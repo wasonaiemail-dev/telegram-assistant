@@ -21,7 +21,6 @@ GOOGLE_CREDENTIALS = os.environ["GOOGLE_CREDENTIALS"]
 client = OpenAI()
 
 conversation_history = {}
-pending_auth = {}
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TOKEN_FILE = "/tmp/google_token.json"
 
@@ -100,9 +99,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "Hey! I'm your personal assistant.\n\n"
-        "I can help with conversations, and now also your Google Calendar!\n\n"
         "Commands:\n"
         "/auth - Connect your Google Calendar\n"
+        "/code YOUR_CODE - Submit Google auth code\n"
         "/today - See today's events\n"
         "/week - See this week's events\n"
         "/clear - Clear conversation memory\n\n"
@@ -117,45 +116,49 @@ async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     creds_data = json.loads(GOOGLE_CREDENTIALS)
     flow = Flow.from_client_config(creds_data, scopes=SCOPES)
     flow.redirect_uri = "http://localhost"
-
     auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
-    pending_auth[update.effective_user.id] = flow
 
     await update.message.reply_text(
-        "To connect Google Calendar, click this link and sign in:\n\n"
+        "Click this link and sign in with Google:\n\n"
         f"{auth_url}\n\n"
-        "After approving, Google will show you a code. "
-        "Send that code back to me here."
+        "You'll get an error page — that's normal. Copy the full URL from your browser's address bar and send it back using:\n\n"
+        "/code PASTE_FULL_URL_HERE"
     )
 
 
-async def handle_auth_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    code = update.message.text.strip()
-    if "code=" in code:
-        code = code.split("code=")[1].split("&")[0]
-    flow = pending_auth.get(user_id)
-    if not flow:
-        return False
+async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Please include your code or URL. Example:\n/code 4/0Afr..."
+        )
+        return
+
+    raw = " ".join(context.args).strip()
+
+    # Extract code from full URL if pasted
+    if "code=" in raw:
+        raw = raw.split("code=")[1].split("&")[0]
+
+    logger.info(f"Attempting auth with code: {raw[:20]}...")
 
     try:
+        creds_data = json.loads(GOOGLE_CREDENTIALS)
+        flow = Flow.from_client_config(creds_data, scopes=SCOPES)
         flow.redirect_uri = "http://localhost"
-        flow.fetch_token(code=code)
+        flow.fetch_token(code=raw)
         creds = flow.credentials
         with open(TOKEN_FILE, "w") as f:
             f.write(creds.to_json())
-        del pending_auth[user_id]
         await update.message.reply_text(
-            "✅ Google Calendar connected! Try asking me to schedule something or use /week to see upcoming events."
+            "✅ Google Calendar connected!\n\nTry /week to see upcoming events, or just tell me something to schedule."
         )
-        return True
     except Exception as e:
         logger.error(f"Auth error: {e}")
         await update.message.reply_text(
-            "That code didn't work. Try /auth again to get a new link."
+            "That code didn't work — it may have expired. Type /auth to get a fresh link and try again immediately."
         )
-        del pending_auth[user_id]
-        return True
 
 
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -201,12 +204,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ALLOWED_USER_ID:
         return
-
-    # Check if this is an auth code
-    if user_id in pending_auth:
-        handled = await handle_auth_code(update, context)
-        if handled:
-            return
 
     user_message = update.message.text
     logger.info(f"Received: {user_message}")
@@ -268,7 +265,7 @@ async def handle_calendar_action(action_data, update):
     if action == "create":
         service = get_calendar_service()
         if not service:
-            return "I'd love to add that to your calendar, but it's not connected yet. Use /auth to connect."
+            return "I'd love to add that, but calendar isn't connected yet. Use /auth to connect."
 
         event = create_event(
             title=action_data.get("title", "Event"),
@@ -277,7 +274,7 @@ async def handle_calendar_action(action_data, update):
             description=action_data.get("description", "")
         )
         if event:
-            return f"✅ Added to your calendar: **{action_data.get('title')}**"
+            return f"✅ Added to your calendar: {action_data.get('title')}"
         else:
             return "Couldn't add the event — something went wrong."
 
@@ -317,6 +314,7 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("auth", auth))
+    app.add_handler(CommandHandler("code", code))
     app.add_handler(CommandHandler("today", today))
     app.add_handler(CommandHandler("week", week))
     app.add_handler(CommandHandler("clear", clear))
