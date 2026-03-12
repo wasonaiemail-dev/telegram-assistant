@@ -8,10 +8,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 ALLOWED_USER_ID = int(os.environ["ALLOWED_USER_ID"])
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI()
 
 conversation_history = {}
 
