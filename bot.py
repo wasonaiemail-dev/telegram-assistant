@@ -23,6 +23,7 @@ client = OpenAI()
 conversation_history = {}
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TOKEN_FILE = "/tmp/google_token.json"
+AUTH_STATE_FILE = "/tmp/auth_state.json"
 
 SYSTEM_PROMPT = """You are a personal assistant accessible via Telegram. You are helpful, concise, and friendly.
 
@@ -101,7 +102,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Hey! I'm your personal assistant.\n\n"
         "Commands:\n"
         "/auth - Connect your Google Calendar\n"
-        "/code YOUR_CODE - Submit Google auth code\n"
+        "/code PASTE_FULL_URL - Submit Google auth URL\n"
         "/today - See today's events\n"
         "/week - See this week's events\n"
         "/clear - Clear conversation memory\n\n"
@@ -116,12 +117,23 @@ async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     creds_data = json.loads(GOOGLE_CREDENTIALS)
     flow = Flow.from_client_config(creds_data, scopes=SCOPES)
     flow.redirect_uri = "http://localhost"
-    auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+    auth_url, state = flow.authorization_url(access_type="offline", prompt="consent")
+
+    # Save state AND code_verifier so /code can recreate the exact same flow
+    auth_state = {
+        "state": state,
+        "code_verifier": flow.code_verifier  # may be None if PKCE not used
+    }
+    with open(AUTH_STATE_FILE, "w") as f:
+        json.dump(auth_state, f)
+
+    logger.info(f"Auth started. State: {state}, Verifier: {flow.code_verifier}")
 
     await update.message.reply_text(
         "Click this link and sign in with Google:\n\n"
         f"{auth_url}\n\n"
-        "You'll get an error page — that's normal. Copy the full URL from your browser's address bar and send it back using:\n\n"
+        "You'll get an error page — that's normal. Copy the full URL from your browser's "
+        "address bar and send it back using:\n\n"
         "/code PASTE_FULL_URL_HERE"
     )
 
@@ -131,33 +143,57 @@ async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not context.args:
         await update.message.reply_text(
-            "Please include your code or URL. Example:\n/code 4/0Afr..."
+            "Please paste the full URL from your browser.\nExample:\n/code http://localhost/?state=...&code=..."
         )
         return
 
-    raw = " ".join(context.args).strip()
+    full_input = " ".join(context.args).strip()
+    logger.info(f"Received /code input: {full_input[:80]}...")
 
-    # Extract code from full URL if pasted
-    if "code=" in raw:
-        raw = raw.split("code=")[1].split("&")[0]
+    # Load saved auth state (state + code_verifier from /auth)
+    if not os.path.exists(AUTH_STATE_FILE):
+        await update.message.reply_text(
+            "No auth session found. Please type /auth first to get a fresh link."
+        )
+        return
 
-    logger.info(f"Attempting auth with code: {raw[:20]}...")
+    with open(AUTH_STATE_FILE, "r") as f:
+        auth_state = json.load(f)
+
+    saved_state = auth_state.get("state")
+    saved_verifier = auth_state.get("code_verifier")
+    logger.info(f"Loaded state: {saved_state}, verifier: {saved_verifier}")
 
     try:
         creds_data = json.loads(GOOGLE_CREDENTIALS)
-        flow = Flow.from_client_config(creds_data, scopes=SCOPES)
+        # Recreate flow with the SAME state as when /auth was called
+        flow = Flow.from_client_config(creds_data, scopes=SCOPES, state=saved_state)
         flow.redirect_uri = "http://localhost"
-        flow.fetch_token(code=raw)
+        # Restore the same code_verifier so PKCE check passes
+        flow.code_verifier = saved_verifier
+
+        # Use authorization_response with the full URL (includes state for validation)
+        # Ensure it uses https:// because oauthlib requires it for security check
+        auth_response = full_input
+        if auth_response.startswith("http://"):
+            auth_response = "https://" + auth_response[7:]
+
+        flow.fetch_token(authorization_response=auth_response)
         creds = flow.credentials
+
         with open(TOKEN_FILE, "w") as f:
             f.write(creds.to_json())
+
+        # Clean up auth state file
+        os.remove(AUTH_STATE_FILE)
+
         await update.message.reply_text(
             "✅ Google Calendar connected!\n\nTry /week to see upcoming events, or just tell me something to schedule."
         )
     except Exception as e:
         logger.error(f"Auth error: {e}")
         await update.message.reply_text(
-            "That code didn't work — it may have expired. Type /auth to get a fresh link and try again immediately."
+            f"That didn't work — {str(e)[:120]}\n\nType /auth to get a fresh link and try again."
         )
 
 
