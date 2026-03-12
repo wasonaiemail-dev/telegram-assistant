@@ -116,7 +116,7 @@ async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     creds_data = json.loads(GOOGLE_CREDENTIALS)
     flow = Flow.from_client_config(creds_data, scopes=SCOPES)
-    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+    flow.redirect_uri = "http://localhost"
 
     auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
     pending_auth[update.effective_user.id] = flow
@@ -132,11 +132,14 @@ async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_auth_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     code = update.message.text.strip()
+    if "code=" in code:
+        code = code.split("code=")[1].split("&")[0]
     flow = pending_auth.get(user_id)
     if not flow:
         return False
 
     try:
+        flow.redirect_uri = "http://localhost"
         flow.fetch_token(code=code)
         creds = flow.credentials
         with open(TOKEN_FILE, "w") as f:
