@@ -1046,7 +1046,7 @@ def fetch_espn_scores(league, date_str):
         return []
 
 
-def format_sports_recap(date_label="yesterday"):
+def format_sports_recap(date_label="yesterday", my_teams_only=False):
     tz = pytz.timezone("America/Denver")
     now = datetime.datetime.now(tz)
     if date_label == "yesterday":
@@ -1071,8 +1071,11 @@ def format_sports_recap(date_label="yesterday"):
                 my_games.append(g)
             else:
                 other_games.append(g)
+        if my_teams_only and not my_games:
+            continue
+        games_to_show = my_games if my_teams_only else (my_games + other_games)
         league_lines = [f"{LEAGUE_LABELS[league]}"]
-        for g in my_games + other_games:
+        for g in games_to_show:
             score_line = f"  {g['away']} {g['away_score']} @ {g['home']} {g['home_score']}"
             if g["winner"]:
                 score_line += f" - {g['winner']} win"
@@ -1335,7 +1338,7 @@ async def sports_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
     await update.message.reply_text("Fetching yesterday's scores...")
-    recap = format_sports_recap("yesterday")
+    recap = format_sports_recap("yesterday", my_teams_only=True)
     if recap:
         await update.message.reply_text(recap)
     else:
@@ -1367,7 +1370,7 @@ async def build_briefing_message(user_data, cal_service=None):
     expenses = get_briefing_expenses(user_data)
     if expenses:
         sections.append(expenses)
-    recap = format_sports_recap("yesterday")
+    recap = format_sports_recap("yesterday", my_teams_only=True)
     if recap:
         sections.append("Yesterday in Sports\n" + recap)
     quote = get_stoic_quote()
@@ -1391,7 +1394,7 @@ def main():
     app.add_handler(CommandHandler("week", week))
     app.add_handler(CommandHandler("weekend", weekend))
     app.add_handler(CommandHandler("restofday", rest_of_day))
-    app.add_handler(CommandHandler("sports", sports_command))
+    app.add_handler(CommandHandler("scores", scores_command))
     app.add_handler(CommandHandler("briefing", briefing_command))
     app.add_handler(CommandHandler("todos", cmd_todos))
     app.add_handler(CommandHandler("shopping", cmd_shopping))
