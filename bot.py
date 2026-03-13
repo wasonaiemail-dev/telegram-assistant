@@ -201,14 +201,34 @@ def list_events(days=7):
         return None
     now = datetime.datetime.utcnow().isoformat() + "Z"
     future = (datetime.datetime.utcnow() + datetime.timedelta(days=days)).isoformat() + "Z"
-    result = service.events().list(
-        calendarId="primary",
-        timeMin=now,
-        timeMax=future,
-        singleEvents=True,
-        orderBy="startTime"
-    ).execute()
-    return result.get("items", [])
+    all_events = []
+    try:
+        calendars = service.calendarList().list().execute().get("items", [])
+        for cal in calendars:
+            try:
+                result = service.events().list(
+                    calendarId=cal["id"],
+                    timeMin=now,
+                    timeMax=future,
+                    singleEvents=True,
+                    orderBy="startTime"
+                ).execute()
+                for event in result.get("items", []):
+                    event["_calendar_name"] = cal.get("summary", "")
+                    all_events.append(event)
+            except Exception:
+                pass
+    except Exception:
+        result = service.events().list(
+            calendarId="primary",
+            timeMin=now,
+            timeMax=future,
+            singleEvents=True,
+            orderBy="startTime"
+        ).execute()
+        return result.get("items", [])
+    all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
+    return all_events
 
 
 # Data action handler
@@ -565,18 +585,37 @@ def get_todays_calendar_events_briefing(service):
         now = datetime.datetime.now(tz)
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        events_result = service.events().list(
-            calendarId="primary",
-            timeMin=start_of_day.isoformat(),
-            timeMax=end_of_day.isoformat(),
-            singleEvents=True,
-            orderBy="startTime",
-        ).execute()
-        events = events_result.get("items", [])
-        if not events:
+        all_events = []
+        try:
+            calendars = service.calendarList().list().execute().get("items", [])
+            for cal in calendars:
+                try:
+                    result = service.events().list(
+                        calendarId=cal["id"],
+                        timeMin=start_of_day.isoformat(),
+                        timeMax=end_of_day.isoformat(),
+                        singleEvents=True,
+                        orderBy="startTime",
+                    ).execute()
+                    for event in result.get("items", []):
+                        event["_calendar_name"] = cal.get("summary", "")
+                        all_events.append(event)
+                except Exception:
+                    pass
+        except Exception:
+            result = service.events().list(
+                calendarId="primary",
+                timeMin=start_of_day.isoformat(),
+                timeMax=end_of_day.isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+            ).execute()
+            all_events = result.get("items", [])
+        all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
+        if not all_events:
             return "Calendar - No events today"
         lines = ["Todays Calendar"]
-        for event in events:
+        for event in all_events:
             start = event["start"].get("dateTime", event["start"].get("date", ""))
             if "T" in start:
                 dt = datetime.datetime.fromisoformat(start)
@@ -588,7 +627,11 @@ def get_todays_calendar_events_briefing(service):
             else:
                 time_str = "All day"
             title = event.get("summary", "Untitled")
-            lines.append(f"  * {time_str} - {title}")
+            cal_name = event.get("_calendar_name", "")
+            label = f"  * {time_str} - {title}"
+            if cal_name and cal_name.lower() not in ("ty wass", "primary"):
+                label += f" ({cal_name})"
+            lines.append(label)
         return "\n".join(lines)
     except Exception as e:
         return f"Calendar unavailable ({str(e)[:60]})"
