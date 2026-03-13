@@ -102,7 +102,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Hey! I'm your personal assistant.\n\n"
         "Commands:\n"
         "/auth - Connect your Google Calendar\n"
-        "/code PASTE_FULL_URL - Submit Google auth URL\n"
+        "/code 4/0Afr... - Submit your Google auth code\n"
         "/today - See today's events\n"
         "/week - See this week's events\n"
         "/clear - Clear conversation memory\n\n"
@@ -132,9 +132,10 @@ async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Click this link and sign in with Google:\n\n"
         f"{auth_url}\n\n"
-        "You'll get an error page — that's normal. Copy the full URL from your browser's "
-        "address bar and send it back using:\n\n"
-        "/code PASTE_FULL_URL_HERE"
+        "After approving, your browser will show an error page — that's normal.\n\n"
+        "Look at the address bar URL. Find the part that says code= and copy everything after it until you see &scope\n\n"
+        "The code starts with 4/ and is very long. Send it like this:\n\n"
+        "/code 4/0Afr...(your full code here)"
     )
 
 
@@ -143,14 +144,19 @@ async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not context.args:
         await update.message.reply_text(
-            "Please paste the full URL from your browser.\nExample:\n/code http://localhost/?state=...&code=..."
+            "Paste just the code from the URL.\n\n"
+            "From the browser address bar, find the part after 'code=' and before '&scope'.\n"
+            "It starts with '4/' and looks like:\n\n"
+            "/code 4/0Afr...(long string)"
         )
         return
 
-    full_input = " ".join(context.args).strip()
-    logger.info(f"Received /code input: {full_input[:80]}...")
+    # Accept just the short code (e.g. 4/0Afr...) — no full URL needed
+    # This avoids Telegram mangling URLs into broken hyperlinks
+    auth_code = " ".join(context.args).strip()
+    logger.info(f"Received /code input length: {len(auth_code)}")
 
-    # Load saved auth state (state + code_verifier from /auth)
+    # Load saved auth state
     if not os.path.exists(AUTH_STATE_FILE):
         await update.message.reply_text(
             "No auth session found. Please type /auth first to get a fresh link."
@@ -166,25 +172,20 @@ async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         creds_data = json.loads(GOOGLE_CREDENTIALS)
-        # Recreate flow with the SAME state as when /auth was called
         flow = Flow.from_client_config(creds_data, scopes=SCOPES, state=saved_state)
         flow.redirect_uri = "http://localhost"
-        # Restore the same code_verifier so PKCE check passes
         flow.code_verifier = saved_verifier
 
-        # Use authorization_response with the full URL (includes state for validation)
-        # Ensure it uses https:// because oauthlib requires it for security check
-        auth_response = full_input
-        if auth_response.startswith("http://"):
-            auth_response = "https://" + auth_response[7:]
-
-        flow.fetch_token(authorization_response=auth_response)
+        # Use fetch_token(code=...) — pass just the code, not the full URL
+        # This is the officially documented approach and immune to Telegram URL mangling
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+        flow.fetch_token(code=auth_code)
         creds = flow.credentials
 
         with open(TOKEN_FILE, "w") as f:
             f.write(creds.to_json())
 
-        # Clean up auth state file
+        # Clean up
         os.remove(AUTH_STATE_FILE)
 
         await update.message.reply_text(
