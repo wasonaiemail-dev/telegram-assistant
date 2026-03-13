@@ -1334,11 +1334,11 @@ async def rest_of_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
-async def sports_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def scores_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
     await update.message.reply_text("Fetching yesterday's scores...")
-    recap = format_sports_recap("yesterday", my_teams_only=True)
+    recap = format_sports_recap("yesterday", my_teams_only=False)
     if recap:
         await update.message.reply_text(recap)
     else:
