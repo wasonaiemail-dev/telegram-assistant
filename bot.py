@@ -719,32 +719,6 @@ def get_briefing_expenses(user_data):
         return None
 
 
-async def build_briefing_message(user_data, cal_service=None):
-    tz = pytz.timezone("America/Denver")
-    now = datetime.datetime.now(tz)
-    date_str = now.strftime("%A, %B %-d")
-    sections = [f"Good morning, Ty!\n{date_str}\n"]
-    sections.append(get_weather_slc())
-    if cal_service:
-        sections.append(get_todays_calendar_events_briefing(cal_service))
-    else:
-        sections.append("Calendar - Not connected (use /auth to connect)")
-    sections.append(get_briefing_todos(user_data))
-    shopping = get_briefing_shopping(user_data)
-    if shopping:
-        sections.append(shopping)
-    reminders = get_briefing_reminders(user_data)
-    if reminders:
-        sections.append(reminders)
-    workouts = get_briefing_workouts(user_data)
-    if workouts:
-        sections.append(workouts)
-    expenses = get_briefing_expenses(user_data)
-    if expenses:
-        sections.append(expenses)
-    return "\n\n".join(sections)
-
-
 # Scheduled morning briefing job
 
 async def send_scheduled_briefing(context: ContextTypes.DEFAULT_TYPE):
@@ -1012,6 +986,399 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Sorry, ran into an issue. Please try again.")
 
 
+# Phase 6 - Sports recap helpers
+
+MY_TEAMS = {
+    "nba": ["celtics", "jazz"],
+    "nfl": ["patriots"],
+    "mlb": ["red sox"],
+}
+
+ESPN_URLS = {
+    "nba": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+    "nfl": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+    "mlb": "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
+}
+
+LEAGUE_LABELS = {"nba": "NBA", "nfl": "NFL", "mlb": "MLB"}
+
+
+def fetch_espn_scores(league, date_str):
+    try:
+        url = ESPN_URLS[league]
+        resp = requests.get(url, params={"dates": date_str}, timeout=10)
+        data = resp.json()
+        games = []
+        for event in data.get("events", []):
+            comp = event.get("competitions", [{}])[0]
+            competitors = comp.get("competitors", [])
+            if len(competitors) < 2:
+                continue
+            home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
+            away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
+            home_name = home.get("team", {}).get("displayName", "")
+            away_name = away.get("team", {}).get("displayName", "")
+            home_score = home.get("score", "")
+            away_score = away.get("score", "")
+            status = event.get("status", {}).get("type", {}).get("description", "")
+            winner = ""
+            if home.get("winner"):
+                winner = home_name
+            elif away.get("winner"):
+                winner = away_name
+            leaders = []
+            for leader_cat in comp.get("leaders", []):
+                for leader in leader_cat.get("leaders", [])[:1]:
+                    name = leader.get("athlete", {}).get("displayName", "")
+                    stat = leader.get("displayValue", "")
+                    cat = leader_cat.get("shortDisplayName", "")
+                    if name and stat:
+                        leaders.append(f"{name} {stat} {cat}")
+            games.append({
+                "home": home_name, "away": away_name,
+                "home_score": home_score, "away_score": away_score,
+                "status": status, "winner": winner,
+                "leaders": leaders[:2],
+            })
+        return games
+    except Exception as e:
+        logger.error(f"ESPN fetch error {league}: {e}")
+        return []
+
+
+def format_sports_recap(date_label="yesterday"):
+    tz = pytz.timezone("America/Denver")
+    now = datetime.datetime.now(tz)
+    if date_label == "yesterday":
+        target = now - datetime.timedelta(days=1)
+    else:
+        target = now
+    date_str = target.strftime("%Y%m%d")
+    sections = []
+    for league in ["nba", "nfl", "mlb"]:
+        games = fetch_espn_scores(league, date_str)
+        if not games:
+            continue
+        my_team_names = MY_TEAMS[league]
+        my_games = []
+        other_games = []
+        for g in games:
+            is_my_team = any(
+                t in g["home"].lower() or t in g["away"].lower()
+                for t in my_team_names
+            )
+            if is_my_team:
+                my_games.append(g)
+            else:
+                other_games.append(g)
+        league_lines = [f"{LEAGUE_LABELS[league]}"]
+        for g in my_games + other_games:
+            score_line = f"  {g['away']} {g['away_score']} @ {g['home']} {g['home_score']}"
+            if g["winner"]:
+                score_line += f" - {g['winner']} win"
+            league_lines.append(score_line)
+            for leader in g["leaders"]:
+                league_lines.append(f"    {leader}")
+        if len(league_lines) > 1:
+            sections.append("\n".join(league_lines))
+    if not sections:
+        return None
+    return "\n\n".join(sections)
+
+
+# Phase 6 - Quote and word of the day via GPT
+
+def get_stoic_quote():
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": (
+                "Give me one authentic stoic quote from Marcus Aurelius, Seneca, or Epictetus. "
+                "Return ONLY this format, nothing else:\n"
+                "Quote text here\n- Author Name"
+            )}],
+            max_tokens=120,
+            temperature=0.9
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception:
+        return None
+
+
+def get_word_of_the_day():
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": (
+                "Give me an interesting English word of the day. "
+                "Pick a real word that is genuinely useful in everyday conversation - "
+                "not too obscure, not too common. Something someone could actually use this week. "
+                "Return ONLY this exact format with no extra text:\n"
+                "WORD: the word\n"
+                "PART: noun/verb/adjective/etc\n"
+                "MEANING: one clear sentence definition\n"
+                "EXAMPLE: one natural example sentence using the word"
+            )}],
+            max_tokens=120,
+            temperature=0.9
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception:
+        return None
+
+
+# Phase 6 - Voice message handler
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    voice_file = await update.message.voice.get_file()
+    ogg_path = f"/tmp/voice_{update.message.message_id}.ogg"
+    try:
+        await voice_file.download_to_drive(ogg_path)
+        with open(ogg_path, "rb") as audio:
+            transcription = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio,
+                response_format="text"
+            )
+        text = transcription.strip()
+        if not text:
+            await update.message.reply_text("Could not make out what you said. Try again?")
+            return
+        await update.message.reply_text(f"You said: {text}\n\nProcessing...")
+        fake_update_text = update.message.text
+        update.message.text = text
+        await handle_message(update, context)
+    except Exception as e:
+        logger.error(f"Voice error: {e}")
+        await update.message.reply_text("Had trouble processing that voice message. Please try again.")
+    finally:
+        try:
+            os.remove(ogg_path)
+        except Exception:
+            pass
+
+
+# Phase 6 - Photo/screenshot handler
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    photo = update.message.photo[-1]
+    photo_file = await photo.get_file()
+    img_path = f"/tmp/photo_{update.message.message_id}.jpg"
+    try:
+        await photo_file.download_to_drive(img_path)
+        with open(img_path, "rb") as f:
+            import base64
+            img_data = base64.b64encode(f.read()).decode("utf-8")
+        caption = update.message.caption or ""
+        prompt = (
+            "Look at this image carefully. Determine what it is and respond helpfully:\n\n"
+            "- If it is a receipt or expense: extract the total amount, store name, and date if visible. "
+            "Then say: RECEIPT_DETECTED: {amount} at {store} on {date} and ask if they want to log it.\n"
+            "- If it is a message, text, email, or DM someone sent them: offer 3 reply options in the same "
+            "format as smart reply drafting (Option 1, Option 2, Option 3 with tone labels).\n"
+            "- If it is anything else: describe what you see and answer any question in the caption.\n\n"
+            f"Caption from user: {caption if caption else 'None'}"
+        )
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64,{img_data}"
+                    }}
+                ]
+            }],
+            max_tokens=600
+        )
+        reply = response.choices[0].message.content.strip()
+        if "RECEIPT_DETECTED:" in reply:
+            context.user_data["pending_receipt"] = reply
+        await update.message.reply_text(reply)
+    except Exception as e:
+        logger.error(f"Photo error: {e}")
+        await update.message.reply_text("Had trouble reading that image. Please try again.")
+    finally:
+        try:
+            os.remove(img_path)
+        except Exception:
+            pass
+
+
+# Phase 6 - Calendar range commands
+
+async def weekend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    tz = pytz.timezone("America/Denver")
+    now = datetime.datetime.now(tz)
+    days_until_sat = (5 - now.weekday()) % 7
+    if days_until_sat == 0 and now.weekday() == 5:
+        days_until_sat = 0
+    sat = now + datetime.timedelta(days=days_until_sat)
+    sun = sat + datetime.timedelta(days=1)
+    service = get_calendar_service()
+    if not service:
+        await update.message.reply_text("Calendar not connected yet. Use /auth to connect.")
+        return
+    sat_start = sat.replace(hour=0, minute=0, second=0, microsecond=0)
+    sun_end = sun.replace(hour=23, minute=59, second=59, microsecond=0)
+    all_events = []
+    try:
+        calendars = service.calendarList().list().execute().get("items", [])
+        for cal in calendars:
+            try:
+                result = service.events().list(
+                    calendarId=cal["id"],
+                    timeMin=sat_start.isoformat(),
+                    timeMax=sun_end.isoformat(),
+                    singleEvents=True,
+                    orderBy="startTime"
+                ).execute()
+                for event in result.get("items", []):
+                    event["_calendar_name"] = cal.get("summary", "")
+                    all_events.append(event)
+            except Exception:
+                pass
+    except Exception:
+        await update.message.reply_text("Could not fetch calendar events.")
+        return
+    all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
+    if not all_events:
+        await update.message.reply_text("Nothing on the calendar this weekend.")
+        return
+    lines = ["Your weekend:\n"]
+    for e in all_events:
+        start = e["start"].get("dateTime", e["start"].get("date", ""))
+        if "T" in start:
+            dt = datetime.datetime.fromisoformat(start)
+            if dt.tzinfo is None:
+                dt = tz.localize(dt)
+            else:
+                dt = dt.astimezone(tz)
+            time_str = dt.strftime("%a %-I:%M %p")
+        else:
+            dt = datetime.datetime.fromisoformat(start)
+            time_str = dt.strftime("%a (all day)")
+        title = e.get("summary", "Untitled")
+        cal_name = e.get("_calendar_name", "")
+        line = f"* {time_str} - {title}"
+        if cal_name and cal_name.lower() not in ("ty wass", "primary"):
+            line += f" ({cal_name})"
+        lines.append(line)
+    await update.message.reply_text("\n".join(lines))
+
+
+async def rest_of_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    tz = pytz.timezone("America/Denver")
+    now = datetime.datetime.now(tz)
+    end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
+    service = get_calendar_service()
+    if not service:
+        await update.message.reply_text("Calendar not connected yet. Use /auth to connect.")
+        return
+    all_events = []
+    try:
+        calendars = service.calendarList().list().execute().get("items", [])
+        for cal in calendars:
+            try:
+                result = service.events().list(
+                    calendarId=cal["id"],
+                    timeMin=now.isoformat(),
+                    timeMax=end_of_day.isoformat(),
+                    singleEvents=True,
+                    orderBy="startTime"
+                ).execute()
+                for event in result.get("items", []):
+                    event["_calendar_name"] = cal.get("summary", "")
+                    all_events.append(event)
+            except Exception:
+                pass
+    except Exception:
+        await update.message.reply_text("Could not fetch calendar events.")
+        return
+    all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
+    if not all_events:
+        await update.message.reply_text("Nothing left on the calendar today.")
+        return
+    lines = ["Rest of today:\n"]
+    for e in all_events:
+        start = e["start"].get("dateTime", e["start"].get("date", ""))
+        if "T" in start:
+            dt = datetime.datetime.fromisoformat(start)
+            if dt.tzinfo is None:
+                dt = tz.localize(dt)
+            else:
+                dt = dt.astimezone(tz)
+            time_str = dt.strftime("%-I:%M %p")
+        else:
+            time_str = "All day"
+        title = e.get("summary", "Untitled")
+        cal_name = e.get("_calendar_name", "")
+        line = f"* {time_str} - {title}"
+        if cal_name and cal_name.lower() not in ("ty wass", "primary"):
+            line += f" ({cal_name})"
+        lines.append(line)
+    await update.message.reply_text("\n".join(lines))
+
+
+async def sports_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    await update.message.reply_text("Fetching yesterday's scores...")
+    recap = format_sports_recap("yesterday")
+    if recap:
+        await update.message.reply_text(recap)
+    else:
+        await update.message.reply_text("No games played yesterday.")
+
+
+# Update build_briefing_message to include Phase 6 content
+
+async def build_briefing_message(user_data, cal_service=None):
+    tz = pytz.timezone("America/Denver")
+    now = datetime.datetime.now(tz)
+    date_str = now.strftime("%A, %B %-d")
+    sections = [f"Good morning, Ty!\n{date_str}\n"]
+    sections.append(get_weather_slc())
+    if cal_service:
+        sections.append(get_todays_calendar_events_briefing(cal_service))
+    else:
+        sections.append("Calendar - Not connected (use /auth to connect)")
+    sections.append(get_briefing_todos(user_data))
+    shopping = get_briefing_shopping(user_data)
+    if shopping:
+        sections.append(shopping)
+    reminders = get_briefing_reminders(user_data)
+    if reminders:
+        sections.append(reminders)
+    workouts = get_briefing_workouts(user_data)
+    if workouts:
+        sections.append(workouts)
+    expenses = get_briefing_expenses(user_data)
+    if expenses:
+        sections.append(expenses)
+    recap = format_sports_recap("yesterday")
+    if recap:
+        sections.append("Yesterday in Sports\n" + recap)
+    quote = get_stoic_quote()
+    if quote:
+        sections.append("Stoic Quote\n" + quote)
+    word = get_word_of_the_day()
+    if word:
+        sections.append("Word of the Day\n" + word)
+    return "\n\n".join(sections)
+
+
 # Main
 
 def main():
@@ -1022,6 +1389,9 @@ def main():
     app.add_handler(CommandHandler("code", code))
     app.add_handler(CommandHandler("today", today))
     app.add_handler(CommandHandler("week", week))
+    app.add_handler(CommandHandler("weekend", weekend))
+    app.add_handler(CommandHandler("restofday", rest_of_day))
+    app.add_handler(CommandHandler("sports", sports_command))
     app.add_handler(CommandHandler("briefing", briefing_command))
     app.add_handler(CommandHandler("todos", cmd_todos))
     app.add_handler(CommandHandler("shopping", cmd_shopping))
@@ -1031,6 +1401,8 @@ def main():
     app.add_handler(CommandHandler("gifts", cmd_gifts))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
     app.add_handler(CommandHandler("clear", clear))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Check reminders every 60 seconds
@@ -1040,7 +1412,7 @@ def main():
     briefing_time = datetime.time(hour=7, minute=0, tzinfo=pytz.timezone("America/Denver"))
     app.job_queue.run_daily(send_scheduled_briefing, time=briefing_time, name="morning_briefing")
 
-    logger.info("Bot is running (Phase 5)...")
+    logger.info("Bot is running (Phase 6)...")
     app.run_polling(drop_pending_updates=True)
 
 
