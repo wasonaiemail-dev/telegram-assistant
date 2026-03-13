@@ -141,6 +141,696 @@ When the user asks for help replying to a message, email, or DM — or pastes a 
 Automatically detect the type and tone:
 - Is it a text/iMessage, work email, or social media DM?
 - Is the sender a friend, family member, colleague, or stranger?
+- What is the context — casual, professional, sensitive, urgent?
+
+Format your response EXACTLY like this (always use these exact labels):
+
+**Option 1 — [tone label, e.g. Warm & friendly]:**
+[reply text]
+
+**Option 2 — [tone label, e.g. Professional]:**
+[reply text]
+
+**Option 3 — [tone label, e.g. Short & direct]:**
+[reply text]
+
+After the options, add one line: Want me to tweak any of these?
+
+If the user asks to refine an option (e.g. "make option 2 more casual", "make option 1 shorter"), rewrite just that option.
+If the user says "send option 2" or "use option 1", just confirm which they picked — you cannot actually send it for them.
+
+== GENERAL ==
+For everything else, respond normally in plain conversational text.
+Keep responses concise. Today's date context will be provided in each message.
+When performing a DATA_ACTION or CALENDAR_ACTION, also include a brief friendly confirmation message on a separate line before or after the action line."""
+
+
+# ─── Calendar helpers ─────────────────────────────────────────────────────────
+
+def get_calendar_service():
+    creds = None
+    if os.path.exists(TOKEN_FILE):
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        with open(TOKEN_FILE, "w") as f:
+            f.write(creds.to_json())
+    if not creds or not creds.valid:
+        return None
+    return build("calendar", "v3", credentials=creds)
+
+
+def create_event(title, start, end, description=""):
+    service = get_calendar_service()
+    if not service:
+        return None
+    event = {
+        "summary": title,
+        "description": description,
+        "start": {"dateTime": start, "timeZone": "America/Denver"},
+        "end": {"dateTime": end, "timeZone": "America/Denver"},
+    }
+    return service.events().insert(calendarId="primary", body=event).execute()
+
+
+def list_events(days=7):
+    service = get_calendar_service()
+    if not service:
+        return None
+    now = datetime.datetime.utcnow().isoformat() + "Z"
+    future = (datetime.datetime.utcnow() + datetime.timedelta(days=days)).isoformat() + "Z"
+    result = service.events().list(
+        calendarId="primary",
+        timeMin=now,
+        timeMax=future,
+        singleEvents=True,
+        orderBy="startTime"
+    ).execute()
+    return result.get("items", [])
+
+
+# ─── Data action handler ──────────────────────────────────────────────────────
+
+async def handle_data_action(action_data):
+    data = load_data()
+    action = action_data.get("action", "")
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # ── TO-DO ──
+    if action == "todo_add":
+        item = action_data.get("item", "").strip()
+        data["todos"].append({"text": item, "done": False, "added": now_str})
+        save_data(data)
+        return f"✅ Added to your to-do list: {item}"
+
+    elif action == "todo_list":
+        todos = data.get("todos", [])
+        if not todos:
+            return "Your to-do list is empty!"
+        lines = ["📋 To-Do List:\n"]
+        for i, t in enumerate(todos, 1):
+            check = "✓" if t["done"] else "○"
+            lines.append(f"{check} {i}. {t['text']}")
+        return "\n".join(lines)
+
+    elif action == "todo_done":
+        idx = action_data.get("index", 0) - 1
+        todos = data.get("todos", [])
+        if 0 <= idx < len(todos):
+            todos[idx]["done"] = True
+            save_data(data)
+            return f"✅ Marked done: {todos[idx]['text']}"
+        return "Couldn't find that item."
+
+    elif action == "todo_clear":
+        data["todos"] = [t for t in data["todos"] if not t["done"]]
+        save_data(data)
+        return "🗑️ Cleared completed to-dos."
+
+    # ── SHOPPING ──
+    elif action == "shop_add":
+        item = action_data.get("item", "").strip()
+        data["shopping"].append({"text": item, "done": False, "added": now_str})
+        save_data(data)
+        return f"🛒 Added to shopping list: {item}"
+
+    elif action == "shop_list":
+        items = data.get("shopping", [])
+        if not items:
+            return "Your shopping list is empty!"
+        lines = ["🛒 Shopping List:\n"]
+        for i, t in enumerate(items, 1):
+            check = "✓" if t["done"] else "○"
+            lines.append(f"{check} {i}. {t['text']}")
+        return "\n".join(lines)
+
+    elif action == "shop_done":
+        idx = action_data.get("index", 0) - 1
+        items = data.get("shopping", [])
+        if 0 <= idx < len(items):
+            items[idx]["done"] = True
+            save_data(data)
+            return f"✅ Got it: {items[idx]['text']}"
+        return "Couldn't find that item."
+
+    elif action == "shop_clear":
+        data["shopping"] = [t for t in data["shopping"] if not t["done"]]
+        save_data(data)
+        return "🗑️ Cleared purchased items from shopping list."
+
+    # ── NOTES ──
+    elif action == "note_add":
+        text = action_data.get("text", "").strip()
+        data["notes"].append({"text": text, "added": now_str})
+        save_data(data)
+        return f"📝 Note saved!"
+
+    elif action == "note_list":
+        notes = data.get("notes", [])
+        if not notes:
+            return "No notes saved yet."
+        lines = ["📝 Your Notes:\n"]
+        for i, n in enumerate(notes, 1):
+            lines.append(f"{i}. {n['text']}\n   ({n['added']})")
+        return "\n".join(lines)
+
+    elif action == "note_delete":
+        idx = action_data.get("index", 0) - 1
+        notes = data.get("notes", [])
+        if 0 <= idx < len(notes):
+            removed = notes.pop(idx)
+            save_data(data)
+            return f"🗑️ Deleted note: {removed['text']}"
+        return "Couldn't find that note."
+
+    # ── REMINDERS ──
+    elif action == "reminder_add":
+        text = action_data.get("text", "").strip()
+        time_str = action_data.get("time", "")
+        data["reminders"].append({"text": text, "time": time_str, "sent": False, "added": now_str})
+        save_data(data)
+        try:
+            dt = datetime.datetime.fromisoformat(time_str)
+            friendly = dt.strftime("%A, %B %-d at %-I:%M %p")
+        except:
+            friendly = time_str
+        return f"⏰ Reminder set: {text}\n{friendly}"
+
+    elif action == "reminder_list":
+        reminders = [r for r in data.get("reminders", []) if not r.get("sent")]
+        if not reminders:
+            return "No upcoming reminders."
+        lines = ["⏰ Upcoming Reminders:\n"]
+        for i, r in enumerate(reminders, 1):
+            try:
+                dt = datetime.datetime.fromisoformat(r["time"])
+                friendly = dt.strftime("%a %b %-d at %-I:%M %p")
+            except:
+                friendly = r["time"]
+            lines.append(f"{i}. {r['text']} — {friendly}")
+        return "\n".join(lines)
+
+    # ── EXPENSES ──
+    elif action == "expense_add":
+        amount = action_data.get("amount", 0)
+        category = action_data.get("category", "Other")
+        note = action_data.get("note", "")
+        data["expenses"].append({
+            "amount": amount,
+            "category": category,
+            "note": note,
+            "date": now_str
+        })
+        save_data(data)
+        return f"💰 Logged: ${amount:.2f} on {category}{' — ' + note if note else ''}"
+
+    elif action == "expense_list":
+        expenses = data.get("expenses", [])
+        if not expenses:
+            return "No expenses logged yet."
+        # Group by category
+        totals = {}
+        total = 0
+        for e in expenses:
+            cat = e.get("category", "Other")
+            amt = e.get("amount", 0)
+            totals[cat] = totals.get(cat, 0) + amt
+            total += amt
+        lines = ["💰 Expense Summary:\n"]
+        for cat, amt in sorted(totals.items(), key=lambda x: -x[1]):
+            lines.append(f"• {cat}: ${amt:.2f}")
+        lines.append(f"\nTotal: ${total:.2f}")
+        return "\n".join(lines)
+
+    # ── MEALS ──
+    elif action == "meal_add":
+        meal = action_data.get("meal", "").strip()
+        data["meals"].append({"meal": meal, "added": now_str})
+        save_data(data)
+        return f"🍽️ Saved meal idea: {meal}"
+
+    elif action == "meal_list":
+        meals = data.get("meals", [])
+        if not meals:
+            return "No meal ideas saved yet. Tell me some meals you like!"
+        lines = ["🍽️ Your Meal Ideas:\n"]
+        for i, m in enumerate(meals, 1):
+            lines.append(f"{i}. {m['meal']}")
+        return "\n".join(lines)
+
+    elif action == "meal_plan":
+        meals = data.get("meals", [])
+        if len(meals) < 7:
+            return f"You only have {len(meals)} meal ideas saved. Add more first, then I can plan a week!"
+        import random
+        picks = random.sample(meals, 7)
+        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        lines = ["🗓️ Meal Plan for the Week:\n"]
+        for day, meal in zip(days, picks):
+            lines.append(f"• {day}: {meal['meal']}")
+        return "\n".join(lines)
+
+    # ── WORKOUTS ──
+    elif action == "workout_add":
+        desc = action_data.get("description", "").strip()
+        data["workouts"].append({"description": desc, "date": now_str})
+        save_data(data)
+        return f"💪 Workout logged: {desc}"
+
+    elif action == "workout_list":
+        workouts = data.get("workouts", [])
+        if not workouts:
+            return "No workouts logged yet. Get after it!"
+        lines = ["💪 Recent Workouts:\n"]
+        for w in reversed(workouts[-10:]):
+            lines.append(f"• {w['date'][:10]}: {w['description']}")
+        return "\n".join(lines)
+
+    # ── GIFTS ──
+    elif action == "gift_add":
+        person = action_data.get("person", "").strip().lower()
+        idea = action_data.get("idea", "").strip()
+        if person not in data["gifts"]:
+            data["gifts"][person] = []
+        data["gifts"][person].append({"idea": idea, "added": now_str})
+        save_data(data)
+        return f"🎁 Gift idea saved for {person.title()}: {idea}"
+
+    elif action == "gift_list":
+        person = action_data.get("person", "").strip().lower()
+        gifts = data.get("gifts", {})
+        if person and person in gifts:
+            ideas = gifts[person]
+            if not ideas:
+                return f"No gift ideas for {person.title()} yet."
+            lines = [f"🎁 Gift ideas for {person.title()}:\n"]
+            for i, g in enumerate(ideas, 1):
+                lines.append(f"{i}. {g['idea']}")
+            return "\n".join(lines)
+        elif not person:
+            if not gifts:
+                return "No gift ideas saved yet."
+            lines = ["🎁 All Gift Ideas:\n"]
+            for p, ideas in gifts.items():
+                lines.append(f"\n{p.title()}:")
+                for g in ideas:
+                    lines.append(f"  • {g['idea']}")
+            return "\n".join(lines)
+        return f"No gift ideas saved for {person.title()} yet."
+
+    return None
+
+
+# ─── Calendar action handler ──────────────────────────────────────────────────
+
+async def handle_calendar_action(action_data, update):
+    action = action_data.get("action")
+
+    if action == "create":
+        service = get_calendar_service()
+        if not service:
+            return "I'd love to add that, but calendar isn't connected yet. Use /auth to connect."
+        event = create_event(
+            title=action_data.get("title", "Event"),
+            start=action_data.get("start"),
+            end=action_data.get("end"),
+            description=action_data.get("description", "")
+        )
+        if event:
+            return f"✅ Added to your calendar: {action_data.get('title')}"
+        else:
+            return "Couldn't add the event — something went wrong."
+
+    elif action == "list":
+        service = get_calendar_service()
+        if not service:
+            return "Calendar not connected. Use /auth to connect."
+        days = action_data.get("days", 7)
+        events = list_events(days=days)
+        if not events:
+            return "No upcoming events found."
+        lines = ["📅 Here's what's coming up:\n"]
+        for e in events:
+            start = e["start"].get("dateTime", e["start"].get("date", ""))
+            if "T" in start:
+                dt = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
+                time_str = dt.strftime("%a %b %-d at %-I:%M %p")
+            else:
+                dt = datetime.datetime.fromisoformat(start)
+                time_str = dt.strftime("%a %b %-d (all day)")
+            lines.append(f"• {e.get('summary', 'No title')} — {time_str}")
+        return "\n".join(lines)
+
+    return None
+
+
+# ─── Reminder checker ─────────────────────────────────────────────────────────
+
+async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
+    data = load_data()
+    now = datetime.datetime.now()
+    changed = False
+    for r in data.get("reminders", []):
+        if r.get("sent"):
+            continue
+        try:
+            remind_time = datetime.datetime.fromisoformat(r["time"])
+            if now >= remind_time:
+                await context.bot.send_message(
+                    chat_id=ALLOWED_USER_ID,
+                    text=f"⏰ Reminder: {r['text']}"
+                )
+                r["sent"] = True
+                changed = True
+        except Exception as e:
+            logger.error(f"Reminder error: {e}")
+    if changed:
+        save_data(data)
+
+
+# ─── Commands ────────────────────────────────────────────────────────────────
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    await update.message.reply_text(
+        "Hey! I'm your personal assistant.\n\n"
+        "📅 Calendar: /today /week /auth\n"
+        "📋 Lists: just tell me naturally!\n\n"
+        "Examples:\n"
+        "• 'Add milk to shopping list'\n"
+        "• 'Remind me at 3pm to call mom'\n"
+        "• 'Spent $45 on groceries'\n"
+        "• 'Log a 30 min run'\n"
+        "• 'Gift idea for Sarah: silk scarf'\n"
+        "• 'Note: password is abc123'\n\n"
+        "Other commands:\n"
+        "/todos - See to-do list\n"
+        "/shopping - See shopping list\n"
+        "/notes - See saved notes\n"
+        "/expenses - See spending summary\n"
+        "/workouts - See workout log\n"
+        "/gifts - See gift ideas\n"
+        "/reminders - See upcoming reminders\n"
+        "/clear - Clear conversation memory"
+    )
+
+
+async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    creds_data = json.loads(GOOGLE_CREDENTIALS)
+    flow = Flow.from_client_config(creds_data, scopes=SCOPES)
+    flow.redirect_uri = "http://localhost"
+    auth_url, state = flow.authorization_url(access_type="offline", prompt="consent")
+    auth_state = {"state": state, "code_verifier": flow.code_verifier}
+    with open(AUTH_STATE_FILE, "w") as f:
+        json.dump(auth_state, f)
+    await update.message.reply_text(
+        "Click this link and sign in with Google:\n\n"
+        f"{auth_url}\n\n"
+        "After approving, your browser will show an error page — that's normal.\n\n"
+        "Find the part in the address bar that says code= and copy everything after it until &scope\n\n"
+        "Send it like this:\n/code 4/0Afr...(your full code here)"
+    )
+
+
+async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("Paste the code after /code\n\nExample: /code 4/0Afr...")
+        return
+    auth_code = " ".join(context.args).strip()
+    if not os.path.exists(AUTH_STATE_FILE):
+        await update.message.reply_text("No auth session found. Please type /auth first.")
+        return
+    with open(AUTH_STATE_FILE, "r") as f:
+        auth_state = json.load(f)
+    try:
+        creds_data = json.loads(GOOGLE_CREDENTIALS)
+        flow = Flow.from_client_config(creds_data, scopes=SCOPES, state=auth_state.get("state"))
+        flow.redirect_uri = "http://localhost"
+        flow.code_verifier = auth_state.get("code_verifier")
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+        flow.fetch_token(code=auth_code)
+        with open(TOKEN_FILE, "w") as f:
+            f.write(flow.credentials.to_json())
+        os.remove(AUTH_STATE_FILE)
+        await update.message.reply_text("✅ Google Calendar connected!\n\nTry /week to see upcoming events.")
+    except Exception as e:
+        logger.error(f"Auth error: {e}")
+        await update.message.reply_text(f"That didn't work — {str(e)[:120]}\n\nType /auth to try again.")
+
+
+async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    await show_events(update, days=1, label="today")
+
+
+async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    await show_events(update, days=7, label="this week")
+
+
+async def show_events(update, days, label):
+    service = get_calendar_service()
+    if not service:
+        await update.message.reply_text("Calendar not connected yet. Use /auth to connect.")
+        return
+    events = list_events(days=days)
+    if not events:
+        await update.message.reply_text(f"No events {label}.")
+        return
+    lines = [f"📅 Your events {label}:\n"]
+    for e in events:
+        start = e["start"].get("dateTime", e["start"].get("date", ""))
+        if "T" in start:
+            dt = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
+            time_str = dt.strftime("%a %b %-d at %-I:%M %p")
+        else:
+            dt = datetime.datetime.fromisoformat(start)
+            time_str = dt.strftime("%a %b %-d (all day)")
+        lines.append(f"• {e.get('summary', 'No title')} — {time_str}")
+    await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_todos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    reply = await handle_data_action({"action": "todo_list"})
+    await update.message.reply_text(reply)
+
+async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    reply = await handle_data_action({"action": "shop_list"})
+    await update.message.reply_text(reply)
+
+async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    reply = await handle_data_action({"action": "note_list"})
+    await update.message.reply_text(reply)
+
+async def cmd_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    reply = await handle_data_action({"action": "expense_list"})
+    await update.message.reply_text(reply)
+
+async def cmd_workouts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    reply = await handle_data_action({"action": "workout_list"})
+    await update.message.reply_text(reply)
+
+async def cmd_gifts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    reply = await handle_data_action({"action": "gift_list", "person": ""})
+    await update.message.reply_text(reply)
+
+async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    reply = await handle_data_action({"action": "reminder_list"})
+    await update.message.reply_text(reply)
+
+async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    conversation_history.clear()
+    await update.message.reply_text("Memory cleared — starting fresh!")
+
+
+# ─── Main message handler ─────────────────────────────────────────────────────
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ALLOWED_USER_ID:
+        return
+
+    user_message = update.message.text
+    if not user_message:
+        return
+
+    logger.info(f"Received: {user_message}")
+
+    if user_id not in conversation_history:
+        conversation_history[user_id] = []
+
+    conversation_history[user_id].append({"role": "user", "content": user_message})
+    if len(conversation_history[user_id]) > 20:
+        conversation_history[user_id] = conversation_history[user_id][-20:]
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    try:
+        now = datetime.datetime.now().strftime("%A, %B %-d, %Y, %-I:%M %p")
+        system = SYSTEM_PROMPT + f"\n\nCurrent date/time: {now} (Mountain Time)"
+        messages = [{"role": "system", "content": system}] + conversation_history[user_id]
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=900,
+            temperature=0.7
+        )
+
+        assistant_message = response.choices[0].message.content
+        reply_lines = []
+
+        for line in assistant_message.split("\n"):
+            if line.startswith("CALENDAR_ACTION:"):
+                json_str = line.replace("CALENDAR_ACTION:", "").strip()
+                try:
+                    action_data = json.loads(json_str)
+                    cal_reply = await handle_calendar_action(action_data, update)
+                    if cal_reply:
+                        reply_lines.append(cal_reply)
+                except Exception as e:
+                    logger.error(f"Calendar action error: {e}")
+            elif line.startswith("DATA_ACTION:"):
+                json_str = line.replace("DATA_ACTION:", "").strip()
+                try:
+                    action_data = json.loads(json_str)
+                    data_reply = await handle_data_action(action_data)
+                    if data_reply:
+                        reply_lines.append(data_reply)
+                except Exception as e:
+                    logger.error(f"Data action error: {e}")
+            else:
+                if line.strip():
+                    reply_lines.append(line)
+
+        final_reply = "\n".join(reply_lines).strip()
+        if not final_reply:
+            final_reply = "Done!"
+
+        conversation_history[user_id].append({"role": "assistant", "content": final_reply})
+        await update.message.reply_text(final_reply)
+
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        await update.message.reply_text("Sorry, ran into an issue. Please try again.")
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("auth", auth))
+    app.add_handler(CommandHandler("code", code))
+    app.add_handler(CommandHandler("today", today))
+    app.add_handler(CommandHandler("week", week))
+    app.add_handler(CommandHandler("todos", cmd_todos))
+    app.add_handler(CommandHandler("shopping", cmd_shopping))
+    app.add_handler(CommandHandler("notes", cmd_notes))
+    app.add_handler(CommandHandler("expenses", cmd_expenses))
+    app.add_handler(CommandHandler("workouts", cmd_workouts))
+    app.add_handler(CommandHandler("gifts", cmd_gifts))
+    app.add_handler(CommandHandler("reminders", cmd_reminders))
+    app.add_handler(CommandHandler("clear", clear))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Check reminders every minute
+    app.job_queue.run_repeating(check_reminders, interval=60, first=10)
+
+    logger.info("Bot is running (Phase 3)...")
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
+When the user asks to see the shopping list:
+DATA_ACTION: {"action": "shop_list"}
+
+When the user marks a shopping item as gotten/bought (by number or name):
+DATA_ACTION: {"action": "shop_done", "index": <number starting at 1>}
+
+When the user asks to clear the shopping list:
+DATA_ACTION: {"action": "shop_clear"}
+
+== NOTES ==
+When the user says "note", "remember this", "save this", "jot this down", or anything like "note: ...":
+DATA_ACTION: {"action": "note_add", "text": "..."}
+
+When the user asks to see their notes:
+DATA_ACTION: {"action": "note_list"}
+
+When the user asks to delete a note by number:
+DATA_ACTION: {"action": "note_delete", "index": <number starting at 1>}
+
+== REMINDERS ==
+When the user asks to be reminded of something at a specific time, respond with:
+DATA_ACTION: {"action": "reminder_add", "text": "...", "time": "YYYY-MM-DDTHH:MM:00"}
+
+When the user asks to see their reminders:
+DATA_ACTION: {"action": "reminder_list"}
+
+== EXPENSES ==
+When the user logs an expense (e.g. "spent $45 on groceries", "bought gas for $60"):
+DATA_ACTION: {"action": "expense_add", "amount": <number>, "category": "...", "note": "..."}
+
+When the user asks for spending summary or to see expenses:
+DATA_ACTION: {"action": "expense_list"}
+
+== MEAL PLANNING ==
+When the user saves a meal idea or recipe name:
+DATA_ACTION: {"action": "meal_add", "meal": "..."}
+
+When the user asks for meal ideas or their meal list:
+DATA_ACTION: {"action": "meal_list"}
+
+When the user asks to plan the week's meals:
+DATA_ACTION: {"action": "meal_plan"}
+
+== WORKOUT LOG ==
+When the user logs a workout (e.g. "just did 30 min run", "did chest day", "walked 2 miles"):
+DATA_ACTION: {"action": "workout_add", "description": "..."}
+
+When the user asks to see their workout history:
+DATA_ACTION: {"action": "workout_list"}
+
+== GIFT IDEAS ==
+When the user saves a gift idea for someone (e.g. "gift idea for mom: silk scarf"):
+DATA_ACTION: {"action": "gift_add", "person": "...", "idea": "..."}
+
+When the user asks to see gift ideas (optionally for a person):
+DATA_ACTION: {"action": "gift_list", "person": "..."}
+
+== SMART REPLY DRAFTING ==
+When the user asks for help replying to a message, email, or DM — or pastes a message and says things like "help me reply", "how should I respond", "draft a response", "what should I say", "reply to this" — generate exactly 3 reply options.
+
+Automatically detect the type and tone:
+- Is it a text/iMessage, work email, or social media DM?
+- Is the sender a friend, family member, colleague, or stranger?
 - What's the context — casual, professional, sensitive, urgent?
 
 Format your response EXACTLY like this (always use these exact labels):
