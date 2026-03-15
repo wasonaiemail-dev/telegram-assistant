@@ -25,9 +25,14 @@ client = OpenAI()
 
 conversation_history = {}
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
-TOKEN_FILE = "/tmp/google_token.json"
-AUTH_STATE_FILE = "/tmp/auth_state.json"
-DATA_FILE = "/tmp/userdata.json"
+# Use persistent volume if mounted, otherwise fall back to /tmp
+PERSIST_DIR = "/data" if os.path.isdir("/data") else "/tmp"
+TOKEN_FILE = os.path.join(PERSIST_DIR, "google_token.json")
+AUTH_STATE_FILE = os.path.join(PERSIST_DIR, "auth_state.json")
+DATA_FILE = os.path.join(PERSIST_DIR, "userdata.json")
+LOG_FILE = os.path.join(PERSIST_DIR, "audit.log")
+CONTACTS_FILE = os.path.join(PERSIST_DIR, "contacts.json")
+CONVO_FILE = os.path.join(PERSIST_DIR, "conversation.json")
 
 # Data helpers
 
@@ -43,12 +48,58 @@ def load_data():
         "expenses": [],
         "meals": [],
         "workouts": [],
-        "gifts": {}
+        "gifts": {},
+        "habits": {},
+        "habit_log": []
     }
 
 def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
+
+
+def load_contacts():
+    if os.path.exists(CONTACTS_FILE):
+        with open(CONTACTS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_contacts(contacts):
+    with open(CONTACTS_FILE, "w") as f:
+        json.dump(contacts, f, indent=2)
+
+
+def load_conversation():
+    if os.path.exists(CONVO_FILE):
+        with open(CONVO_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_conversation(history):
+    with open(CONVO_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+def audit_log(event):
+    try:
+        tz = pytz.timezone("America/Denver")
+        ts = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_FILE, "a") as f:
+            f.write(f"{ts} | {event}\n")
+    except Exception:
+        pass
+
+
+def send_error_alert(bot, msg):
+    import asyncio
+    try:
+        asyncio.create_task(
+            bot.send_message(chat_id=ALLOWED_USER_ID, text=f"Bot error: {msg[:300]}")
+        )
+    except Exception:
+        pass
 
 # System prompt - NO apostrophes anywhere inside this string
 
@@ -160,6 +211,15 @@ After the options, add one line: Want me to tweak any of these?
 
 If the user asks to refine an option (e.g. make option 2 more casual, make option 1 shorter), rewrite just that option.
 If the user says send option 2 or use option 1, just confirm which they picked - you cannot actually send it for them.
+
+== HABIT LOGGING ==
+The user tracks these daily habits: Daily workout, Water intake, Meditation, Morning routine, Journaling, Vitamins, Stretching, Outdoor time, Gratitude practice.
+When the user mentions completing any of these (e.g. "did my workout", "meditated today", "took vitamins"), the habit checker handles it automatically - just respond naturally and encouragingly.
+
+== CONTACT MEMORY ==
+When the user says things like "remember that John prefers texts over calls" or "note about Sarah: birthday is April 3rd", respond with:
+CONTACT_ACTION: {"name": "...", "fact": "..."}
+When the user asks about a person you have notes on, include the relevant facts naturally in your response.
 
 == GENERAL ==
 For everything else, respond normally in plain conversational text.
@@ -529,6 +589,47 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
         save_data(data)
 
 
+# Message utilities
+
+async def send_long_message(message_obj, text, parse_mode=None):
+    """Split and send messages that exceed Telegram 4096 char limit."""
+    MAX_LEN = 4000
+    if len(text) <= MAX_LEN:
+        await message_obj.reply_text(text, parse_mode=parse_mode)
+        return
+    chunks = []
+    while text:
+        if len(text) <= MAX_LEN:
+            chunks.append(text)
+            break
+        split_at = text.rfind("\n", 0, MAX_LEN)
+        if split_at == -1:
+            split_at = MAX_LEN
+        chunks.append(text[:split_at])
+        text = text[split_at:].lstrip("\n")
+    for chunk in chunks:
+        await message_obj.reply_text(chunk, parse_mode=parse_mode)
+
+
+# Rate limiting
+
+_rate_counters = {}
+
+def check_rate_limit(user_id):
+    """Returns True if user is within rate limit (30 msgs/60s)."""
+    import time
+    now = time.time()
+    window = 60
+    limit = 30
+    if user_id not in _rate_counters:
+        _rate_counters[user_id] = []
+    _rate_counters[user_id] = [t for t in _rate_counters[user_id] if now - t < window]
+    if len(_rate_counters[user_id]) >= limit:
+        return False
+    _rate_counters[user_id].append(now)
+    return True
+
+
 # Phase 5 - Daily Briefing helpers
 
 def get_weather_slc():
@@ -566,11 +667,27 @@ def get_weather_slc():
         high = round(daily["temperature_2m_max"][0])
         low = round(daily["temperature_2m_min"][0])
         precip = round(daily["precipitation_sum"][0], 2)
+        # Pick emoji based on weather code
+        if code == 0:
+            w_emoji = "☀️"
+        elif code in (1, 2):
+            w_emoji = "🌤"
+        elif code == 3:
+            w_emoji = "☁️"
+        elif code in (45, 48):
+            w_emoji = "🌫"
+        elif code in (51, 53, 55, 61, 63, 65, 80, 81, 82):
+            w_emoji = "🌧"
+        elif code in (71, 73, 75, 77, 85, 86):
+            w_emoji = "❄️"
+        elif code in (95, 96, 99):
+            w_emoji = "⛈"
+        else:
+            w_emoji = "🌤"
         lines = [
-            "Weather - Salt Lake City",
+            f"{w_emoji} <b>Weather - Salt Lake City</b>",
             f"Now: {temp_now}F (feels {feels_like}F) - {description}",
-            f"High: {high}F  |  Low: {low}F",
-            f"Wind: {wind} mph",
+            f"High: {high}F  |  Low: {low}F  |  Wind: {wind} mph",
         ]
         if precip > 0:
             lines.append(f"Precip: {precip} in")
@@ -614,7 +731,7 @@ def get_todays_calendar_events_briefing(service):
         all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
         if not all_events:
             return "Calendar - No events today"
-        lines = ["Todays Calendar"]
+        lines = ["📅 <b>Todays Calendar</b>"]
         for event in all_events:
             start = event["start"].get("dateTime", event["start"].get("date", ""))
             if "T" in start:
@@ -640,8 +757,8 @@ def get_todays_calendar_events_briefing(service):
 def get_briefing_todos(user_data):
     todos = [t for t in user_data.get("todos", []) if not t.get("done")]
     if not todos:
-        return "To-Dos - All clear!"
-    lines = ["To-Dos"]
+        return "✅ <b>To-Dos</b> - All clear!"
+    lines = ["✅ <b>To-Dos</b>"]
     for item in todos[:10]:
         lines.append(f"  * {item['text']}")
     if len(todos) > 10:
@@ -653,7 +770,7 @@ def get_briefing_shopping(user_data):
     shopping = [s for s in user_data.get("shopping", []) if not s.get("done")]
     if not shopping:
         return None
-    lines = ["Shopping List"]
+    lines = ["🛒 <b>Shopping List</b>"]
     for item in shopping[:8]:
         lines.append(f"  * {item['text']}")
     if len(shopping) > 8:
@@ -676,7 +793,7 @@ def get_briefing_reminders(user_data):
                 due_today.append(r.get("text", "Reminder"))
         if not due_today:
             return None
-        lines = ["Reminders Due Today"]
+        lines = ["⏰ <b>Reminders Due Today</b>"]
         for r in due_today:
             lines.append(f"  * {r}")
         return "\n".join(lines)
@@ -690,7 +807,7 @@ def get_briefing_workouts(user_data):
         if not workouts:
             return None
         recent = workouts[-5:]
-        lines = ["Recent Workouts"]
+        lines = ["💪 <b>Recent Workouts</b>"]
         for w in reversed(recent):
             lines.append(f"  * {w['date'][:10]}: {w['description']}")
         return "\n".join(lines)
@@ -728,11 +845,13 @@ async def send_scheduled_briefing(context: ContextTypes.DEFAULT_TYPE):
         cal_service = get_calendar_service()
     except Exception:
         pass
-    message = await build_briefing_message(user_data, cal_service)
-    await context.bot.send_message(
-        chat_id=ALLOWED_USER_ID,
-        text=message
-    )
+    sections = await build_briefing_sections(user_data, cal_service)
+    for section in sections:
+        await context.bot.send_message(
+            chat_id=ALLOWED_USER_ID,
+            text=section,
+            parse_mode="HTML"
+        )
 
 
 # Commands
@@ -855,8 +974,9 @@ async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cal_service = get_calendar_service()
     except Exception:
         pass
-    message = await build_briefing_message(user_data, cal_service)
-    await update.message.reply_text(message)
+    sections = await build_briefing_sections(user_data, cal_service)
+    for section in sections:
+        await update.message.reply_text(section, parse_mode="HTML")
 
 
 async def cmd_todos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -919,6 +1039,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_message:
         return
 
+    if not check_rate_limit(user_id):
+        await update.message.reply_text("Slow down a bit - try again in a minute.")
+        return
+
     logger.info(f"Received: {user_message}")
 
     # Briefing keyword trigger
@@ -927,10 +1051,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await briefing_command(update, context)
         return
 
-    if user_id not in conversation_history:
-        conversation_history[user_id] = []
+    # Habit logging check
+    data = load_data()
+    habit_response = check_habit_from_message(text_lower, data)
+    if habit_response:
+        await update.message.reply_text(habit_response)
+        audit_log(f"HABIT user={user_id}")
+        return
 
-    conversation_history[user_id].append({"role": "user", "content": user_message})
+    # Load conversation from persistent storage, merge with in-memory
+    if user_id not in conversation_history:
+        saved = load_conversation()
+        conversation_history[user_id] = saved.get(str(user_id), [])
+
+    conversation_history[user_id].append({"role": "user", "content": user_message[:2000]})
     if len(conversation_history[user_id]) > 20:
         conversation_history[user_id] = conversation_history[user_id][-20:]
 
@@ -938,7 +1072,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         now = datetime.datetime.now().strftime("%A, %B %-d, %Y, %-I:%M %p")
-        system = SYSTEM_PROMPT + f"\n\nCurrent date/time: {now} (Mountain Time)"
+        # Add contact context if any known contacts
+        contacts = load_contacts()
+        contact_ctx = ""
+        if contacts:
+            contact_ctx = "\n\nKnown contacts:\n"
+            for name, facts in list(contacts.items())[:10]:
+                facts_list = facts if isinstance(facts, list) else [facts]
+                contact_ctx += f"- {name}: {'; '.join(facts_list[:3])}\n"
+        system = SYSTEM_PROMPT + CONTACT_SYSTEM_ADDON + f"\n\nCurrent date/time: {now} (Mountain Time)" + contact_ctx
         messages = [{"role": "system", "content": system}] + conversation_history[user_id]
 
         response = client.chat.completions.create(
@@ -970,6 +1112,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         reply_lines.append(data_reply)
                 except Exception as e:
                     logger.error(f"Data action error: {e}")
+            elif line.startswith("CONTACT_ACTION:"):
+                json_str = line.replace("CONTACT_ACTION:", "").strip()
+                try:
+                    contact_data = json.loads(json_str)
+                    contacts = load_contacts()
+                    name = contact_data.get("name", "").title()
+                    fact = contact_data.get("fact", "").strip()
+                    if name and fact:
+                        if name not in contacts:
+                            contacts[name] = []
+                        if isinstance(contacts[name], str):
+                            contacts[name] = [contacts[name]]
+                        contacts[name].append(fact)
+                        save_contacts(contacts)
+                        reply_lines.append(f"Got it! Saved note about {name}: {fact}")
+                        audit_log(f"CONTACT_SAVED {name}")
+                except Exception as e:
+                    logger.error(f"Contact action error: {e}")
             else:
                 if line.strip():
                     reply_lines.append(line)
@@ -979,10 +1139,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_reply = "Done!"
 
         conversation_history[user_id].append({"role": "assistant", "content": final_reply})
-        await update.message.reply_text(final_reply)
+        # Persist conversation to disk
+        all_history = load_conversation()
+        all_history[str(user_id)] = conversation_history[user_id]
+        save_conversation(all_history)
+        audit_log(f"MSG user={user_id} len={len(user_message)}")
+        await send_long_message(update.message, final_reply)
 
     except Exception as e:
         logger.error(f"Error: {e}")
+        audit_log(f"ERROR {str(e)[:100]}")
+        try:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=f"Bot error alert: {str(e)[:200]}"
+            )
+        except Exception:
+            pass
         await update.message.reply_text("Sorry, ran into an issue. Please try again.")
 
 
@@ -1347,39 +1520,423 @@ async def scores_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Update build_briefing_message to include Phase 6 content
 
-async def build_briefing_message(user_data, cal_service=None):
+async def build_briefing_sections(user_data, cal_service=None):
+    """Returns a list of message strings, each sent as a separate Telegram message."""
     tz = pytz.timezone("America/Denver")
     now = datetime.datetime.now(tz)
     date_str = now.strftime("%A, %B %-d")
-    sections = [f"Good morning, Ty!\n{date_str}\n"]
-    sections.append(get_weather_slc())
+
+    sections = []
+
+    # Message 1: Header + Weather
+    header = f"🌅 <b>Good morning, Ty!</b>\n{date_str}"
+    weather = get_weather_slc()
+    sections.append(header + "\n\n" + weather)
+
+    # Message 2: Calendar
     if cal_service:
-        sections.append(get_todays_calendar_events_briefing(cal_service))
+        cal = get_todays_calendar_events_briefing(cal_service)
     else:
-        sections.append("Calendar - Not connected (use /auth to connect)")
-    sections.append(get_briefing_todos(user_data))
+        cal = "📅 Calendar - Not connected (use /auth to connect)"
+    sections.append(cal)
+
+    # Message 3: To-dos + Shopping + Reminders (grouped)
+    daily_tasks = []
+    daily_tasks.append(get_briefing_todos(user_data))
     shopping = get_briefing_shopping(user_data)
     if shopping:
-        sections.append(shopping)
+        daily_tasks.append(shopping)
     reminders = get_briefing_reminders(user_data)
     if reminders:
-        sections.append(reminders)
+        daily_tasks.append(reminders)
+    sections.append("\n\n".join(daily_tasks))
+
+    # Message 4: Habits streak (if any tracked)
+    habits_msg = get_briefing_habits(user_data)
+    if habits_msg:
+        sections.append(habits_msg)
+
+    # Message 5: Workouts + Expenses
+    stats = []
     workouts = get_briefing_workouts(user_data)
     if workouts:
-        sections.append(workouts)
+        stats.append(workouts)
     expenses = get_briefing_expenses(user_data)
     if expenses:
-        sections.append(expenses)
+        stats.append(expenses)
+    if stats:
+        sections.append("\n\n".join(stats))
+
+    # Message 6: Sports recap (my teams only)
     recap = format_sports_recap("yesterday", my_teams_only=True)
     if recap:
-        sections.append("Yesterday in Sports\n" + recap)
+        sections.append("🏆 <b>Yesterday in Sports</b>\n" + recap)
+
+    # Message 7: Quote + Word of the day
+    inspiration = []
     quote = get_stoic_quote()
     if quote:
-        sections.append("Stoic Quote\n" + quote)
+        inspiration.append("💭 <b>Stoic Quote</b>\n" + quote)
     word = get_word_of_the_day()
     if word:
-        sections.append("Word of the Day\n" + word)
+        inspiration.append("📖 <b>Word of the Day</b>\n" + word)
+    if inspiration:
+        sections.append("\n\n".join(inspiration))
+
+    return sections
+
+
+async def build_briefing_message(user_data, cal_service=None):
+    """Legacy single-message version kept for compatibility."""
+    sections = await build_briefing_sections(user_data, cal_service)
     return "\n\n".join(sections)
+
+
+
+# Phase 7 - Habit Tracker
+
+HABITS = [
+    "workout",
+    "water",
+    "meditation",
+    "morning_routine",
+    "journaling",
+    "vitamins",
+    "stretching",
+    "outdoor_time",
+    "gratitude",
+]
+
+HABIT_LABELS = {
+    "workout": "Daily workout",
+    "water": "Water intake",
+    "meditation": "Meditation",
+    "morning_routine": "Morning routine",
+    "journaling": "Journaling",
+    "vitamins": "Vitamins",
+    "stretching": "Stretching",
+    "outdoor_time": "Outdoor time",
+    "gratitude": "Gratitude practice",
+}
+
+HABIT_KEYWORDS = {
+    "workout": ["workout", "worked out", "exercise", "exercised", "hit the gym", "gym done"],
+    "water": ["drank water", "water intake", "hydrated", "finished my water"],
+    "meditation": ["meditated", "meditation done", "mindfulness", "did meditation"],
+    "morning_routine": ["morning routine", "morning done", "got my morning in"],
+    "journaling": ["journaled", "journaling done", "wrote in journal", "did my journal"],
+    "vitamins": ["took vitamins", "vitamins done", "took my supplements", "supplements done"],
+    "stretching": ["stretched", "stretching done", "did my stretches", "mobility done"],
+    "outdoor_time": ["went outside", "outdoor time", "fresh air", "took a walk outside"],
+    "gratitude": ["gratitude done", "did gratitude", "grateful today", "wrote gratitude"],
+}
+
+
+def get_habit_streak(habit_log, habit_key):
+    """Calculate current streak for a habit."""
+    tz = pytz.timezone("America/Denver")
+    today = datetime.datetime.now(tz).date()
+    streak = 0
+    check_date = today
+    while True:
+        date_str = check_date.strftime("%Y-%m-%d")
+        if any(e.get("habit") == habit_key and e.get("date", "").startswith(date_str)
+               for e in habit_log):
+            streak += 1
+            check_date -= datetime.timedelta(days=1)
+        else:
+            break
+    return streak
+
+
+def get_briefing_habits(user_data):
+    habit_log = user_data.get("habit_log", [])
+    if not habit_log:
+        return None
+    tz = pytz.timezone("America/Denver")
+    today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
+    lines = ["🔥 <b>Habit Streaks</b>"]
+    any_streak = False
+    for habit in HABITS:
+        streak = get_habit_streak(habit_log, habit)
+        done_today = any(
+            e.get("habit") == habit and e.get("date", "").startswith(today_str)
+            for e in habit_log
+        )
+        if streak > 0:
+            any_streak = True
+            check = "✅" if done_today else "⬜"
+            label = HABIT_LABELS[habit]
+            lines.append(f"  {check} {label} - {streak} day streak")
+    if not any_streak:
+        return None
+    return "\n".join(lines)
+
+
+async def cmd_habits(update, context):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    data = load_data()
+    habit_log = data.get("habit_log", [])
+    tz = pytz.timezone("America/Denver")
+    today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
+    lines = ["🔥 <b>Your Habit Tracker</b>\n"]
+    for habit in HABITS:
+        streak = get_habit_streak(habit_log, habit)
+        done_today = any(
+            e.get("habit") == habit and e.get("date", "").startswith(today_str)
+            for e in habit_log
+        )
+        check = "✅" if done_today else "⬜"
+        label = HABIT_LABELS[habit]
+        streak_txt = f"{streak} day streak" if streak > 0 else "No streak yet"
+        lines.append(f"{check} {label} - {streak_txt}")
+    lines.append("\nSay things like 'did my workout' or 'meditation done' to log habits.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+def check_habit_from_message(text_lower, user_data):
+    """Check if a message logs a habit. Returns response string or None."""
+    data_changed = False
+    responses = []
+    tz = pytz.timezone("America/Denver")
+    now_str = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
+
+    for habit, keywords in HABIT_KEYWORDS.items():
+        if any(kw in text_lower for kw in keywords):
+            habit_log = user_data.get("habit_log", [])
+            today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
+            already = any(
+                e.get("habit") == habit and e.get("date", "").startswith(today_str)
+                for e in habit_log
+            )
+            if not already:
+                habit_log.append({"habit": habit, "date": now_str})
+                user_data["habit_log"] = habit_log
+                save_data(user_data)
+                data_changed = True
+                streak = get_habit_streak(habit_log, habit)
+                label = HABIT_LABELS[habit]
+                responses.append(f"✅ {label} logged! {streak} day streak 🔥")
+            else:
+                label = HABIT_LABELS[habit]
+                responses.append(f"✅ {label} already logged today!")
+
+    return "\n".join(responses) if responses else None
+
+
+# Phase 7 - Contact Memory
+
+def get_contact_note(name, contacts):
+    name_lower = name.lower()
+    for key in contacts:
+        if key.lower() == name_lower or name_lower in key.lower():
+            return contacts[key]
+    return None
+
+
+def extract_contact_update(text, contacts):
+    """Check if message is saving a contact fact. Returns (name, fact) or None."""
+    import re
+    patterns = [
+        r"remember that ([a-zA-Z]+) (.+)",
+        r"note about ([a-zA-Z]+)[:\-] (.+)",
+        r"([a-zA-Z]+)[ ]?['s]+ (birthday|phone|email|address|prefers|likes|hates|works at|lives in).+",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text.lower())
+        if match:
+            name = match.group(1).title()
+            fact = text[match.start(2):].strip() if len(match.groups()) > 1 else text
+            return name, fact
+    return None
+
+
+async def cmd_contacts(update, context):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    contacts = load_contacts()
+    if not contacts:
+        await update.message.reply_text("No contact notes saved yet.\nSay things like: remember that John prefers texts over calls")
+        return
+    lines = ["👥 <b>Contact Notes</b>\n"]
+    for name, facts in contacts.items():
+        lines.append(f"<b>{name}</b>")
+        if isinstance(facts, list):
+            for f in facts:
+                lines.append(f"  • {f}")
+        else:
+            lines.append(f"  • {facts}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+# Phase 7 - Weekly Summary
+
+async def build_weekly_summary(user_data, cal_service=None):
+    tz = pytz.timezone("America/Denver")
+    now = datetime.datetime.now(tz)
+    week_start = now - datetime.timedelta(days=7)
+    week_start_str = week_start.strftime("%Y-%m-%d")
+
+    sections = ["📊 <b>Your Week in Review</b>\n"]
+
+    # Habits this week
+    habit_log = user_data.get("habit_log", [])
+    week_habits = [e for e in habit_log if e.get("date", "") >= week_start_str]
+    if week_habits:
+        habit_counts = {}
+        for e in week_habits:
+            h = e.get("habit", "")
+            habit_counts[h] = habit_counts.get(h, 0) + 1
+        habit_lines = ["💪 <b>Habits this week</b>"]
+        for habit in HABITS:
+            count = habit_counts.get(habit, 0)
+            if count > 0:
+                label = HABIT_LABELS[habit]
+                bar = "🟩" * count + "⬜" * (7 - count)
+                habit_lines.append(f"  {label}: {bar} {count}/7")
+        sections.append("\n".join(habit_lines))
+
+    # Workouts this week
+    workouts = [w for w in user_data.get("workouts", [])
+                if w.get("date", "") >= week_start_str]
+    if workouts:
+        sections.append(f"🏋️ <b>Workouts</b>: {len(workouts)} this week")
+
+    # Expenses this week
+    expenses = [e for e in user_data.get("expenses", [])
+                if e.get("date", "") >= week_start_str]
+    if expenses:
+        total = sum(float(e.get("amount", 0)) for e in expenses)
+        sections.append(f"💰 <b>Spending</b>: ${total:.2f} across {len(expenses)} transactions")
+
+    # Calendar events this week
+    if cal_service:
+        try:
+            week_events = list_events(days=7)
+            if week_events:
+                sections.append(f"📅 <b>Upcoming this week</b>: {len(week_events)} events")
+        except Exception:
+            pass
+
+    # GPT narrative summary
+    try:
+        summary_prompt = (
+            f"Write a brief, warm, encouraging weekly recap for Ty. "
+            f"This week: {len(workouts)} workouts, "
+            f"{len(week_habits)} habit completions, "
+            f"${sum(float(e.get('amount',0)) for e in expenses):.2f} spent. "
+            f"Keep it to 2-3 sentences, positive and motivating."
+        )
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": summary_prompt}],
+            max_tokens=150,
+            temperature=0.8
+        )
+        narrative = resp.choices[0].message.content.strip()
+        sections.append(f"\n{narrative}")
+    except Exception:
+        pass
+
+    return "\n\n".join(sections)
+
+
+async def summary_command(update, context):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    await update.message.reply_text("Building your weekly summary...")
+    data = load_data()
+    cal_service = None
+    try:
+        cal_service = get_calendar_service()
+    except Exception:
+        pass
+    msg = await build_weekly_summary(data, cal_service)
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+
+async def send_weekly_summary(context):
+    """Scheduled Sunday evening weekly summary."""
+    data = load_data()
+    cal_service = None
+    try:
+        cal_service = get_calendar_service()
+    except Exception:
+        pass
+    msg = await build_weekly_summary(data, cal_service)
+    await context.bot.send_message(
+        chat_id=ALLOWED_USER_ID,
+        text=msg,
+        parse_mode="HTML"
+    )
+
+
+# Phase 7 - Travel Weather Detection
+
+async def check_travel_weather(context):
+    """Evening job: scan tomorrows calendar for travel, send weather forecast."""
+    try:
+        service = get_calendar_service()
+        if not service:
+            return
+        tz = pytz.timezone("America/Denver")
+        tomorrow = datetime.datetime.now(tz) + datetime.timedelta(days=1)
+        start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = tomorrow.replace(hour=23, minute=59, second=59, microsecond=0)
+        all_events = []
+        calendars = service.calendarList().list().execute().get("items", [])
+        for cal in calendars:
+            try:
+                result = service.events().list(
+                    calendarId=cal["id"],
+                    timeMin=start.isoformat(),
+                    timeMax=end.isoformat(),
+                    singleEvents=True,
+                    orderBy="startTime"
+                ).execute()
+                all_events.extend(result.get("items", []))
+            except Exception:
+                pass
+
+        travel_keywords = ["flight", "fly", "airport", "hotel", "travel", "trip",
+                           "conference", "convention", "visit", "drive to"]
+        slc_keywords = ["salt lake", "slc", "home", "ut ", "utah"]
+
+        for event in all_events:
+            title = event.get("summary", "").lower()
+            location = event.get("location", "").lower()
+            combined = title + " " + location
+            is_travel = any(kw in combined for kw in travel_keywords)
+            is_local = any(kw in combined for kw in slc_keywords)
+
+            if is_travel and not is_local:
+                dest = event.get("location") or event.get("summary", "your destination")
+                msg = (
+                    f"✈️ <b>Travel heads up!</b>\n"
+                    f"You have <b>{event.get('summary', 'an event')}</b> tomorrow.\n"
+                    f"Location: {dest}\n\n"
+                    f"Remember to check the weather at your destination and pack accordingly!"
+                )
+                await context.bot.send_message(
+                    chat_id=ALLOWED_USER_ID,
+                    text=msg,
+                    parse_mode="HTML"
+                )
+                break
+    except Exception as e:
+        logger.error(f"Travel weather check error: {e}")
+
+
+# Phase 7 - Contact memory detection in handle_message (injected via system prompt addition)
+
+CONTACT_SYSTEM_ADDON = """
+== CONTACT MEMORY ==
+When the user mentions remembering something about a person (e.g. "remember that John prefers texts", "note about Sarah: birthday is April 3"), respond with:
+CONTACT_ACTION: {"name": "...", "fact": "..."}
+
+When the user asks about a person they have mentioned before, include any known facts about them in your response if relevant.
+"""
 
 
 # Main
@@ -1403,19 +1960,32 @@ def main():
     app.add_handler(CommandHandler("workouts", cmd_workouts))
     app.add_handler(CommandHandler("gifts", cmd_gifts))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
+    app.add_handler(CommandHandler("habits", cmd_habits))
+    app.add_handler(CommandHandler("contacts", cmd_contacts))
+    app.add_handler(CommandHandler("summary", summary_command))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    mtn = pytz.timezone("America/Denver")
+
     # Check reminders every 60 seconds
     app.job_queue.run_repeating(check_reminders, interval=60, first=10)
 
     # Scheduled morning briefing at 7:00 AM Mountain Time
-    briefing_time = datetime.time(hour=7, minute=0, tzinfo=pytz.timezone("America/Denver"))
+    briefing_time = datetime.time(hour=7, minute=0, tzinfo=mtn)
     app.job_queue.run_daily(send_scheduled_briefing, time=briefing_time, name="morning_briefing")
 
-    logger.info("Bot is running (Phase 6)...")
+    # Weekly summary + digest: Sunday at 7:00 PM Mountain Time
+    weekly_time = datetime.time(hour=19, minute=0, tzinfo=mtn)
+    app.job_queue.run_daily(send_weekly_summary, time=weekly_time, days=(6,), name="weekly_summary")
+
+    # Travel weather check: every evening at 7:00 PM Mountain Time
+    travel_time = datetime.time(hour=19, minute=0, tzinfo=mtn)
+    app.job_queue.run_daily(check_travel_weather, time=travel_time, name="travel_weather")
+
+    logger.info("Bot is running (Phase 7)...")
     app.run_polling(drop_pending_updates=True)
 
 
