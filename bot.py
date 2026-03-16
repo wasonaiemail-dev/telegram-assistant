@@ -1076,6 +1076,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await brain_dump_command(update, context)
         return
 
+    # Pending calendar event confirmation (from photo)
+    if context.user_data.get("pending_calendar_event") and text_lower in ("yes", "yeah", "yep", "sure", "add it", "yes please", "do it"):
+        event_text = context.user_data.pop("pending_calendar_event", "")
+        service = get_calendar_service()
+        if not service:
+            await update.message.reply_text("Calendar not connected. Use /auth first.")
+            return
+        parse_prompt = (
+            "Extract calendar event details from this text and return ONLY a JSON object with keys: "
+            "title, start (YYYY-MM-DDTHH:MM:00), end (YYYY-MM-DDTHH:MM:00), location, description. "
+            "Use reasonable defaults if some fields are missing. "
+            f"Text: {event_text}"
+        )
+        try:
+            parse_resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": parse_prompt}],
+                max_tokens=200, temperature=0
+            )
+            import json as _json
+            raw = parse_resp.choices[0].message.content.strip()
+            raw = raw.replace("```json", "").replace("```", "").strip()
+            event_data = _json.loads(raw)
+            event = create_event(
+                title=event_data.get("title", "Event"),
+                start=event_data.get("start", ""),
+                end=event_data.get("end", ""),
+                description=event_data.get("description", "") + " " + event_data.get("location", "")
+            )
+            if event:
+                await update.message.reply_text(f"Added to your calendar: {event_data.get('title', 'Event')}")
+            else:
+                await update.message.reply_text("Could not add the event. Please try using /auth to reconnect.")
+        except Exception as e:
+            logger.error(f"Calendar event from photo error: {e}")
+            await update.message.reply_text("Had trouble adding that event. Try describing it manually.")
+        return
+
     # Habit logging check
     data = load_data()
     habit_response = check_habit_from_message(text_lower, data)
@@ -1452,12 +1490,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             img_data = base64.b64encode(f.read()).decode("utf-8")
         caption = update.message.caption or ""
         prompt = (
-            "Look at this image carefully. Determine what it is and respond helpfully:\n\n"
-            "- If it is a receipt or expense: extract the total amount, store name, and date if visible. "
-            "Then say: RECEIPT_DETECTED: {amount} at {store} on {date} and ask if they want to log it.\n"
-            "- If it is a message, text, email, or DM someone sent them: offer 3 reply options in the same "
-            "format as smart reply drafting (Option 1, Option 2, Option 3 with tone labels).\n"
-            "- If it is anything else: describe what you see and answer any question in the caption.\n\n"
+            "Look at this image carefully. Determine what it is and respond helpfully. "
+            "If it is a receipt or expense: extract the total amount, store name, and date if visible, "
+            "then say RECEIPT_DETECTED: {amount} at {store} on {date} and ask if they want to log it. "
+            "If it is a calendar event or appointment screenshot: extract ALL details (title, date, start time, "
+            "end time, location, description) and say CALENDAR_EVENT_DETECTED: then list the details clearly, "
+            "then ask if they want to add it to their calendar. "
+            "If it is a message, text, email, or DM someone sent them: offer 3 reply options "
+            "(Option 1, Option 2, Option 3 with tone labels). "
+            "If it is anything else: describe what you see and answer any question in the caption. "
             f"Caption from user: {caption if caption else 'None'}"
         )
         response = client.chat.completions.create(
@@ -1474,11 +1515,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             max_tokens=600
         )
         reply = response.choices[0].message.content.strip()
-        # Convert markdown bold to HTML bold for Telegram
         import re as _re
         reply = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', reply)
         if "RECEIPT_DETECTED:" in reply:
             context.user_data["pending_receipt"] = reply
+        if "CALENDAR_EVENT_DETECTED:" in reply:
+            context.user_data["pending_calendar_event"] = reply
         await update.message.reply_text(reply, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Photo error: {e}")
