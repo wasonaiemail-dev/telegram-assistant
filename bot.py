@@ -109,7 +109,10 @@ You help with scheduling, lists, notes, tracking, and general questions.
 
 == CALENDAR ==
 When the user asks to add/create/schedule a calendar event, respond with this on its own line:
-CALENDAR_ACTION: {"action": "create", "title": "...", "start": "YYYY-MM-DDTHH:MM:00", "end": "YYYY-MM-DDTHH:MM:00", "description": "..."}
+CALENDAR_ACTION: {"action": "create", "title": "...", "start": "YYYY-MM-DDTHH:MM:00", "end": "YYYY-MM-DDTHH:MM:00", "description": "...", "recurrence": ""}
+
+For recurring events, set recurrence to one of: "RRULE:FREQ=DAILY", "RRULE:FREQ=WEEKLY", "RRULE:FREQ=MONTHLY", "RRULE:FREQ=YEARLY". Leave empty for single events.
+Examples: "every Monday" -> "RRULE:FREQ=WEEKLY;BYDAY=MO", "daily" -> "RRULE:FREQ=DAILY", "every week" -> "RRULE:FREQ=WEEKLY"
 
 When the user asks what is on their calendar or schedule, respond with:
 CALENDAR_ACTION: {"action": "list", "days": 7}
@@ -242,7 +245,7 @@ def get_calendar_service():
     return build("calendar", "v3", credentials=creds)
 
 
-def create_event(title, start, end, description=""):
+def create_event(title, start, end, description="", recurrence=None):
     service = get_calendar_service()
     if not service:
         return None
@@ -252,6 +255,8 @@ def create_event(title, start, end, description=""):
         "start": {"dateTime": start, "timeZone": "America/Denver"},
         "end": {"dateTime": end, "timeZone": "America/Denver"},
     }
+    if recurrence:
+        event["recurrence"] = recurrence
     return service.events().insert(calendarId="primary", body=event).execute()
 
 
@@ -532,14 +537,26 @@ async def handle_calendar_action(action_data, update):
         service = get_calendar_service()
         if not service:
             return "I would love to add that, but calendar is not connected yet. Use /auth to connect."
+        recurrence_rule = action_data.get("recurrence", "")
+        recurrence = [recurrence_rule] if recurrence_rule else None
         event = create_event(
             title=action_data.get("title", "Event"),
             start=action_data.get("start"),
             end=action_data.get("end"),
-            description=action_data.get("description", "")
+            description=action_data.get("description", ""),
+            recurrence=recurrence
         )
         if event:
-            return f"Added to your calendar: {action_data.get('title')}"
+            title = action_data.get("title", "Event")
+            rec_label = ""
+            if recurrence_rule:
+                if "WEEKLY" in recurrence_rule:
+                    rec_label = " (repeating weekly)"
+                elif "DAILY" in recurrence_rule:
+                    rec_label = " (repeating daily)"
+                elif "MONTHLY" in recurrence_rule:
+                    rec_label = " (repeating monthly)"
+            return f"Added to your calendar: {title}{rec_label}"
         else:
             return "Could not add the event - something went wrong."
 
@@ -1106,7 +1123,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 description=event_data.get("description", "") + " " + event_data.get("location", "")
             )
             if event:
-                await update.message.reply_text(f"Added to your calendar: {event_data.get('title', 'Event')}")
+                title = event_data.get("title", "Event")
+                title = event_data.get("title", "Event")
+                msg = "Added to your calendar: " + title + ". Note: added as a single event. For recurring events, open Google Calendar to set the repeat."
+                await update.message.reply_text(msg)
             else:
                 await update.message.reply_text("Could not add the event. Please try using /auth to reconnect.")
         except Exception as e:
@@ -1114,13 +1134,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Had trouble adding that event. Try describing it manually.")
         return
 
-    # Habit logging check
+    # Habit logging check - skip if message is about scheduling/planning (not completing)
+    scheduling_words = ["schedule", "remind me", "every monday", "every tuesday",
+                        "every wednesday", "every thursday", "every friday",
+                        "every saturday", "every sunday", "every day", "every week",
+                        "set a reminder", "add to calendar", "create a reminder",
+                        "plan to", "going to", "will do", "want to", "need to"]
+    is_scheduling = any(w in text_lower for w in scheduling_words)
     data = load_data()
-    habit_response = check_habit_from_message(text_lower, data)
-    if habit_response:
-        await update.message.reply_text(habit_response)
-        audit_log(f"HABIT user={user_id}")
-        return
+    if not is_scheduling:
+        habit_response = check_habit_from_message(text_lower, data)
+        if habit_response:
+            await update.message.reply_text(habit_response)
+            audit_log(f"HABIT user={user_id}")
+            return
 
     # Load conversation from persistent storage, merge with in-memory
     if user_id not in conversation_history:
@@ -2136,13 +2163,55 @@ async def handle_callback(update, context):
         await query.edit_message_text("Reminder snoozed until tomorrow!")
 
     elif data_str == "cmd_todos":
-        data = load_data()
         reply = await handle_data_action({"action": "todo_list"})
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=reply)
+        await query.message.reply_text(reply)
 
     elif data_str == "cmd_notes":
         reply = await handle_data_action({"action": "note_list"})
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=reply)
+        await query.message.reply_text(reply)
+
+    elif data_str == "cmd_habits":
+        data = load_data()
+        habit_log = data.get("habit_log", [])
+        tz = pytz.timezone("America/Denver")
+        today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
+        lines = ["<b>Your Habit Tracker</b>\n"]
+        for habit in HABITS:
+            streak = get_habit_streak(habit_log, habit)
+            done_today = any(
+                e.get("habit") == habit and e.get("date", "").startswith(today_str)
+                for e in habit_log
+            )
+            check = "done" if done_today else "o"
+            label = HABIT_LABELS[habit]
+            streak_txt = f"{streak} day streak" if streak > 0 else "No streak yet"
+            lines.append(f"{check} {label} - {streak_txt}")
+        await query.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+    elif data_str == "cmd_summary":
+        data = load_data()
+        cal_service = None
+        try:
+            cal_service = get_calendar_service()
+        except Exception:
+            pass
+        msg = await build_weekly_summary(data, cal_service)
+        await query.message.reply_text(msg, parse_mode="HTML")
+
+    elif data_str == "cmd_expenses":
+        reply = await handle_data_action({"action": "expense_list"})
+        await query.message.reply_text(reply)
+
+    elif data_str == "cmd_briefing":
+        data = load_data()
+        cal_service = None
+        try:
+            cal_service = get_calendar_service()
+        except Exception:
+            pass
+        sections = await build_briefing_sections(data, cal_service)
+        for section in sections:
+            await query.message.reply_text(section, parse_mode="HTML")
 
 
 # Phase 8 - Brain dump
@@ -2260,33 +2329,57 @@ async def ask_command(update, context):
     question = " ".join(context.args).strip()
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     await update.message.reply_text("Searching...")
+    serper_key = os.environ.get("SERPER_API_KEY", "")
+    search_results = ""
+    if serper_key:
+        try:
+            resp = requests.post(
+                "https://google.serper.dev/search",
+                headers={"X-API-KEY": serper_key, "Content-Type": "application/json"},
+                json={"q": question, "num": 5},
+                timeout=10
+            )
+            data = resp.json()
+            snippets = []
+            if "answerBox" in data:
+                ab = data["answerBox"]
+                snippets.append(ab.get("answer") or ab.get("snippet") or "")
+            for r in data.get("organic", [])[:4]:
+                snippets.append(r.get("title", "") + ": " + r.get("snippet", ""))
+            search_results = " | ".join(s for s in snippets if s)
+        except Exception as e:
+            logger.error(f"Serper search error: {e}")
     today = datetime.datetime.now().strftime("%B %d, %Y")
-    prompt = (
-        "Search the web and answer this question accurately and concisely. "
-        "Include key facts, numbers, and dates where relevant. "
-        "If the information might be outdated, say so. "
-        f"Today is {today}. "
-        f"Question: {question}"
-    )
+    if search_results:
+        prompt = (
+            f"Using these search results, answer the question concisely. "
+            f"Today is {today}. "
+            f"Search results: {search_results[:1500]} "
+            f"Question: {question}"
+        )
+    else:
+        prompt = (
+            f"Answer this question as accurately as possible. "
+            f"If the answer depends on recent events after your training, say so. "
+            f"Today is {today}. "
+            f"Question: {question}"
+        )
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=600,
+            max_tokens=500,
             temperature=0.3,
-            tools=[{"type": "web_search_preview"}],
         )
-        answer = ""
-        if response.choices[0].message.content:
-            answer = response.choices[0].message.content
-        if not answer:
-            answer = "Could not find an answer for that."
-        reply = "<b>" + question + "</b>\n\n" + answer
+        answer = response.choices[0].message.content or "Could not find an answer for that."
+        src = " (via live search)" if search_results else " (from training data)"
+        reply = "<b>" + question + "</b>" + src + "\n\n" + answer
         await send_long_message(update.message, reply, parse_mode="HTML")
         audit_log(f"ASK q={question[:50]}")
     except Exception as e:
         logger.error(f"Ask command error: {e}")
-        await update.message.reply_text(f"Search ran into an issue. Try rephrasing your question.")
+        audit_log(f"ASK_ERROR {str(e)[:100]}")
+        await update.message.reply_text(f"Search error: {str(e)[:120]}")
 
 
 # Phase 8 - Google Tasks two-way sync
