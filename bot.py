@@ -6,8 +6,8 @@ import asyncio
 import requests
 import pytz
 from openai import OpenAI
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -24,7 +24,7 @@ GOOGLE_CREDENTIALS = os.environ["GOOGLE_CREDENTIALS"]
 client = OpenAI()
 
 conversation_history = {}
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+SCOPES = ["https://www.googleapis.com/auth/calendar", "https://www.googleapis.com/auth/tasks"]
 # Use persistent volume if mounted, otherwise fall back to /tmp
 PERSIST_DIR = "/data" if os.path.isdir("/data") else "/tmp"
 TOKEN_FILE = os.path.join(PERSIST_DIR, "google_token.json")
@@ -389,7 +389,8 @@ async def handle_data_action(action_data):
     elif action == "reminder_add":
         text = action_data.get("text", "").strip()
         time_str = action_data.get("time", "")
-        data["reminders"].append({"text": text, "time": time_str, "sent": False, "added": now_str})
+        import uuid as _uuid
+        data["reminders"].append({"text": text, "time": time_str, "sent": False, "added": now_str, "id": str(_uuid.uuid4())[:8]})
         save_data(data)
         try:
             dt = datetime.datetime.fromisoformat(time_str)
@@ -577,9 +578,18 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
         try:
             remind_time = datetime.datetime.fromisoformat(r["time"])
             if now >= remind_time:
+                reminder_id = r.get("id", "")
+                keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("Done", callback_data=f"reminder_done:{reminder_id}"),
+                        InlineKeyboardButton("+1 hour", callback_data=f"reminder_snooze_1h:{reminder_id}"),
+                        InlineKeyboardButton("Tomorrow", callback_data=f"reminder_snooze_1d:{reminder_id}"),
+                    ]
+                ])
                 await context.bot.send_message(
                     chat_id=ALLOWED_USER_ID,
-                    text=f"Reminder: {r['text']}"
+                    text=f"Reminder: {r['text']}",
+                    reply_markup=keyboard
                 )
                 r["sent"] = True
                 changed = True
@@ -633,6 +643,9 @@ def check_rate_limit(user_id):
 # Phase 5 - Daily Briefing helpers
 
 def get_weather_slc():
+    cached = cache_get("weather_slc", max_age_seconds=300)
+    if cached:
+        return cached
     try:
         url = (
             "https://api.open-meteo.com/v1/forecast"
@@ -691,7 +704,9 @@ def get_weather_slc():
         ]
         if precip > 0:
             lines.append(f"Precip: {precip} in")
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        cache_set("weather_slc", result)
+        return result
     except Exception as e:
         return f"Weather unavailable ({str(e)[:50]})"
 
@@ -1045,10 +1060,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Received: {user_message}")
 
+    # Brain dump mode check
+    if context.user_data.get("brain_dump_mode"):
+        await process_brain_dump(update, context)
+        return
+
     # Briefing keyword trigger
     text_lower = user_message.lower()
     if any(phrase in text_lower for phrase in ["morning briefing", "daily briefing", "give me my briefing", "my briefing"]):
         await briefing_command(update, context)
+        return
+
+    # Brain dump keyword trigger
+    if any(phrase in text_lower for phrase in ["brain dump", "braindump", "quick capture", "dump everything"]):
+        await brain_dump_command(update, context)
         return
 
     # Habit logging check
@@ -1177,6 +1202,10 @@ LEAGUE_LABELS = {"nba": "NBA", "nfl": "NFL", "mlb": "MLB"}
 
 
 def fetch_espn_scores(league, date_str):
+    cache_key = f"espn_{league}_{date_str}"
+    cached = cache_get(cache_key, max_age_seconds=300)
+    if cached is not None:
+        return cached
     try:
         url = ESPN_URLS[league]
         resp = requests.get(url, params={"dates": date_str}, timeout=10)
@@ -1213,6 +1242,7 @@ def fetch_espn_scores(league, date_str):
                 "status": status, "winner": winner,
                 "leaders": leaders[:2],
             })
+        cache_set(cache_key, games)
         return games
     except Exception as e:
         logger.error(f"ESPN fetch error {league}: {e}")
@@ -2011,6 +2041,344 @@ When the user asks about a person they have mentioned before, include any known 
 """
 
 
+
+# Phase 8 - Callback query handler (inline keyboard button presses)
+
+async def handle_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+    data_str = query.data
+
+    if data_str.startswith("reminder_done:"):
+        reminder_id = data_str.split(":", 1)[1]
+        data = load_data()
+        for r in data.get("reminders", []):
+            if r.get("id") == reminder_id:
+                r["sent"] = True
+                break
+        save_data(data)
+        await query.edit_message_text(f"Reminder marked done!")
+
+    elif data_str.startswith("reminder_snooze_1h:"):
+        reminder_id = data_str.split(":", 1)[1]
+        data = load_data()
+        tz = pytz.timezone("America/Denver")
+        for r in data.get("reminders", []):
+            if r.get("id") == reminder_id:
+                r["sent"] = False
+                try:
+                    new_time = datetime.datetime.fromisoformat(r["time"]) + datetime.timedelta(hours=1)
+                    r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
+                except Exception:
+                    new_time = datetime.datetime.now(tz) + datetime.timedelta(hours=1)
+                    r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
+                break
+        save_data(data)
+        await query.edit_message_text("Reminder snoozed for 1 hour!")
+
+    elif data_str.startswith("reminder_snooze_1d:"):
+        reminder_id = data_str.split(":", 1)[1]
+        data = load_data()
+        for r in data.get("reminders", []):
+            if r.get("id") == reminder_id:
+                r["sent"] = False
+                try:
+                    new_time = datetime.datetime.fromisoformat(r["time"]) + datetime.timedelta(days=1)
+                    r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
+                except Exception:
+                    tz = pytz.timezone("America/Denver")
+                    new_time = datetime.datetime.now(tz) + datetime.timedelta(days=1)
+                    r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
+                break
+        save_data(data)
+        await query.edit_message_text("Reminder snoozed until tomorrow!")
+
+    elif data_str == "cmd_todos":
+        data = load_data()
+        reply = await handle_data_action({"action": "todo_list"})
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=reply)
+
+    elif data_str == "cmd_notes":
+        reply = await handle_data_action({"action": "note_list"})
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=reply)
+
+
+# Phase 8 - Brain dump
+
+async def brain_dump_command(update, context):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    await update.message.reply_text(
+        "Brain dump mode. Just type or speak everything on your mind - "
+        "I will sort it into todos, reminders, and notes automatically. Go!"
+    )
+    context.user_data["brain_dump_mode"] = True
+
+
+async def process_brain_dump(update, context):
+    """Process a brain dump message - sort with GPT and save raw to notes."""
+    text = update.message.text
+    user_data = load_data()
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    # Save raw version to notes
+    user_data["notes"].append({"text": f"[Brain dump] {text}", "added": now_str})
+
+    # Ask GPT to sort it
+    sort_prompt = (
+        "The user did a brain dump. Extract and categorize everything into: "
+        "TODOS (format: TODO: task text), "
+        "REMINDERS (format: REMINDER: text | YYYY-MM-DDTHH:MM:00), "
+        "NOTES (format: NOTE: text). "
+        "If no clear time is given for reminders, make them todos instead. "
+        f"Current date/time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}. "
+        f"Brain dump text: {text} "
+        "List each item on its own line with the prefix. Nothing else."
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": sort_prompt}],
+            max_tokens=500,
+            temperature=0.3
+        )
+        sorted_text = response.choices[0].message.content.strip()
+
+        todos_added = []
+        reminders_added = []
+        notes_added = []
+
+        for line in sorted_text.splitlines():
+            line = line.strip()
+            if line.startswith("TODO:"):
+                item = line[5:].strip()
+                import uuid as _uuid
+                user_data["todos"].append({"text": item, "done": False, "added": now_str})
+                todos_added.append(item)
+            elif line.startswith("REMINDER:"):
+                parts = line[9:].strip().split("|")
+                if len(parts) == 2:
+                    reminder_text = parts[0].strip()
+                    reminder_time = parts[1].strip()
+                    user_data["reminders"].append({
+                        "text": reminder_text,
+                        "time": reminder_time,
+                        "sent": False,
+                        "added": now_str,
+                        "id": str(_uuid.uuid4())[:8]
+                    })
+                    reminders_added.append(reminder_text)
+                else:
+                    item = parts[0].strip()
+                    user_data["todos"].append({"text": item, "done": False, "added": now_str})
+                    todos_added.append(item)
+            elif line.startswith("NOTE:"):
+                note_text = line[5:].strip()
+                notes_added.append(note_text)
+
+        save_data(user_data)
+
+        summary_parts = []
+        if todos_added:
+            summary_parts.append(f"<b>{len(todos_added)} todo(s)</b>: " + ", ".join(todos_added[:3]) + ("..." if len(todos_added) > 3 else ""))
+        if reminders_added:
+            summary_parts.append(f"<b>{len(reminders_added)} reminder(s)</b>: " + ", ".join(reminders_added[:2]))
+        if notes_added:
+            summary_parts.append(f"<b>{len(notes_added)} note idea(s)</b> captured")
+
+        summary = ("Brain dump sorted! " + " | ".join(summary_parts) if summary_parts else "Brain dump saved to notes!")
+        summary += " (Raw dump also saved to your notes)"
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("View todos", callback_data="cmd_todos"),
+            InlineKeyboardButton("View notes", callback_data="cmd_notes"),
+        ]])
+
+        await update.message.reply_text(summary, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Brain dump error: {e}")
+        save_data(user_data)
+        await update.message.reply_text("Saved your brain dump to notes! Could not auto-sort this time.")
+
+    context.user_data["brain_dump_mode"] = False
+
+
+# Phase 8 - /ask web search via GPT-4o with browsing
+
+async def ask_command(update, context):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /ask [question]. Example: /ask who won last nights Celtics game")
+        return
+    question = " ".join(context.args).strip()
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    await update.message.reply_text("Searching...")
+    today = datetime.datetime.now().strftime("%B %d, %Y")
+    prompt = (
+        "Search the web and answer this question accurately and concisely. "
+        "Include key facts, numbers, and dates where relevant. "
+        "If the information might be outdated, say so. "
+        f"Today is {today}. "
+        f"Question: {question}"
+    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=600,
+            temperature=0.3,
+            tools=[{"type": "web_search_preview"}],
+        )
+        answer = ""
+        if response.choices[0].message.content:
+            answer = response.choices[0].message.content
+        if not answer:
+            answer = "Could not find an answer for that."
+        reply = "<b>" + question + "</b>\n\n" + answer
+        await send_long_message(update.message, reply, parse_mode="HTML")
+        audit_log(f"ASK q={question[:50]}")
+    except Exception as e:
+        logger.error(f"Ask command error: {e}")
+        await update.message.reply_text(f"Search ran into an issue. Try rephrasing your question.")
+
+
+# Phase 8 - Google Tasks two-way sync
+
+def get_tasks_service():
+    creds = None
+    if os.path.exists(TOKEN_FILE):
+        from google.oauth2.credentials import Credentials as GCreds
+        creds = GCreds.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    if creds and creds.expired and creds.refresh_token:
+        from google.auth.transport.requests import Request as GRequest
+        creds.refresh(GRequest())
+        with open(TOKEN_FILE, "w") as f:
+            f.write(creds.to_json())
+    if not creds or not creds.valid:
+        return None
+    return build("tasks", "v1", credentials=creds)
+
+
+def sync_todos_to_tasks(user_data):
+    """Push bot todos to Google Tasks."""
+    try:
+        service = get_tasks_service()
+        if not service:
+            return False
+        tasklists = service.tasklists().list().execute()
+        bot_list_id = None
+        for tl in tasklists.get("items", []):
+            if tl.get("title") == "Wasonassistant":
+                bot_list_id = tl["id"]
+                break
+        if not bot_list_id:
+            new_list = service.tasklists().insert(body={"title": "Wasonassistant"}).execute()
+            bot_list_id = new_list["id"]
+        existing = service.tasks().list(tasklist=bot_list_id, showCompleted=False).execute()
+        existing_titles = {t.get("title", "") for t in existing.get("items", [])}
+        pushed = 0
+        for todo in user_data.get("todos", []):
+            if not todo.get("done") and todo.get("text") not in existing_titles:
+                service.tasks().insert(
+                    tasklist=bot_list_id,
+                    body={"title": todo["text"], "status": "needsAction"}
+                ).execute()
+                pushed += 1
+        return pushed
+    except Exception as e:
+        logger.error(f"Tasks sync push error: {e}")
+        return False
+
+
+def sync_tasks_to_todos(user_data):
+    """Pull Google Tasks into bot todos (avoid duplicates)."""
+    try:
+        service = get_tasks_service()
+        if not service:
+            return 0
+        tasklists = service.tasklists().list().execute()
+        pulled = 0
+        existing_texts = {t.get("text", "").lower() for t in user_data.get("todos", [])}
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        for tl in tasklists.get("items", []):
+            if tl.get("title") == "Wasonassistant":
+                continue
+            tasks = service.tasks().list(
+                tasklist=tl["id"], showCompleted=False
+            ).execute()
+            for task in tasks.get("items", []):
+                title = task.get("title", "").strip()
+                if title and title.lower() not in existing_texts:
+                    import uuid as _uuid
+                    user_data["todos"].append({
+                        "text": title,
+                        "done": False,
+                        "added": now_str,
+                        "source": "google_tasks"
+                    })
+                    existing_texts.add(title.lower())
+                    pulled += 1
+        if pulled:
+            save_data(user_data)
+        return pulled
+    except Exception as e:
+        logger.error(f"Tasks sync pull error: {e}")
+        return 0
+
+
+async def cmd_synctasks(update, context):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    await update.message.reply_text("Syncing with Google Tasks...")
+    user_data = load_data()
+    pulled = sync_tasks_to_todos(user_data)
+    pushed = sync_todos_to_tasks(user_data)
+    parts = []
+    if pulled:
+        parts.append(f"{pulled} task(s) pulled from Google Tasks")
+    if pushed:
+        parts.append(f"{pushed} todo(s) pushed to Google Tasks")
+    if not parts:
+        parts.append("Everything already in sync")
+    await update.message.reply_text("Sync complete! " + " | ".join(parts))
+
+
+# Phase 8 - Auto tasks sync job
+
+async def auto_sync_tasks(context):
+    """Silently sync Google Tasks every morning."""
+    try:
+        user_data = load_data()
+        pulled = sync_tasks_to_todos(user_data)
+        if pulled:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=f"Synced {pulled} new task(s) from Google Tasks into your todos."
+            )
+    except Exception as e:
+        logger.error(f"Auto tasks sync error: {e}")
+
+
+# Phase 8 - Response caching for weather and sports
+
+_cache = {}
+
+def cache_get(key, max_age_seconds=300):
+    if key in _cache:
+        value, timestamp = _cache[key]
+        if datetime.datetime.now().timestamp() - timestamp < max_age_seconds:
+            return value
+    return None
+
+def cache_set(key, value):
+    _cache[key] = (value, datetime.datetime.now().timestamp())
+
+
 # Main
 
 def main():
@@ -2035,7 +2403,11 @@ def main():
     app.add_handler(CommandHandler("habits", cmd_habits))
     app.add_handler(CommandHandler("contacts", cmd_contacts))
     app.add_handler(CommandHandler("summary", summary_command))
+    app.add_handler(CommandHandler("ask", ask_command))
+    app.add_handler(CommandHandler("braindump", brain_dump_command))
+    app.add_handler(CommandHandler("synctasks", cmd_synctasks))
     app.add_handler(CommandHandler("clear", clear))
+    app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -2057,7 +2429,11 @@ def main():
     travel_time = datetime.time(hour=19, minute=0, tzinfo=mtn)
     app.job_queue.run_daily(check_travel_weather, time=travel_time, name="travel_weather")
 
-    logger.info("Bot is running (Phase 7)...")
+    # Google Tasks sync: every morning at 7:05 AM (just after briefing)
+    tasks_sync_time = datetime.time(hour=7, minute=5, tzinfo=mtn)
+    app.job_queue.run_daily(auto_sync_tasks, time=tasks_sync_time, name="tasks_sync")
+
+    logger.info("Bot is running (Phase 8)...")
     app.run_polling(drop_pending_updates=True)
 
 
