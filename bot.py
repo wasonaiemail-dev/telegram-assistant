@@ -2115,7 +2115,6 @@ When the user asks about a person they have mentioned before, include any known 
 
 async def handle_callback(update, context):
     query = update.callback_query
-    await query.answer()
     data_str = query.data
 
     if data_str.startswith("reminder_done:"):
@@ -2126,7 +2125,8 @@ async def handle_callback(update, context):
                 r["sent"] = True
                 break
         save_data(data)
-        await query.edit_message_text(f"Reminder marked done!")
+        await query.answer()
+        await query.edit_message_text("Reminder marked done!")
 
     elif data_str.startswith("reminder_snooze_1h:"):
         reminder_id = data_str.split(":", 1)[1]
@@ -2143,6 +2143,7 @@ async def handle_callback(update, context):
                     r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
                 break
         save_data(data)
+        await query.answer()
         await query.edit_message_text("Reminder snoozed for 1 hour!")
 
     elif data_str.startswith("reminder_snooze_1d:"):
@@ -2160,12 +2161,14 @@ async def handle_callback(update, context):
                     r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
                 break
         save_data(data)
+        await query.answer()
         await query.edit_message_text("Reminder snoozed until tomorrow!")
 
     elif data_str == "cmd_todos":
         try:
             reply = await handle_data_action({"action": "todo_list"})
             await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
+            await query.answer()
         except Exception as e:
             logger.error(f"cmd_todos callback error: {e}")
             await query.answer(text="Could not load todos", show_alert=True)
@@ -2174,6 +2177,7 @@ async def handle_callback(update, context):
         try:
             reply = await handle_data_action({"action": "note_list"})
             await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
+            await query.answer()
         except Exception as e:
             logger.error(f"cmd_notes callback error: {e}")
             await query.answer(text="Could not load notes", show_alert=True)
