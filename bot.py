@@ -1324,9 +1324,78 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Could not make out what you said. Try again?")
             return
         await update.message.reply_text(f"You said: {text}\n\nProcessing...")
-        fake_update_text = update.message.text
-        update.message.text = text
-        await handle_message(update, context)
+        # Process transcribed text directly through GPT
+        user_id = update.effective_user.id
+        if user_id not in conversation_history:
+            saved = load_conversation()
+            conversation_history[user_id] = saved.get(str(user_id), [])
+        # Check habit keywords first
+        text_lower = text.lower()
+        habit_response = check_habit_from_message(text_lower, load_data())
+        if habit_response:
+            await update.message.reply_text(habit_response)
+            return
+        conversation_history[user_id].append({"role": "user", "content": text[:2000]})
+        if len(conversation_history[user_id]) > 20:
+            conversation_history[user_id] = conversation_history[user_id][-20:]
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        now = datetime.datetime.now().strftime("%A, %B %-d, %Y, %-I:%M %p")
+        contacts = load_contacts()
+        contact_ctx = ""
+        if contacts:
+            contact_ctx = "\n\nKnown contacts:\n"
+            for name, facts in list(contacts.items())[:10]:
+                facts_list = facts if isinstance(facts, list) else [facts]
+                contact_ctx += f"- {name}: {'; '.join(facts_list[:3])}\n"
+        system = SYSTEM_PROMPT + CONTACT_SYSTEM_ADDON + f"\n\nCurrent date/time: {now} (Mountain Time)" + contact_ctx
+        messages = [{"role": "system", "content": system}] + conversation_history[user_id]
+        response = client.chat.completions.create(
+            model="gpt-4o-mini", messages=messages, max_tokens=900, temperature=0.7
+        )
+        assistant_message = response.choices[0].message.content
+        reply_lines = []
+        for line in assistant_message.split("\n"):
+            if line.startswith("CALENDAR_ACTION:"):
+                try:
+                    action_data = json.loads(line.replace("CALENDAR_ACTION:", "").strip())
+                    cal_reply = await handle_calendar_action(action_data, update)
+                    if cal_reply:
+                        reply_lines.append(cal_reply)
+                except Exception as e:
+                    logger.error(f"Voice cal action error: {e}")
+            elif line.startswith("DATA_ACTION:"):
+                try:
+                    action_data = json.loads(line.replace("DATA_ACTION:", "").strip())
+                    data_reply = await handle_data_action(action_data)
+                    if data_reply:
+                        reply_lines.append(data_reply)
+                except Exception as e:
+                    logger.error(f"Voice data action error: {e}")
+            elif line.startswith("CONTACT_ACTION:"):
+                try:
+                    contact_data = json.loads(line.replace("CONTACT_ACTION:", "").strip())
+                    contacts = load_contacts()
+                    name = contact_data.get("name", "").title()
+                    fact = contact_data.get("fact", "").strip()
+                    if name and fact:
+                        if name not in contacts:
+                            contacts[name] = []
+                        if isinstance(contacts[name], str):
+                            contacts[name] = [contacts[name]]
+                        contacts[name].append(fact)
+                        save_contacts(contacts)
+                        reply_lines.append(f"Got it! Saved note about {name}: {fact}")
+                except Exception as e:
+                    logger.error(f"Voice contact action error: {e}")
+            else:
+                if line.strip():
+                    reply_lines.append(line)
+        final_reply = "\n".join(reply_lines).strip() or "Done!"
+        conversation_history[user_id].append({"role": "assistant", "content": final_reply})
+        all_history = load_conversation()
+        all_history[str(user_id)] = conversation_history[user_id]
+        save_conversation(all_history)
+        await send_long_message(update.message, final_reply)
     except Exception as e:
         logger.error(f"Voice error: {e}")
         await update.message.reply_text("Had trouble processing that voice message. Please try again.")
@@ -1375,9 +1444,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             max_tokens=600
         )
         reply = response.choices[0].message.content.strip()
+        # Convert markdown bold to HTML bold for Telegram
+        import re as _re
+        reply = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', reply)
         if "RECEIPT_DETECTED:" in reply:
             context.user_data["pending_receipt"] = reply
-        await update.message.reply_text(reply)
+        await update.message.reply_text(reply, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Photo error: {e}")
         await update.message.reply_text("Had trouble reading that image. Please try again.")
@@ -1625,7 +1697,7 @@ HABIT_KEYWORDS = {
     "meditation": ["meditated", "meditation done", "mindfulness", "did meditation"],
     "morning_routine": ["morning routine", "morning done", "got my morning in"],
     "journaling": ["journaled", "journaling done", "wrote in journal", "did my journal"],
-    "vitamins": ["took vitamins", "vitamins done", "took my supplements", "supplements done"],
+    "vitamins": ["took vitamins", "took my vitamins", "vitamins done", "took my supplements", "supplements done", "vitamins taken", "had my vitamins"],
     "stretching": ["stretched", "stretching done", "did my stretches", "mobility done"],
     "outdoor_time": ["went outside", "outdoor time", "fresh air", "took a walk outside"],
     "gratitude": ["gratitude done", "did gratitude", "grateful today", "wrote gratitude"],
