@@ -117,9 +117,16 @@ Examples: "every Monday" -> "RRULE:FREQ=WEEKLY;BYDAY=MO", "daily" -> "RRULE:FREQ
 When the user asks what is on their calendar or schedule, respond with:
 CALENDAR_ACTION: {"action": "list", "days": 7}
 
+When the user asks to delete or remove a calendar event, tell them: to delete events, open Google Calendar directly since the bot cannot delete events for safety reasons.
+When the user asks to edit or update a calendar event time/title, tell them the same.
+
 == TO-DO LIST ==
 When the user asks to add a task or to-do, respond with:
-DATA_ACTION: {"action": "todo_add", "item": "..."}
+DATA_ACTION: {"action": "todo_add", "item": "...", "priority": "normal"}
+
+If the user says "high priority", "urgent", "important", or "asap" use priority "high".
+If the user says "low priority", "whenever", "someday" use priority "low".
+Otherwise use "normal".
 
 When the user asks to see their to-do list, respond with:
 DATA_ACTION: {"action": "todo_list"}
@@ -129,6 +136,12 @@ DATA_ACTION: {"action": "todo_done", "index": <number starting at 1>}
 
 When the user asks to clear all completed todos or clear the list:
 DATA_ACTION: {"action": "todo_clear"}
+
+When the user wants to delete or remove a specific todo by number or name:
+DATA_ACTION: {"action": "todo_delete", "index": <number starting at 1>}
+
+When the user wants to change the priority of a todo (e.g. "make todo 2 high priority"):
+DATA_ACTION: {"action": "todo_priority", "index": <number starting at 1>, "priority": "high|normal|low"}
 
 == SHOPPING LIST ==
 When the user asks to add something to the shopping list or says I need to buy X or pick up X:
@@ -183,6 +196,20 @@ DATA_ACTION: {"action": "workout_add", "description": "..."}
 
 When the user asks to see their workout history:
 DATA_ACTION: {"action": "workout_list"}
+
+== SLEEP TRACKING ==
+When the user mentions sleep (e.g. slept 7 hours, got 6 hours of sleep, only slept 5 hours, slept great):
+DATA_ACTION: {"action": "sleep_add", "hours": <number or null if unknown>, "quality": "good|okay|poor or null"}
+
+When the user asks to see their sleep log:
+DATA_ACTION: {"action": "sleep_list"}
+
+== MOOD TRACKING ==
+When the user mentions how they are feeling (e.g. feeling tired, stressed, anxious, great, happy, good, exhausted):
+DATA_ACTION: {"action": "mood_add", "mood": "great|good|okay|tired|stressed|anxious|low", "note": "...optional context..."}
+
+When the user asks to see their mood log:
+DATA_ACTION: {"action": "mood_list"}
 
 == GIFT IDEAS ==
 When the user saves a gift idea for someone (e.g. gift idea for mom: silk scarf):
@@ -306,18 +333,37 @@ async def handle_data_action(action_data):
     # TO-DO
     if action == "todo_add":
         item = action_data.get("item", "").strip()
-        data["todos"].append({"text": item, "done": False, "added": now_str})
+        priority = action_data.get("priority", "normal").lower()
+        if priority not in ("high", "normal", "low"):
+            priority = "normal"
+        data["todos"].append({"text": item, "done": False, "added": now_str, "priority": priority})
         save_data(data)
-        return f"Added to your to-do list: {item}"
+        flag = " [HIGH PRIORITY]" if priority == "high" else (" [low priority]" if priority == "low" else "")
+        return f"Added to your to-do list: {item}{flag}"
 
     elif action == "todo_list":
         todos = data.get("todos", [])
         if not todos:
             return "Your to-do list is empty!"
-        lines = ["To-Do List:\n"]
-        for i, t in enumerate(todos, 1):
-            check = "done" if t["done"] else "o"
-            lines.append(f"{check} {i}. {t['text']}")
+        priority_order = {"high": 0, "normal": 1, "low": 2}
+        active = sorted([t for t in todos if not t.get("done")],
+                        key=lambda t: priority_order.get(t.get("priority", "normal"), 1))
+        done_items = [t for t in todos if t.get("done")]
+        lines = ["<b>To-Do List</b>\n"]
+        if active:
+            for i, t in enumerate(active, 1):
+                p = t.get("priority", "normal")
+                if p == "high":
+                    icon = "🔴"
+                elif p == "low":
+                    icon = "🔵"
+                else:
+                    icon = "⚪"
+                lines.append(f"{icon} {i}. {t['text']}")
+        if done_items:
+            lines.append("\n<i>Completed:</i>")
+            for t in done_items:
+                lines.append(f"✅ {t['text']}")
         return "\n".join(lines)
 
     elif action == "todo_done":
@@ -333,6 +379,29 @@ async def handle_data_action(action_data):
         data["todos"] = [t for t in data["todos"] if not t["done"]]
         save_data(data)
         return "Cleared completed to-dos."
+
+    elif action == "todo_delete":
+        active = [t for t in data.get("todos", []) if not t.get("done")]
+        idx = action_data.get("index", 0) - 1
+        if 0 <= idx < len(active):
+            item_text = active[idx]["text"]
+            data["todos"] = [t for t in data["todos"] if t is not active[idx]]
+            save_data(data)
+            return f"Deleted: {item_text}"
+        return "Could not find that todo item."
+
+    elif action == "todo_priority":
+        active = [t for t in data.get("todos", []) if not t.get("done")]
+        idx = action_data.get("index", 0) - 1
+        new_p = action_data.get("priority", "normal").lower()
+        if new_p not in ("high", "normal", "low"):
+            new_p = "normal"
+        if 0 <= idx < len(active):
+            active[idx]["priority"] = new_p
+            save_data(data)
+            flag = "🔴 HIGH" if new_p == "high" else ("🔵 low" if new_p == "low" else "⚪ normal")
+            return f"Updated priority to {flag}: {active[idx]['text']}"
+        return "Could not find that todo item."
 
     # SHOPPING
     elif action == "shop_add":
@@ -524,6 +593,75 @@ async def handle_data_action(action_data):
                     lines.append(f"  * {g['idea']}")
             return "\n".join(lines)
         return f"No gift ideas saved for {person.title()} yet."
+
+    # SLEEP
+    elif action == "sleep_add":
+        hours = action_data.get("hours")
+        quality = action_data.get("quality")
+        entry = {"date": now_str[:10], "added": now_str}
+        if hours is not None:
+            try:
+                entry["hours"] = float(hours)
+            except (ValueError, TypeError):
+                pass
+        if quality:
+            entry["quality"] = quality
+        if "sleep_log" not in data:
+            data["sleep_log"] = []
+        data["sleep_log"].append(entry)
+        save_data(data)
+        parts = []
+        if "hours" in entry:
+            parts.append(f"{entry['hours']:.0f} hours")
+        if "quality" in entry:
+            q_emoji = {"great": "😴✨", "good": "😴", "okay": "😐", "poor": "😔"}.get(entry["quality"], "")
+            parts.append(f"{entry['quality']} {q_emoji}")
+        return "Sleep logged: " + (", ".join(parts) if parts else "noted")
+
+    elif action == "sleep_list":
+        log = data.get("sleep_log", [])
+        if not log:
+            return "No sleep logged yet."
+        recent = log[-7:]
+        lines = ["<b>Sleep Log (last 7 days)</b>\n"]
+        for e in reversed(recent):
+            parts = [e.get("date", "")]
+            if "hours" in e:
+                h = e["hours"]
+                bar = "🟢" if h >= 7 else ("🟡" if h >= 5 else "🔴")
+                parts.append(f"{bar} {h:.0f}h")
+            if "quality" in e:
+                parts.append(e["quality"])
+            lines.append("  ".join(parts))
+        total_h = [e["hours"] for e in recent if "hours" in e]
+        if total_h:
+            avg = sum(total_h) / len(total_h)
+            lines.append(f"\nAvg: {avg:.1f}h / night")
+        return "\n".join(lines)
+
+    # MOOD
+    elif action == "mood_add":
+        mood = action_data.get("mood", "okay")
+        note = action_data.get("note", "")
+        if "mood_log" not in data:
+            data["mood_log"] = []
+        data["mood_log"].append({"date": now_str[:10], "added": now_str, "mood": mood, "note": note})
+        save_data(data)
+        mood_emoji = {"great": "🌟", "good": "😊", "okay": "😐", "tired": "😴", "stressed": "😤", "anxious": "😰", "low": "😔"}.get(mood, "")
+        return f"Mood logged: {mood} {mood_emoji}"
+
+    elif action == "mood_list":
+        log = data.get("mood_log", [])
+        if not log:
+            return "No mood logged yet."
+        recent = log[-7:]
+        lines = ["<b>Mood Log (last 7 days)</b>\n"]
+        emoji_map = {"great": "🌟", "good": "😊", "okay": "😐", "tired": "😴", "stressed": "😤", "anxious": "😰", "low": "😔"}
+        for e in reversed(recent):
+            em = emoji_map.get(e.get("mood", ""), "")
+            note = f" - {e['note']}" if e.get("note") else ""
+            lines.append(f"{e.get('date', '')}  {em} {e.get('mood', '')}{note}")
+        return "\n".join(lines)
 
     return None
 
@@ -1042,6 +1180,18 @@ async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     reply = await handle_data_action({"action": "reminder_list"})
     await update.message.reply_text(reply)
+
+async def cmd_sleep(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    reply = await handle_data_action({"action": "sleep_list"})
+    await update.message.reply_text(reply, parse_mode="HTML")
+
+async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    reply = await handle_data_action({"action": "mood_list"})
+    await update.message.reply_text(reply, parse_mode="HTML")
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
@@ -2538,6 +2688,8 @@ def main():
     app.add_handler(CommandHandler("workouts", cmd_workouts))
     app.add_handler(CommandHandler("gifts", cmd_gifts))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
+    app.add_handler(CommandHandler("sleep", cmd_sleep))
+    app.add_handler(CommandHandler("mood", cmd_mood))
     app.add_handler(CommandHandler("habits", cmd_habits))
     app.add_handler(CommandHandler("contacts", cmd_contacts))
     app.add_handler(CommandHandler("summary", summary_command))
