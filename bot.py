@@ -2163,55 +2163,75 @@ async def handle_callback(update, context):
         await query.edit_message_text("Reminder snoozed until tomorrow!")
 
     elif data_str == "cmd_todos":
-        reply = await handle_data_action({"action": "todo_list"})
-        await query.message.reply_text(reply)
+        try:
+            reply = await handle_data_action({"action": "todo_list"})
+            await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
+        except Exception as e:
+            logger.error(f"cmd_todos callback error: {e}")
+            await query.answer(text="Could not load todos", show_alert=True)
 
     elif data_str == "cmd_notes":
-        reply = await handle_data_action({"action": "note_list"})
-        await query.message.reply_text(reply)
+        try:
+            reply = await handle_data_action({"action": "note_list"})
+            await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
+        except Exception as e:
+            logger.error(f"cmd_notes callback error: {e}")
+            await query.answer(text="Could not load notes", show_alert=True)
 
     elif data_str == "cmd_habits":
-        data = load_data()
-        habit_log = data.get("habit_log", [])
-        tz = pytz.timezone("America/Denver")
-        today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
-        lines = ["<b>Your Habit Tracker</b>\n"]
-        for habit in HABITS:
-            streak = get_habit_streak(habit_log, habit)
-            done_today = any(
-                e.get("habit") == habit and e.get("date", "").startswith(today_str)
-                for e in habit_log
-            )
-            check = "done" if done_today else "o"
-            label = HABIT_LABELS[habit]
-            streak_txt = f"{streak} day streak" if streak > 0 else "No streak yet"
-            lines.append(f"{check} {label} - {streak_txt}")
-        await query.message.reply_text("\n".join(lines), parse_mode="HTML")
+        try:
+            data = load_data()
+            habit_log = data.get("habit_log", [])
+            tz = pytz.timezone("America/Denver")
+            today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
+            lines = ["<b>Your Habit Tracker</b>\n"]
+            for habit in HABITS:
+                streak = get_habit_streak(habit_log, habit)
+                done_today = any(
+                    e.get("habit") == habit and e.get("date", "").startswith(today_str)
+                    for e in habit_log
+                )
+                check = "done" if done_today else "o"
+                label = HABIT_LABELS[habit]
+                streak_txt = f"{streak} day streak" if streak > 0 else "No streak yet"
+                lines.append(f"{check} {label} - {streak_txt}")
+            await context.bot.send_message(chat_id=query.message.chat_id, text="\n".join(lines), parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"cmd_habits callback error: {e}")
 
     elif data_str == "cmd_summary":
-        data = load_data()
-        cal_service = None
         try:
-            cal_service = get_calendar_service()
-        except Exception:
-            pass
-        msg = await build_weekly_summary(data, cal_service)
-        await query.message.reply_text(msg, parse_mode="HTML")
+            data = load_data()
+            cal_service = None
+            try:
+                cal_service = get_calendar_service()
+            except Exception:
+                pass
+            msg = await build_weekly_summary(data, cal_service)
+            await context.bot.send_message(chat_id=query.message.chat_id, text=msg, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"cmd_summary callback error: {e}")
 
     elif data_str == "cmd_expenses":
-        reply = await handle_data_action({"action": "expense_list"})
-        await query.message.reply_text(reply)
+        try:
+            reply = await handle_data_action({"action": "expense_list"})
+            await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
+        except Exception as e:
+            logger.error(f"cmd_expenses callback error: {e}")
 
     elif data_str == "cmd_briefing":
-        data = load_data()
-        cal_service = None
         try:
-            cal_service = get_calendar_service()
-        except Exception:
-            pass
-        sections = await build_briefing_sections(data, cal_service)
-        for section in sections:
-            await query.message.reply_text(section, parse_mode="HTML")
+            data = load_data()
+            cal_service = None
+            try:
+                cal_service = get_calendar_service()
+            except Exception:
+                pass
+            sections = await build_briefing_sections(data, cal_service)
+            for section in sections:
+                await context.bot.send_message(chat_id=query.message.chat_id, text=section, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"cmd_briefing callback error: {e}")
 
 
 # Phase 8 - Brain dump
