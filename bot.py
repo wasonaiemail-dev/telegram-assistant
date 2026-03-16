@@ -596,18 +596,8 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
             remind_time = datetime.datetime.fromisoformat(r["time"])
             if now >= remind_time:
                 reminder_id = r.get("id", "")
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("Done", callback_data=f"reminder_done:{reminder_id}"),
-                        InlineKeyboardButton("+1 hour", callback_data=f"reminder_snooze_1h:{reminder_id}"),
-                        InlineKeyboardButton("Tomorrow", callback_data=f"reminder_snooze_1d:{reminder_id}"),
-                    ]
-                ])
-                await context.bot.send_message(
-                    chat_id=ALLOWED_USER_ID,
-                    text=f"Reminder: {r['text']}",
-                    reply_markup=keyboard
-                )
+                reminder_text = f"Reminder: {r['text']}"
+                await context.bot.send_message(chat_id=ALLOWED_USER_ID, text=reminder_text)
                 r["sent"] = True
                 changed = True
         except Exception as e:
@@ -2115,6 +2105,7 @@ When the user asks about a person they have mentioned before, include any known 
 
 async def handle_callback(update, context):
     query = update.callback_query
+    await query.answer()  # Must answer within 10s or Telegram drops the callback
     data_str = query.data
 
     if data_str.startswith("reminder_done:"):
@@ -2125,7 +2116,6 @@ async def handle_callback(update, context):
                 r["sent"] = True
                 break
         save_data(data)
-        await query.answer()
         await query.edit_message_text("Reminder marked done!")
 
     elif data_str.startswith("reminder_snooze_1h:"):
@@ -2143,7 +2133,6 @@ async def handle_callback(update, context):
                     r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
                 break
         save_data(data)
-        await query.answer()
         await query.edit_message_text("Reminder snoozed for 1 hour!")
 
     elif data_str.startswith("reminder_snooze_1d:"):
@@ -2161,26 +2150,21 @@ async def handle_callback(update, context):
                     r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
                 break
         save_data(data)
-        await query.answer()
         await query.edit_message_text("Reminder snoozed until tomorrow!")
 
     elif data_str == "cmd_todos":
         try:
             reply = await handle_data_action({"action": "todo_list"})
             await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
-            await query.answer()
         except Exception as e:
             logger.error(f"cmd_todos callback error: {e}")
-            await query.answer(text="Could not load todos", show_alert=True)
 
     elif data_str == "cmd_notes":
         try:
             reply = await handle_data_action({"action": "note_list"})
             await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
-            await query.answer()
         except Exception as e:
             logger.error(f"cmd_notes callback error: {e}")
-            await query.answer(text="Could not load notes", show_alert=True)
 
     elif data_str == "cmd_habits":
         try:
@@ -2327,12 +2311,7 @@ async def process_brain_dump(update, context):
         summary = ("Brain dump sorted! " + " | ".join(summary_parts) if summary_parts else "Brain dump saved to notes!")
         summary += " (Raw dump also saved to your notes)"
 
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("View todos", callback_data="cmd_todos"),
-            InlineKeyboardButton("View notes", callback_data="cmd_notes"),
-        ]])
-
-        await update.message.reply_text(summary, parse_mode="HTML", reply_markup=keyboard)
+        await update.message.reply_text(summary)
 
     except Exception as e:
         logger.error(f"Brain dump error: {e}")
@@ -2593,7 +2572,7 @@ def main():
     app.job_queue.run_daily(auto_sync_tasks, time=tasks_sync_time, name="tasks_sync")
 
     logger.info("Bot is running (Phase 8)...")
-    app.run_polling(drop_pending_updates=True)
+    app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query", "voice", "photo"])
 
 
 if __name__ == "__main__":
