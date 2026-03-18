@@ -1143,7 +1143,7 @@ async def cmd_todos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
     reply = await handle_data_action({"action": "todo_list"})
-    await update.message.reply_text(reply)
+    await update.message.reply_text(reply, parse_mode="HTML")
 
 async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
