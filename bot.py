@@ -1274,6 +1274,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Had trouble adding that event. Try describing it manually.")
         return
 
+    # Direct todo delete detection - bypass GPT to avoid calendar misrouting
+    import re as _re
+    _delete_match = _re.match(r'^(?:delete|remove) todo #?(\d+)$', text_lower.strip())
+    if _delete_match:
+        idx_num = int(_delete_match.group(1))
+        reply = await handle_data_action({"action": "todo_delete", "index": idx_num})
+        await update.message.reply_text(reply)
+        return
+
     # Habit logging check - skip if message is about scheduling/planning (not completing)
     scheduling_words = ["schedule", "remind me", "every monday", "every tuesday",
                         "every wednesday", "every thursday", "every friday",
@@ -1340,6 +1349,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     data_reply = await handle_data_action(action_data)
                     if data_reply:
                         reply_lines.append(data_reply)
+                        if action_data.get("action") in ("todo_list", "sleep_list", "mood_list", "habit_list"):
+                            context.user_data["_last_html_reply"] = True
                 except Exception as e:
                     logger.error(f"Data action error: {e}")
             elif line.startswith("CONTACT_ACTION:"):
@@ -1608,6 +1619,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     data_reply = await handle_data_action(action_data)
                     if data_reply:
                         reply_lines.append(data_reply)
+                        if action_data.get("action") in ("todo_list", "sleep_list", "mood_list", "habit_list"):
+                            context.user_data["_last_html_reply"] = True
                 except Exception as e:
                     logger.error(f"Voice data action error: {e}")
             elif line.startswith("CONTACT_ACTION:"):
