@@ -1285,6 +1285,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(reply)
         return
 
+    # Direct priority todo detection - ensure priority is passed correctly
+    _high_patterns = ["high priority:", "urgent:", "high priority -", "urgent -"]
+    _low_patterns = ["low priority:", "low priority -"]
+    _detected_priority = None
+    _todo_text = text_lower.strip()
+    for pat in _high_patterns:
+        if _todo_text.startswith(pat):
+            _detected_priority = "high"
+            _todo_text = user_message[len(pat):].strip()
+            break
+    if not _detected_priority:
+        for pat in _low_patterns:
+            if _todo_text.startswith(pat):
+                _detected_priority = "low"
+                _todo_text = user_message[len(pat):].strip()
+                break
+    if _detected_priority and _todo_text:
+        reply = await handle_data_action({"action": "todo_add", "item": _todo_text, "priority": _detected_priority})
+        await update.message.reply_text(reply, parse_mode="HTML")
+        return
+
     # Habit logging check - skip if message is about scheduling/planning (not completing)
     scheduling_words = ["schedule", "remind me", "every monday", "every tuesday",
                         "every wednesday", "every thursday", "every friday",
