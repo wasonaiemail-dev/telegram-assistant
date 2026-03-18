@@ -1279,26 +1279,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Direct todo delete detection - bypass GPT to avoid calendar misrouting
     import re as _re
     _stripped = text_lower.strip()
+    # Undo last delete
+    if _stripped in ("undo", "undo delete", "undo last delete", "restore todos", "restore last deleted"):
+        _undo_items = context.user_data.get("last_deleted_todos", [])
+        if not _undo_items:
+            await update.message.reply_text("Nothing to undo.")
+            return
+        _data = load_data()
+        for _item in _undo_items:
+            _data["todos"].append(_item)
+        save_data(_data)
+        context.user_data["last_deleted_todos"] = []
+        _names = ", ".join(i["text"] for i in _undo_items)
+        await update.message.reply_text(f"Restored: {_names}\n\nType /todos to see your updated list.")
+        return
     # Extract all numbers from "delete todo(s) 1, 2, 3 and 4" patterns
     if _re.match(r'^(?:delete|remove) todos?', _stripped):
         _nums = [int(n) for n in _re.findall(r'\d+', _stripped)]
         if _nums:
-            # Delete in reverse order so indices stay valid
             _data = load_data()
             _active = [t for t in _data.get("todos", []) if not t.get("done")]
-            _deleted = []
-            for _n in sorted(set(_nums), reverse=True):
+            _to_delete = []
+            for _n in sorted(set(_nums)):
                 _i = _n - 1
                 if 0 <= _i < len(_active):
-                    _item = _active[_i]
-                    _deleted.append(_item["text"])
-                    _data["todos"] = [t for t in _data["todos"] if t is not _item]
+                    _to_delete.append(_active[_i])
+            if not _to_delete:
+                await update.message.reply_text("Could not find those items. Type /todos to see current numbers.")
+                return
+            # Save for undo before deleting
+            context.user_data["last_deleted_todos"] = list(_to_delete)
+            _ids = {id(t) for t in _to_delete}
+            _data["todos"] = [t for t in _data["todos"] if id(t) not in _ids]
             save_data(_data)
-            if _deleted:
-                _names = ", ".join(reversed(_deleted))
-                await update.message.reply_text(f"Deleted: {_names}")
-            else:
-                await update.message.reply_text("Could not find those items.")
+            _names = ", ".join(t["text"] for t in _to_delete)
+            await update.message.reply_text(f"Deleted: {_names}\n\nSay \"undo\" within this session to restore.")
             return
 
     # Direct priority todo detection - ensure priority is passed correctly
