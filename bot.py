@@ -349,6 +349,8 @@ async def handle_data_action(action_data):
         active = sorted([t for t in todos if not t.get("done")],
                         key=lambda t: priority_order.get(t.get("priority", "normal"), 1))
         done_items = [t for t in todos if t.get("done")]
+        def _esc(s):
+            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         lines = ["<b>To-Do List</b>\n"]
         if active:
             for i, t in enumerate(active, 1):
@@ -359,11 +361,11 @@ async def handle_data_action(action_data):
                     icon = "🔵"
                 else:
                     icon = "⚪"
-                lines.append(f"{icon} {i}. {t['text']}")
+                lines.append(f"{icon} {i}. {_esc(t['text'])}")
         if done_items:
             lines.append("\n<i>Completed:</i>")
             for t in done_items:
-                lines.append(f"✅ {t['text']}")
+                lines.append(f"✅ {_esc(t['text'])}")
         return "\n".join(lines)
 
     elif action == "todo_done":
