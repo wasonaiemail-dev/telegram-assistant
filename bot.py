@@ -1247,13 +1247,14 @@ async def show_events(update, days, label):
     if not events:
         await update.message.reply_text(f"No events {label}.")
         return
-    # Count events per day to flag busy days
+    # Count events per day PER CALENDAR to flag busy days
     from collections import defaultdict as _dd
-    day_counts = _dd(int)
+    # key: (day, calendar_name) -> count
+    day_cal_counts = _dd(int)
     for e in events:
         start = e["start"].get("dateTime", e["start"].get("date", ""))
-        day_key = start[:10]
-        day_counts[day_key] += 1
+        cal_name = e.get("_calendar_name", "Personal")
+        day_cal_counts[(start[:10], cal_name)] += 1
     lines = [f"<b>Your events {label}</b>\n"]
     for e in events:
         start = e["start"].get("dateTime", e["start"].get("date", ""))
@@ -1263,8 +1264,11 @@ async def show_events(update, days, label):
         else:
             dt = datetime.datetime.fromisoformat(start)
             time_str = dt.strftime("%a %b %-d (all day)")
-        busy = " <b>[BUSY DAY]</b>" if day_counts[start[:10]] >= 3 else ""
-        lines.append(f"* {e.get('summary', 'No title')} - {time_str}{busy}")
+        cal_name = e.get("_calendar_name", "Personal")
+        busy_tag = ""
+        if day_cal_counts[(start[:10], cal_name)] >= 3:
+            busy_tag = f" <b>[Busy day - {cal_name}]</b>"
+        lines.append(f"* {e.get('summary', 'No title')} - {time_str}{busy_tag}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
