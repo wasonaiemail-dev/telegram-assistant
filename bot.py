@@ -1278,12 +1278,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Direct todo delete detection - bypass GPT to avoid calendar misrouting
     import re as _re
-    _delete_match = _re.match(r'^(?:delete|remove) todo #?(\d+)$', text_lower.strip())
-    if _delete_match:
-        idx_num = int(_delete_match.group(1))
-        reply = await handle_data_action({"action": "todo_delete", "index": idx_num})
-        await update.message.reply_text(reply)
-        return
+    _stripped = text_lower.strip()
+    # Extract all numbers from "delete todo(s) 1, 2, 3 and 4" patterns
+    if _re.match(r'^(?:delete|remove) todos?', _stripped):
+        _nums = [int(n) for n in _re.findall(r'\d+', _stripped)]
+        if _nums:
+            # Delete in reverse order so indices stay valid
+            _data = load_data()
+            _active = [t for t in _data.get("todos", []) if not t.get("done")]
+            _deleted = []
+            for _n in sorted(set(_nums), reverse=True):
+                _i = _n - 1
+                if 0 <= _i < len(_active):
+                    _item = _active[_i]
+                    _deleted.append(_item["text"])
+                    _data["todos"] = [t for t in _data["todos"] if t is not _item]
+            save_data(_data)
+            if _deleted:
+                _names = ", ".join(reversed(_deleted))
+                await update.message.reply_text(f"Deleted: {_names}")
+            else:
+                await update.message.reply_text("Could not find those items.")
+            return
 
     # Direct priority todo detection - ensure priority is passed correctly
     _high_patterns = ["high priority:", "urgent:", "high priority -", "urgent -"]
