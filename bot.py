@@ -143,18 +143,34 @@ DATA_ACTION: {"action": "todo_delete", "index": <number starting at 1>}
 When the user wants to change the priority of a todo (e.g. "make todo 2 high priority"):
 DATA_ACTION: {"action": "todo_priority", "index": <number starting at 1>, "priority": "high|normal|low"}
 
-== SHOPPING LIST ==
-When the user asks to add something to the shopping list or says I need to buy X or pick up X:
-DATA_ACTION: {"action": "shop_add", "item": "..."}
+== SHOPPING LISTS ==
+There are 4 shopping lists: grocery, household, baby (for Luna), wishlist.
+Auto-assign items to the correct list:
+- grocery: food, drinks, produce, dairy, meat, snacks, beverages, kitchen staples
+- household: cleaning supplies, paper towels, soap, laundry, home supplies, batteries, light bulbs
+- baby: diapers, wipes, formula, baby food, baby clothes, Luna items, anything for the baby
+- wishlist: electronics, gadgets, clothing for self, personal wants, things to buy someday
 
-When the user asks to see the shopping list:
+When the user adds a shopping item (naturally or explicitly):
+DATA_ACTION: {"action": "shop_add", "item": "...", "list": "grocery|household|baby|wishlist"}
+
+If the user says "add to grocery/household/baby/wishlist" use that list explicitly.
+If unclear, use grocery as default for food items, wishlist for non-essential personal items.
+
+When the user asks to see their shopping list or /shopping:
 DATA_ACTION: {"action": "shop_list"}
 
 When the user marks a shopping item as gotten or bought (by number or name):
-DATA_ACTION: {"action": "shop_done", "index": <number starting at 1>}
+DATA_ACTION: {"action": "shop_done", "index": <number starting at 1>, "list": "grocery|household|baby|wishlist"}
 
-When the user asks to clear the shopping list:
-DATA_ACTION: {"action": "shop_clear"}
+When the user asks to delete or remove a shopping item:
+DATA_ACTION: {"action": "shop_delete", "index": <number starting at 1>, "list": "grocery|household|baby|wishlist"}
+
+When the user asks to clear bought/done items from a list:
+DATA_ACTION: {"action": "shop_clear", "list": "grocery|household|baby|wishlist|all"}
+
+When the user wants to remove/delete a specific shopping item (not mark it bought, but remove it entirely):
+DATA_ACTION: {"action": "shop_delete", "index": <number>}
 
 == NOTES ==
 When the user says note, remember this, save this, jot this down, or anything like note: ...:
@@ -162,6 +178,9 @@ DATA_ACTION: {"action": "note_add", "text": "..."}
 
 When the user asks to see their notes:
 DATA_ACTION: {"action": "note_list"}
+
+When the user wants to search notes or find a note about something:
+DATA_ACTION: {"action": "note_search", "query": "...search term..."}
 
 When the user asks to delete a note by number:
 DATA_ACTION: {"action": "note_delete", "index": <number starting at 1>}
@@ -172,6 +191,9 @@ DATA_ACTION: {"action": "reminder_add", "text": "...", "time": "YYYY-MM-DDTHH:MM
 
 When the user asks to see their reminders:
 DATA_ACTION: {"action": "reminder_list"}
+
+When the user wants to cancel or delete a specific reminder by number:
+DATA_ACTION: {"action": "reminder_cancel", "index": <number starting at 1>}
 
 == EXPENSES ==
 When the user logs an expense (e.g. spent $45 on groceries, bought gas for $60):
@@ -212,8 +234,8 @@ When the user asks to see their mood log:
 DATA_ACTION: {"action": "mood_list"}
 
 == GIFT IDEAS ==
-When the user saves a gift idea for someone (e.g. gift idea for mom: silk scarf):
-DATA_ACTION: {"action": "gift_add", "person": "...", "idea": "..."}
+When the user saves a gift idea for someone, extract person, idea, occasion, and target date if mentioned:
+DATA_ACTION: {"action": "gift_add", "person": "...", "idea": "...", "occasion": "birthday|christmas|anniversary|just because|other", "date": "YYYY-MM-DD or empty"}
 
 When the user asks to see gift ideas (optionally for a person):
 DATA_ACTION: {"action": "gift_list", "person": "..."}
@@ -336,6 +358,14 @@ async def handle_data_action(action_data):
         priority = action_data.get("priority", "normal").lower()
         if priority not in ("high", "normal", "low"):
             priority = "normal"
+        # Dedup check - warn if very similar item exists
+        existing = [t["text"].lower() for t in data.get("todos", []) if not t.get("done")]
+        item_lower = item.lower()
+        for ex in existing:
+            if item_lower in ex or ex in item_lower or (len(item_lower) > 5 and item_lower[:8] in ex):
+                # Store in a separate pending key for "add anyway" override
+                # Note: can't access context here so we just return the warning
+                return f"Similar todo already exists: \"{ex}\"\nSay \"add anyway\" if you still want to add \"{item}\""
         data["todos"].append({"text": item, "done": False, "added": now_str, "priority": priority})
         save_data(data)
         flag = " [HIGH PRIORITY]" if priority == "high" else (" [low priority]" if priority == "low" else "")
@@ -408,33 +438,80 @@ async def handle_data_action(action_data):
     # SHOPPING
     elif action == "shop_add":
         item = action_data.get("item", "").strip()
-        data["shopping"].append({"text": item, "done": False, "added": now_str})
+        lst = action_data.get("list", "grocery").lower()
+        if lst not in ("grocery", "household", "baby", "wishlist"):
+            lst = "grocery"
+        if "shopping_lists" not in data:
+            data["shopping_lists"] = {"grocery": [], "household": [], "baby": [], "wishlist": []}
+        data["shopping_lists"][lst].append({"text": item, "done": False, "added": now_str})
         save_data(data)
-        return f"Added to shopping list: {item}"
+        list_label = {"grocery": "Grocery", "household": "Household", "baby": "Luna (Baby)", "wishlist": "Wishlist"}[lst]
+        return f"Added to {list_label}: {item}"
 
     elif action == "shop_list":
-        items = data.get("shopping", [])
-        if not items:
-            return "Your shopping list is empty!"
-        lines = ["Shopping List:\n"]
-        for i, t in enumerate(items, 1):
-            check = "got it" if t["done"] else "o"
-            lines.append(f"{check} {i}. {t['text']}")
-        return "\n".join(lines)
+        lists = data.get("shopping_lists", {"grocery": [], "household": [], "baby": [], "wishlist": []})
+        list_icons = {"grocery": "\U0001f6d2 <b>Grocery</b>", "household": "\U0001f3e0 <b>Household</b>",
+                      "baby": "\U0001f476 <b>Luna (Baby)</b>", "wishlist": "\u2b50 <b>Wishlist</b>"}
+        sections = []
+        for lst_key in ("grocery", "household", "baby", "wishlist"):
+            items = [i for i in lists.get(lst_key, []) if not i.get("done")]
+            if items:
+                lines = [list_icons[lst_key]]
+                for i, t in enumerate(items, 1):
+                    lines.append(f"  {i}. {t['text']}")
+                sections.append("\n".join(lines))
+        if not sections:
+            return "All shopping lists are empty!"
+        return "\n\n".join(sections)
 
     elif action == "shop_done":
+        lst = action_data.get("list", "grocery").lower()
+        if lst not in ("grocery", "household", "baby", "wishlist"):
+            lst = "grocery"
         idx = action_data.get("index", 0) - 1
-        items = data.get("shopping", [])
+        lists = data.get("shopping_lists", {})
+        items = [i for i in lists.get(lst, []) if not i.get("done")]
         if 0 <= idx < len(items):
             items[idx]["done"] = True
             save_data(data)
             return f"Got it: {items[idx]['text']}"
         return "Couldn't find that item."
 
+    elif action == "shop_delete":
+        lst = action_data.get("list", "grocery").lower()
+        if lst not in ("grocery", "household", "baby", "wishlist"):
+            lst = "grocery"
+        idx = action_data.get("index", 0) - 1
+        lists = data.get("shopping_lists", {})
+        items = [i for i in lists.get(lst, []) if not i.get("done")]
+        if 0 <= idx < len(items):
+            removed = items[idx]["text"]
+            lists[lst] = [i for i in lists.get(lst, []) if i is not items[idx]]
+            save_data(data)
+            return f"Removed from list: {removed}"
+        return "Couldn't find that item."
+
     elif action == "shop_clear":
-        data["shopping"] = [t for t in data["shopping"] if not t["done"]]
+        lst = action_data.get("list", "all").lower()
+        if "shopping_lists" not in data:
+            data["shopping_lists"] = {"grocery": [], "household": [], "baby": [], "wishlist": []}
+        if lst == "all":
+            for k in data["shopping_lists"]:
+                data["shopping_lists"][k] = [i for i in data["shopping_lists"][k] if not i.get("done")]
+        elif lst in data["shopping_lists"]:
+            data["shopping_lists"][lst] = [i for i in data["shopping_lists"][lst] if not i.get("done")]
         save_data(data)
-        return "Cleared purchased items from shopping list."
+        return "Cleared purchased items."
+
+    elif action == "shop_delete":
+        active = [t for t in data.get("shopping", []) if not t.get("done")]
+        idx = action_data.get("index", 0) - 1
+        if 0 <= idx < len(active):
+            item_text = active[idx]["text"]
+            data["shopping"] = [t for t in data["shopping"] if t is not active[idx]]
+            save_data(data)
+            return f"Removed from shopping list: {item_text}"
+        return "Could not find that item."
 
     # NOTES
     elif action == "note_add":
@@ -447,9 +524,14 @@ async def handle_data_action(action_data):
         notes = data.get("notes", [])
         if not notes:
             return "No notes saved yet."
-        lines = ["Your Notes:\n"]
+        lines = ["<b>Your Notes</b>\n"]
         for i, n in enumerate(notes, 1):
-            lines.append(f"{i}. {n['text']}\n   ({n['added']})")
+            text = n["text"]
+            # Use first line as title if multiline, else first 50 chars
+            title = text.split("\n")[0][:60]
+            if len(title) < len(text):
+                title += "..."
+            lines.append(f"{i}. {title}\n   <i>{n['added']}</i>")
         return "\n".join(lines)
 
     elif action == "note_delete":
@@ -460,6 +542,17 @@ async def handle_data_action(action_data):
             save_data(data)
             return f"Deleted note: {removed['text']}"
         return "Couldn't find that note."
+
+    elif action == "note_search":
+        query = action_data.get("query", "").lower().strip()
+        notes = data.get("notes", [])
+        matches = [n for n in notes if query in n.get("text", "").lower()]
+        if not matches:
+            return f"No notes found matching: {query}"
+        lines = [f"<b>Notes matching '{query}'</b>\n"]
+        for i, n in enumerate(matches, 1):
+            lines.append(f"{i}. {n['text']}\n   ({n['added']})")
+        return "\n".join(lines)
 
     # REMINDERS
     elif action == "reminder_add":
@@ -488,6 +581,16 @@ async def handle_data_action(action_data):
                 friendly = r["time"]
             lines.append(f"{i}. {r['text']} - {friendly}")
         return "\n".join(lines)
+
+    elif action == "reminder_cancel":
+        reminders = [r for r in data.get("reminders", []) if not r.get("sent")]
+        idx = action_data.get("index", 0) - 1
+        if 0 <= idx < len(reminders):
+            item = reminders[idx]
+            item["sent"] = True
+            save_data(data)
+            return f"Cancelled reminder: {item['text']}"
+        return "Could not find that reminder."
 
     # EXPENSES
     elif action == "expense_add":
@@ -568,31 +671,54 @@ async def handle_data_action(action_data):
     elif action == "gift_add":
         person = action_data.get("person", "").strip().lower()
         idea = action_data.get("idea", "").strip()
+        occasion = action_data.get("occasion", "").strip()
+        date = action_data.get("date", "").strip()
         if person not in data["gifts"]:
             data["gifts"][person] = []
-        data["gifts"][person].append({"idea": idea, "added": now_str})
+        entry = {"idea": idea, "added": now_str}
+        if occasion:
+            entry["occasion"] = occasion
+        if date:
+            entry["date"] = date
+        data["gifts"][person].append(entry)
         save_data(data)
-        return f"Gift idea saved for {person.title()}: {idea}"
+        extra = f" for {occasion}" if occasion else ""
+        date_str = f" (by {date})" if date else ""
+        return f"Gift idea saved for {person.title()}{extra}{date_str}: {idea}"
 
     elif action == "gift_list":
         person = action_data.get("person", "").strip().lower()
         gifts = data.get("gifts", {})
+        occasion_icons = {"birthday": "\U0001f382", "christmas": "\U0001f384",
+                          "anniversary": "\U0001f496", "just because": "\U0001f381", "other": "\U0001f4dd"}
         if person and person in gifts:
             ideas = gifts[person]
             if not ideas:
                 return f"No gift ideas for {person.title()} yet."
-            lines = [f"Gift ideas for {person.title()}:\n"]
+            lines = [f"\U0001f381 <b>Gift Ideas for {person.title()}</b>\n"]
             for i, g in enumerate(ideas, 1):
-                lines.append(f"{i}. {g['idea']}")
+                icon = occasion_icons.get(g.get("occasion", ""), "\U0001f381")
+                date_label = f" - by {g['date']}" if g.get("date") else ""
+                occ_label = f" ({g['occasion']})" if g.get("occasion") else ""
+                lines.append(f"{icon} {i}. {g['idea']}{occ_label}{date_label}")
             return "\n".join(lines)
         elif not person:
             if not gifts:
                 return "No gift ideas saved yet."
-            lines = ["All Gift Ideas:\n"]
-            for p, ideas in gifts.items():
-                lines.append(f"\n{p.title()}:")
+            # Sort people by earliest upcoming gift date
+            import datetime as _dt
+            def _earliest(items):
+                dates = [i.get("date","") for i in items if i.get("date")]
+                return min(dates) if dates else "9999"
+            sorted_people = sorted(gifts.items(), key=lambda x: _earliest(x[1]))
+            lines = ["\U0001f381 <b>All Gift Ideas</b>\n"]
+            for p, ideas in sorted_people:
+                lines.append(f"\n<b>{p.title()}</b>")
                 for g in ideas:
-                    lines.append(f"  * {g['idea']}")
+                    icon = occasion_icons.get(g.get("occasion", ""), "\U0001f381")
+                    date_label = f" - by {g['date']}" if g.get("date") else ""
+                    occ_label = f" ({g['occasion']})" if g.get("occasion") else ""
+                    lines.append(f"  {icon} {g['idea']}{occ_label}{date_label}")
             return "\n".join(lines)
         return f"No gift ideas saved for {person.title()} yet."
 
@@ -803,7 +929,7 @@ def get_weather_slc():
             "&windspeed_unit=mph"
             "&precipitation_unit=inch"
             "&timezone=America%2FDenver"
-            "&forecast_days=1"
+            "&forecast_days=2"
         )
         resp = requests.get(url, timeout=10)
         data = resp.json()
@@ -920,11 +1046,19 @@ def get_briefing_todos(user_data):
     todos = [t for t in user_data.get("todos", []) if not t.get("done")]
     if not todos:
         return "✅ <b>To-Dos</b> - All clear!"
+    priority_order = {"high": 0, "normal": 1, "low": 2}
+    todos = sorted(todos, key=lambda t: priority_order.get(t.get("priority", "normal"), 1))
+    high = [t for t in todos if t.get("priority") == "high"]
+    rest = [t for t in todos if t.get("priority") != "high"]
     lines = ["✅ <b>To-Dos</b>"]
-    for item in todos[:10]:
+    for item in high:
+        lines.append(f"  🔴 {item['text']}")
+    shown = len(high)
+    for item in rest[:max(0, 8 - shown)]:
         lines.append(f"  * {item['text']}")
-    if len(todos) > 10:
-        lines.append(f"  ...and {len(todos) - 10} more")
+    remaining = len(todos) - min(len(todos), 8)
+    if remaining > 0:
+        lines.append(f"  ...and {remaining} more")
     return "\n".join(lines)
 
 
@@ -1113,7 +1247,14 @@ async def show_events(update, days, label):
     if not events:
         await update.message.reply_text(f"No events {label}.")
         return
-    lines = [f"Your events {label}:\n"]
+    # Count events per day to flag busy days
+    from collections import defaultdict as _dd
+    day_counts = _dd(int)
+    for e in events:
+        start = e["start"].get("dateTime", e["start"].get("date", ""))
+        day_key = start[:10]
+        day_counts[day_key] += 1
+    lines = [f"<b>Your events {label}</b>\n"]
     for e in events:
         start = e["start"].get("dateTime", e["start"].get("date", ""))
         if "T" in start:
@@ -1122,8 +1263,9 @@ async def show_events(update, days, label):
         else:
             dt = datetime.datetime.fromisoformat(start)
             time_str = dt.strftime("%a %b %-d (all day)")
-        lines.append(f"* {e.get('summary', 'No title')} - {time_str}")
-    await update.message.reply_text("\n".join(lines))
+        busy = " <b>[BUSY DAY]</b>" if day_counts[start[:10]] >= 3 else ""
+        lines.append(f"* {e.get('summary', 'No title')} - {time_str}{busy}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1151,13 +1293,13 @@ async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
     reply = await handle_data_action({"action": "shop_list"})
-    await update.message.reply_text(reply)
+    await update.message.reply_text(reply, parse_mode="HTML")
 
 async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
     reply = await handle_data_action({"action": "note_list"})
-    await update.message.reply_text(reply)
+    await update.message.reply_text(reply, parse_mode="HTML")
 
 async def cmd_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
@@ -1175,7 +1317,7 @@ async def cmd_gifts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
     reply = await handle_data_action({"action": "gift_list", "person": ""})
-    await update.message.reply_text(reply)
+    await update.message.reply_text(reply, parse_mode="HTML")
 
 async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
@@ -1198,7 +1340,9 @@ async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
+    global ask_history
     conversation_history.clear()
+    ask_history = []
     await update.message.reply_text("Memory cleared - starting fresh!")
 
 
@@ -1233,6 +1377,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Brain dump keyword trigger
     if any(phrase in text_lower for phrase in ["brain dump", "braindump", "quick capture", "dump everything"]):
         await brain_dump_command(update, context)
+        return
+
+    # Pending photo note confirmation
+    if context.user_data.get("pending_photo_note") and text_lower in ("yes", "yeah", "yep", "sure", "save it", "yes please", "do it", "save"):
+        note_text = context.user_data.pop("pending_photo_note", "")
+        # Extract text after NOTE_DETECTED:
+        import re as _re2
+        _note_match = _re2.search(r"NOTE_DETECTED:(.*?)(?:Would you|$)", note_text, _re2.DOTALL)
+        _extracted = _note_match.group(1).strip() if _note_match else note_text[:500]
+        reply = await handle_data_action({"action": "note_add", "text": f"[Photo note] {_extracted}"})
+        await update.message.reply_text(reply)
+        return
+
+    # Pending photo meal confirmation
+    if context.user_data.get("pending_photo_meal") and text_lower in ("yes", "yeah", "yep", "sure", "save it", "yes please", "do it", "save"):
+        meal_text = context.user_data.pop("pending_photo_meal", "")
+        import re as _re3
+        _meals = _re3.findall(r"MEAL_DETECTED:(.*?)(?:Would you|$)", meal_text, _re3.DOTALL)
+        _meal_raw = _meals[0] if _meals else ""
+        _meal_lines = [l.strip() for l in _meal_raw.split("\n") if l.strip() and not l.startswith("-")]
+        for _m in _meal_lines[:5]:
+            await handle_data_action({"action": "meal_add", "meal": _m})
+            saved.append(_m)
+        await update.message.reply_text(f"Saved {len(saved)} meals to your list!")
         return
 
     # Pending calendar event confirmation (from photo)
@@ -1276,6 +1444,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Had trouble adding that event. Try describing it manually.")
         return
 
+    # Expense quick-add: "$45 groceries" or "$45.50 gas"
+    _orig_msg = update.message.text or ''
+    _dollar_match = _re.match(r'^[$]([0-9]+(?:[.][0-9]{1,2})?) (.+)$', _orig_msg.strip())
+    if _dollar_match:
+        _amount = float(_dollar_match.group(1))
+        _category = _dollar_match.group(2).strip().title()
+        text_lower = _orig_msg.lower()  # update text_lower after override
+        reply = await handle_data_action({"action": "expense_add", "amount": _amount, "category": _category, "note": ""})
+        await update.message.reply_text(reply)
+        return
+
     # Direct todo delete detection - bypass GPT to avoid calendar misrouting
     import re as _re
     _stripped = text_lower.strip()
@@ -1314,6 +1493,78 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_data(_data)
             _names = ", ".join(t["text"] for t in _to_delete)
             await update.message.reply_text(f"Deleted: {_names}\n\nSay \"undo\" within this session to restore.")
+            return
+
+    # Shopping multi-mark-done bypass
+    _shop_got = _re.match(r'^(got|bought|picked up|checked off) (.+)$', _stripped)
+    if _shop_got:
+        _items_text = _shop_got.group(2)
+        _nums = [int(n) for n in _re.findall(r'\d+', _items_text)]
+        if _nums:
+            _data = load_data()
+            _shop = _data.get("shopping", [])
+            _active_shop = [t for t in _shop if not t.get("done")]
+            _got_names = []
+            for _n in _nums:
+                _i = _n - 1
+                if 0 <= _i < len(_active_shop):
+                    _active_shop[_i]["done"] = True
+                    _got_names.append(_active_shop[_i]["text"])
+            if _got_names:
+                save_data(_data)
+                context.user_data["last_shop_done"] = _nums
+                await update.message.reply_text("Got it: " + ", ".join(_got_names) + "\n\nSay \"undo shopping\" to unmark.")
+                return
+
+    # Shopping undo
+    if _stripped in ("undo shopping", "unmark shopping", "undo shop"):
+        _data = load_data()
+        _last = context.user_data.get("last_shop_done", [])
+        if not _last:
+            await update.message.reply_text("Nothing to undo for shopping.")
+            return
+        _shop = _data.get("shopping", [])
+        _active_shop = [t for t in _shop if not t.get("done")]
+        _done_shop = [t for t in _shop if t.get("done")]
+        _restored = []
+        for _n in _last:
+            _i = _n - 1
+            if 0 <= _i < len(_done_shop):
+                _done_shop[_i]["done"] = False
+                _restored.append(_done_shop[_i]["text"])
+        if _restored:
+            save_data(_data)
+            context.user_data["last_shop_done"] = []
+            await update.message.reply_text("Unmarked: " + ", ".join(_restored))
+        else:
+            await update.message.reply_text("Nothing to undo.")
+        return
+
+    # /done shortcut: "done 3" marks todo 3 as complete
+    import re as _re
+    _done_match = _re.match(r'^done [0-9]+$', text_lower.strip())
+    if _done_match:
+        _done_idx = int(text_lower.strip().split()[-1])
+        _data = load_data()
+        _active = [t for t in _data.get("todos", []) if not t.get("done")]
+        if 0 <= _done_idx - 1 < len(_active):
+            _active[_done_idx - 1]["done"] = True
+            save_data(_data)
+            await update.message.reply_text(f"Done: {_active[_done_idx - 1]['text']}")
+        else:
+            await update.message.reply_text("Could not find that todo.")
+        return
+
+    # "add anyway" override for dedup warning
+    if text_lower.strip() in ("add anyway", "add it anyway", "yes add it", "add it"):
+        if context.user_data.get("pending_todo_add"):
+            _pend = context.user_data.pop("pending_todo_add")
+            _data = load_data()
+            _data["todos"].append({"text": _pend["text"], "done": False,
+                                   "added": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                   "priority": _pend.get("priority", "normal")})
+            save_data(_data)
+            await update.message.reply_text(f"Added: {_pend['text']}")
             return
 
     # Direct priority todo detection - ensure priority is passed correctly
@@ -1559,6 +1810,32 @@ def format_sports_recap(date_label="yesterday", my_teams_only=False):
             sections.append("\n".join(league_lines))
     if not sections:
         return None
+    # Sleep summary
+    sleep_log = user_data.get("sleep_log", [])
+    week_sleep = [e for e in sleep_log if e.get("date", "") >= week_start_str]
+    if week_sleep:
+        hours_list = [e["hours"] for e in week_sleep if "hours" in e]
+        if hours_list:
+            avg_sleep = sum(hours_list) / len(hours_list)
+            low_nights = sum(1 for h in hours_list if h < 6)
+            sleep_line = f"Avg: {avg_sleep:.1f}h/night over {len(hours_list)} night(s)"
+            if low_nights:
+                sleep_line += f" ({low_nights} night(s) under 6h)"
+            sections.append(f"😴 <b>Sleep</b>\n{sleep_line}")
+
+    # Mood summary
+    mood_log = user_data.get("mood_log", [])
+    week_moods = [e for e in mood_log if e.get("date", "") >= week_start_str]
+    if week_moods:
+        mood_counts = {}
+        for e in week_moods:
+            m = e.get("mood", "okay")
+            mood_counts[m] = mood_counts.get(m, 0) + 1
+        top_mood = max(mood_counts, key=mood_counts.get)
+        emoji_map = {"great": "🌟", "good": "😊", "okay": "😐", "tired": "😴", "stressed": "😤", "anxious": "😰", "low": "😔"}
+        em = emoji_map.get(top_mood, "")
+        sections.append(f"🧠 <b>Mood</b>\nMost common: {top_mood} {em} ({mood_counts[top_mood]}x)")
+
     return "\n\n".join(sections)
 
 
@@ -1729,8 +2006,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption = update.message.caption or ""
         prompt = (
             "Look at this image carefully. Determine what it is and respond helpfully. "
-            "If it is a receipt or expense: extract the total amount, store name, and date if visible, "
-            "then say RECEIPT_DETECTED: {amount} at {store} on {date} and ask if they want to log it. "
+            "If it is a receipt or expense: extract the total amount, store name, date, and spending category if visible. "
+            "If the caption mentions a category (e.g. groceries, gas, coffee) use that as the category. "
+            "Then say RECEIPT_DETECTED: {amount} at {store} on {date} category:{category} and ask if they want to log it. "
+            "If it is a whiteboard, handwritten notes, sticky notes, or any written/typed text content: "
+            "transcribe all the text clearly, then say NOTE_DETECTED: and offer to save it as a note. "
+            "If it is a menu, recipe, or food item list: list what you see, then say MEAL_DETECTED: and offer to save meals to their list. "
             "If it is a calendar event or appointment screenshot: extract ALL details (title, date, start time, "
             "end time, location, description) and say CALENDAR_EVENT_DETECTED: then list the details clearly, "
             "then ask if they want to add it to their calendar. "
@@ -1759,6 +2040,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["pending_receipt"] = reply
         if "CALENDAR_EVENT_DETECTED:" in reply:
             context.user_data["pending_calendar_event"] = reply
+        if "NOTE_DETECTED:" in reply:
+            context.user_data["pending_photo_note"] = reply
+        if "MEAL_DETECTED:" in reply:
+            context.user_data["pending_photo_meal"] = reply
         await update.message.reply_text(reply, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Photo error: {e}")
@@ -1892,8 +2177,10 @@ async def rest_of_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def scores_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
-    await update.message.reply_text("Fetching yesterday's scores...")
-    recap = format_sports_recap("yesterday", my_teams_only=False)
+    args = context.args or []
+    my_teams = "myteams" in " ".join(args).lower() or "myteam" in " ".join(args).lower()
+    await update.message.reply_text("Fetching scores for your teams..." if my_teams else "Fetching yesterday's scores...")
+    recap = format_sports_recap("yesterday", my_teams_only=my_teams)
     if recap:
         await update.message.reply_text(recap)
     else:
@@ -2220,6 +2507,49 @@ async def build_weekly_summary(user_data, cal_service=None):
         sections.append(f"\n{narrative}")
     except Exception:
         pass
+
+    # Sleep this week
+    sleep_log = data.get("sleep_log", [])
+    week_sleep = [e for e in sleep_log if e.get("date", "") >= week_start_str]
+    if week_sleep:
+        hours_list = [e["hours"] for e in week_sleep if "hours" in e]
+        if hours_list:
+            avg_sleep = sum(hours_list) / len(hours_list)
+            low_nights = sum(1 for h in hours_list if h < 6)
+            sleep_line = f"Avg {avg_sleep:.1f}h/night over {len(hours_list)} nights logged"
+            if low_nights:
+                sleep_line += f" ({low_nights} night(s) under 6h)"
+            sections.append(f"\U0001f4a4 <b>Sleep</b>\n{sleep_line}")
+
+    # Mood this week
+    mood_log = data.get("mood_log", [])
+    week_moods = [e for e in mood_log if e.get("date", "") >= week_start_str]
+    if week_moods:
+        mood_counts = {}
+        for e in week_moods:
+            m = e.get("mood", "okay")
+            mood_counts[m] = mood_counts.get(m, 0) + 1
+        mood_emoji = {"great": "\U0001f31f", "good": "\U0001f60a", "okay": "\U0001f610",
+                      "tired": "\U0001f634", "stressed": "\U0001f624", "anxious": "\U0001f630", "low": "\U0001f614"}
+        top_mood = max(mood_counts, key=mood_counts.get)
+        em = mood_emoji.get(top_mood, "")
+        mood_summary = ", ".join(f"{m} x{c}" for m, c in sorted(mood_counts.items(), key=lambda x: -x[1]))
+        sections.append(f"{em} <b>Mood</b>\n{mood_summary}")
+
+    # Todos status
+    todos = data.get("todos", [])
+    active_todos = [t for t in todos if not t.get("done")]
+    high_todos = [t for t in active_todos if t.get("priority") == "high"]
+    if active_todos:
+        todo_line = f"{len(active_todos)} active"
+        if high_todos:
+            todo_line += f", {len(high_todos)} high priority"
+        sections.append(f"\u2705 <b>To-Dos</b>\n{todo_line} items outstanding")
+
+    # Upcoming reminders
+    reminders = [r for r in data.get("reminders", []) if not r.get("sent")]
+    if reminders:
+        sections.append(f"\u23f0 <b>Reminders</b>\n{len(reminders)} upcoming")
 
     return "\n\n".join(sections)
 
@@ -2693,10 +3023,18 @@ def sync_tasks_to_todos(user_data):
 async def cmd_synctasks(update, context):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
+    service = get_calendar_service()
+    if not service:
+        await update.message.reply_text("Google Tasks is not connected. Use /auth to connect Google first.")
+        return
     await update.message.reply_text("Syncing with Google Tasks...")
-    user_data = load_data()
-    pulled = sync_tasks_to_todos(user_data)
-    pushed = sync_todos_to_tasks(user_data)
+    try:
+        user_data = load_data()
+        pulled = sync_tasks_to_todos(user_data)
+        pushed = sync_todos_to_tasks(user_data)
+    except Exception as e:
+        await update.message.reply_text(f"Sync failed: {str(e)[:120]}\nTry /auth to reconnect Google.")
+        return
     parts = []
     if pulled:
         parts.append(f"{pulled} task(s) pulled from Google Tasks")
