@@ -39,10 +39,26 @@ CONVO_FILE = os.path.join(PERSIST_DIR, "conversation.json")
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+        # Migrate old flat shopping list -> shopping_lists structure
+        if "shopping_lists" not in data:
+            old_shopping = data.get("shopping", [])
+            data["shopping_lists"] = {
+                "grocery": old_shopping if old_shopping else [],
+                "household": [],
+                "baby": [],
+                "wishlist": []
+            }
+            data.pop("shopping", None)
+            with open(DATA_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+        # Ensure all list keys exist
+        for k in ("grocery", "household", "baby", "wishlist"):
+            data["shopping_lists"].setdefault(k, [])
+        return data
     return {
         "todos": [],
-        "shopping": [],
+        "shopping_lists": {"grocery": [], "household": [], "baby": [], "wishlist": []},
         "notes": [],
         "reminders": [],
         "expenses": [],
@@ -437,6 +453,11 @@ async def handle_data_action(action_data):
 
     # SHOPPING
     elif action == "shop_add":
+        # Migrate old shopping list if needed
+        if "shopping_lists" not in data:
+            data["shopping_lists"] = {"grocery": [], "household": [], "baby": [], "wishlist": []}
+            for old_item in data.get("shopping", []):
+                data["shopping_lists"]["grocery"].append(old_item)
         item = action_data.get("item", "").strip()
         lst = action_data.get("list", "grocery").lower()
         if lst not in ("grocery", "household", "baby", "wishlist"):
@@ -449,6 +470,12 @@ async def handle_data_action(action_data):
         return f"Added to {list_label}: {item}"
 
     elif action == "shop_list":
+        # Migrate old shopping list if needed
+        if "shopping_lists" not in data:
+            data["shopping_lists"] = {"grocery": [], "household": [], "baby": [], "wishlist": []}
+            for old_item in data.get("shopping", []):
+                data["shopping_lists"]["grocery"].append(old_item)
+            save_data(data)
         lists = data.get("shopping_lists", {"grocery": [], "household": [], "baby": [], "wishlist": []})
         list_icons = {"grocery": "\U0001f6d2 <b>Grocery</b>", "household": "\U0001f3e0 <b>Household</b>",
                       "baby": "\U0001f476 <b>Luna (Baby)</b>", "wishlist": "\u2b50 <b>Wishlist</b>"}
@@ -1229,6 +1256,11 @@ async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
+    try:
+        weather = get_weather_slc()
+        await update.message.reply_text(weather, parse_mode="HTML")
+    except Exception:
+        pass
     await show_events(update, days=1, label="today")
 
 
@@ -1357,9 +1389,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id != ALLOWED_USER_ID:
         return
 
-    user_message = update.message.text
-    if not user_message:
+    user_message = update.message.text or ""
+    if not user_message.strip():
         return
+    _orig_msg = user_message  # preserve original case for $ detection
 
     if not check_rate_limit(user_id):
         await update.message.reply_text("Slow down a bit - try again in a minute.")
@@ -1454,10 +1487,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _dollar_match:
         _amount = float(_dollar_match.group(1))
         _category = _dollar_match.group(2).strip().title()
-        text_lower = _orig_msg.lower()  # update text_lower after override
         reply = await handle_data_action({"action": "expense_add", "amount": _amount, "category": _category, "note": ""})
         await update.message.reply_text(reply)
         return
+
+    # Direct gift idea bypass: "gift idea for [person]: [idea]"
+    import re as _re_g
+    _gift_match = _re_g.match(r'^gift idea for ([^:]+): (.+)$', user_message.strip(), _re_g.IGNORECASE)
+    if _gift_match:
+        _gp = _gift_match.group(1).strip()
+        _gi = _gift_match.group(2).strip()
+        # Check for occasion keywords
+        _occ = ""
+        for _kw, _ov in [("birthday","birthday"),("christmas","christmas"),("anniversary","anniversary"),("just because","just because")]:
+            if _kw in user_message.lower():
+                _occ = _ov
+                break
+        reply = await handle_data_action({"action": "gift_add", "person": _gp, "idea": _gi, "occasion": _occ, "date": ""})
+        await update.message.reply_text(reply)
+        return
+
+    # Direct shopping list bypass: "add X to grocery/baby/household/wishlist"
+    _shop_patterns = [
+        (_re_g.match(r'^add (.+) to (?:my )?grocery(?: list)?$', text_lower.strip()), "grocery"),
+        (_re_g.match(r'^add (.+) to (?:my )?(?:baby|luna)(?: list)?$', text_lower.strip()), "baby"),
+        (_re_g.match(r'^add (.+) to (?:my )?household(?: list)?$', text_lower.strip()), "household"),
+        (_re_g.match(r'^add (.+) to (?:my )?wishlist$', text_lower.strip()), "wishlist"),
+        (_re_g.match(r'^add (.+) to (?:my )?shopping list$', text_lower.strip()), "grocery"),
+    ]
+    for _sm, _sl in _shop_patterns:
+        if _sm:
+            _si = _sm.group(1).strip()
+            reply = await handle_data_action({"action": "shop_add", "item": _si, "list": _sl})
+            await update.message.reply_text(reply)
+            return
 
     # Direct todo delete detection - bypass GPT to avoid calendar misrouting
     import re as _re
