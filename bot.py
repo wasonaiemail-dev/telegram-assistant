@@ -1090,14 +1090,19 @@ def get_briefing_todos(user_data):
 
 
 def get_briefing_shopping(user_data):
-    shopping = [s for s in user_data.get("shopping", []) if not s.get("done")]
-    if not shopping:
+    lists = user_data.get("shopping_lists", {})
+    # Fallback: check old shopping key too
+    old = [s for s in user_data.get("shopping", []) if not s.get("done")]
+    all_items = old[:]
+    for lst_key in ("grocery", "household", "baby", "wishlist"):
+        all_items += [i for i in lists.get(lst_key, []) if not i.get("done")]
+    if not all_items:
         return None
-    lines = ["🛒 <b>Shopping List</b>"]
-    for item in shopping[:8]:
+    lines = ["🛒 <b>Shopping</b>"]
+    for item in all_items[:8]:
         lines.append(f"  * {item['text']}")
-    if len(shopping) > 8:
-        lines.append(f"  ...and {len(shopping) - 8} more")
+    if len(all_items) > 8:
+        lines.append(f"  ...and {len(all_items) - 8} more")
     return "\n".join(lines)
 
 
@@ -2265,59 +2270,80 @@ async def build_briefing_sections(user_data, cal_service=None):
     sections = []
 
     # Message 1: Header + Weather
-    header = f"🌅 <b>Good morning, Ty!</b>\n{date_str}"
-    weather = get_weather_slc()
-    sections.append(header + "\n\n" + weather)
+    try:
+        header = f"🌅 <b>Good morning, Ty!</b>\n{date_str}"
+        weather = get_weather_slc()
+        sections.append(header + "\n\n" + weather)
+    except Exception as e:
+        sections.append(f"🌅 <b>Good morning, Ty!</b>\n{date_str}\n\nWeather unavailable")
 
     # Message 2: Calendar
-    if cal_service:
-        cal = get_todays_calendar_events_briefing(cal_service)
-    else:
-        cal = "📅 Calendar - Not connected (use /auth to connect)"
-    sections.append(cal)
+    try:
+        if cal_service:
+            cal = get_todays_calendar_events_briefing(cal_service)
+        else:
+            cal = "📅 Calendar - Not connected (use /auth to connect)"
+        sections.append(cal)
+    except Exception:
+        sections.append("📅 Calendar unavailable")
 
     # Message 3: To-dos + Shopping + Reminders (grouped)
-    daily_tasks = []
-    daily_tasks.append(get_briefing_todos(user_data))
-    shopping = get_briefing_shopping(user_data)
-    if shopping:
-        daily_tasks.append(shopping)
-    reminders = get_briefing_reminders(user_data)
-    if reminders:
-        daily_tasks.append(reminders)
-    sections.append("\n\n".join(daily_tasks))
+    try:
+        daily_tasks = []
+        daily_tasks.append(get_briefing_todos(user_data))
+        shopping = get_briefing_shopping(user_data)
+        if shopping:
+            daily_tasks.append(shopping)
+        reminders = get_briefing_reminders(user_data)
+        if reminders:
+            daily_tasks.append(reminders)
+        sections.append("\n\n".join(daily_tasks))
+    except Exception as e:
+        sections.append(f"Tasks unavailable: {str(e)[:60]}")
 
     # Message 4: Habits streak (if any tracked)
-    habits_msg = get_briefing_habits(user_data)
-    if habits_msg:
-        sections.append(habits_msg)
+    try:
+        habits_msg = get_briefing_habits(user_data)
+        if habits_msg:
+            sections.append(habits_msg)
+    except Exception:
+        pass
 
     # Message 5: Workouts + Expenses
-    stats = []
-    workouts = get_briefing_workouts(user_data)
-    if workouts:
-        stats.append(workouts)
-    expenses = get_briefing_expenses(user_data)
-    if expenses:
-        stats.append(expenses)
-    if stats:
-        sections.append("\n\n".join(stats))
+    try:
+        stats = []
+        workouts = get_briefing_workouts(user_data)
+        if workouts:
+            stats.append(workouts)
+        expenses = get_briefing_expenses(user_data)
+        if expenses:
+            stats.append(expenses)
+        if stats:
+            sections.append("\n\n".join(stats))
+    except Exception:
+        pass
 
     # Message 6: Sports recap (my teams only)
-    recap = format_sports_recap("yesterday", my_teams_only=True)
-    if recap:
-        sections.append("🏆 <b>Yesterday in Sports</b>\n" + recap)
+    try:
+        recap = format_sports_recap("yesterday", my_teams_only=True)
+        if recap:
+            sections.append("🏆 <b>Yesterday in Sports</b>\n" + recap)
+    except Exception:
+        pass
 
     # Message 7: Quote + Word of the day
-    inspiration = []
-    quote = get_stoic_quote()
-    if quote:
-        inspiration.append("💭 <b>Stoic Quote</b>\n" + quote)
-    word = get_word_of_the_day()
-    if word:
-        inspiration.append("📖 <b>Word of the Day</b>\n" + word)
-    if inspiration:
-        sections.append("\n\n".join(inspiration))
+    try:
+        inspiration = []
+        quote = get_stoic_quote()
+        if quote:
+            inspiration.append("💭 <b>Stoic Quote</b>\n" + quote)
+        word = get_word_of_the_day()
+        if word:
+            inspiration.append("📖 <b>Word of the Day</b>\n" + word)
+        if inspiration:
+            sections.append("\n\n".join(inspiration))
+    except Exception:
+        pass
 
     return sections
 
