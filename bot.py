@@ -1439,6 +1439,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _meals = _re3.findall(r"MEAL_DETECTED:(.*?)(?:Would you|$)", meal_text, _re3.DOTALL)
         _meal_raw = _meals[0] if _meals else ""
         _meal_lines = [l.strip() for l in _meal_raw.split("\n") if l.strip() and not l.startswith("-")]
+        saved = []
         for _m in _meal_lines[:5]:
             await handle_data_action({"action": "meal_add", "meal": _m})
             saved.append(_m)
@@ -1512,17 +1513,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(reply)
         return
 
-    # Direct shopping list bypass: "add X to grocery/baby/household/wishlist"
-    _shop_patterns = [
+    # Direct shopping list bypass
+    _baby_keywords = ["diaper", "wipe", "formula", "baby", "luna", "onesie", "pacifier", "bottle", "bib"]
+    _household_keywords = ["soap", "detergent", "cleaner", "toilet paper", "paper towel", "trash bag",
+                           "sponge", "bleach", "laundry", "dish soap", "cleaning", "batteries", "light bulb", "candle"]
+    _wishlist_keywords = ["airpod", "iphone", "ipad", "laptop", "tv", "headphone", "watch", "console",
+                          "game", "gadget", "camera", "speaker", "keyboard"]
+    _explicit_patterns = [
         (_re_g.match(r'^add (.+) to (?:my )?grocery(?: list)?$', text_lower.strip()), "grocery"),
         (_re_g.match(r'^add (.+) to (?:my )?(?:baby|luna)(?: list)?$', text_lower.strip()), "baby"),
         (_re_g.match(r'^add (.+) to (?:my )?household(?: list)?$', text_lower.strip()), "household"),
         (_re_g.match(r'^add (.+) to (?:my )?wishlist$', text_lower.strip()), "wishlist"),
         (_re_g.match(r'^add (.+) to (?:my )?shopping list$', text_lower.strip()), "grocery"),
+        (_re_g.match(r'^(?:pick up|get|buy) (.+)$', text_lower.strip()), None),
+        (_re_g.match(r'^add (.+)$', text_lower.strip()), None),
     ]
-    for _sm, _sl in _shop_patterns:
+    for _sm, _sl in _explicit_patterns:
         if _sm:
             _si = _sm.group(1).strip()
+            # Remove trailing "to my list" etc
+            _si = _re_g.sub(r' (?:to my list|to the list|for me)$', '', _si).strip()
+            if not _si or len(_si) < 2:
+                continue
+            # Auto-assign list if not explicit
+            if _sl is None:
+                _si_lower = _si.lower()
+                if any(k in _si_lower for k in _baby_keywords):
+                    _sl = "baby"
+                elif any(k in _si_lower for k in _household_keywords):
+                    _sl = "household"
+                elif any(k in _si_lower for k in _wishlist_keywords):
+                    _sl = "wishlist"
+                else:
+                    _sl = "grocery"
             reply = await handle_data_action({"action": "shop_add", "item": _si, "list": _sl})
             await update.message.reply_text(reply)
             return
