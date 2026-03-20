@@ -1412,6 +1412,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Briefing keyword trigger
     text_lower = user_message.lower()
+    import re as _re  # used by multiple bypass patterns below
     if any(phrase in text_lower for phrase in ["morning briefing", "daily briefing", "give me my briefing", "my briefing"]):
         await briefing_command(update, context)
         return
