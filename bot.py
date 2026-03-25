@@ -943,72 +943,92 @@ def check_rate_limit(user_id):
 # Phase 5 - Daily Briefing helpers
 
 def get_weather_slc():
+    """Fetch weather with retry logic and wttr.in fallback."""
     cached = cache_get("weather_slc", max_age_seconds=300)
     if cached:
         return cached
+
+    wmo_codes = {
+        0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+        45: "Foggy", 48: "Icy fog",
+        51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+        61: "Light rain", 63: "Rain", 65: "Heavy rain",
+        71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
+        80: "Rain showers", 81: "Showers", 82: "Heavy showers",
+        85: "Snow showers", 86: "Heavy snow showers",
+        95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm",
+    }
+
+    # Try Open-Meteo with 2 retries
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        "?latitude=40.7608&longitude=-111.8910"
+        "&current=temperature_2m,apparent_temperature,precipitation,weathercode,windspeed_10m"
+        "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode"
+        "&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch"
+        "&timezone=America%2FDenver&forecast_days=2"
+    )
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, timeout=10)
+            data = resp.json()
+            cur = data["current"]
+            daily = data["daily"]
+            code = cur.get("weathercode", 0)
+            description = wmo_codes.get(code, "Unknown")
+            temp_now = round(cur["temperature_2m"])
+            feels_like = round(cur["apparent_temperature"])
+            wind = round(cur["windspeed_10m"])
+            high = round(daily["temperature_2m_max"][0])
+            low = round(daily["temperature_2m_min"][0])
+            precip = round(daily["precipitation_sum"][0], 2)
+            tom_code = daily["weathercode"][1] if len(daily["weathercode"]) > 1 else 0
+            tom_desc = wmo_codes.get(tom_code, "Unknown")
+            tom_high = round(daily["temperature_2m_max"][1]) if len(daily["temperature_2m_max"]) > 1 else "?"
+            tom_low = round(daily["temperature_2m_min"][1]) if len(daily["temperature_2m_min"]) > 1 else "?"
+            tom_precip = round(daily["precipitation_sum"][1], 2) if len(daily["precipitation_sum"]) > 1 else 0
+            lines = [
+                "\u2600\ufe0f <b>Weather - Salt Lake City</b>",
+                f"Now: {temp_now}F (feels {feels_like}F) - {description}",
+                f"Today: High {high}F / Low {low}F | Wind {wind} mph",
+            ]
+            if precip > 0:
+                lines.append(f"Precip today: {precip} in")
+            lines.append(f"Tomorrow: {tom_desc} | High {tom_high}F / Low {tom_low}F")
+            if tom_precip > 0:
+                lines.append(f"Precip tomorrow: {tom_precip} in")
+            result = "\n".join(lines)
+            cache_set("weather_slc", result)
+            return result
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                import time as _time
+                _time.sleep(3)
+
+    # Fallback: wttr.in
     try:
-        url = (
-            "https://api.open-meteo.com/v1/forecast"
-            "?latitude=40.7608&longitude=-111.8910"
-            "&current=temperature_2m,apparent_temperature,precipitation,weathercode,windspeed_10m"
-            "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode"
-            "&temperature_unit=fahrenheit"
-            "&windspeed_unit=mph"
-            "&precipitation_unit=inch"
-            "&timezone=America%2FDenver"
-            "&forecast_days=2"
-        )
-        resp = requests.get(url, timeout=10)
-        data = resp.json()
-        cur = data["current"]
-        daily = data["daily"]
-        wmo_codes = {
-            0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
-            45: "Foggy", 48: "Icy fog",
-            51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
-            61: "Light rain", 63: "Rain", 65: "Heavy rain",
-            71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
-            80: "Rain showers", 81: "Showers", 82: "Heavy showers",
-            85: "Snow showers", 86: "Heavy snow showers",
-            95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm",
-        }
-        code = cur.get("weathercode", 0)
-        description = wmo_codes.get(code, "Unknown")
-        temp_now = round(cur["temperature_2m"])
-        feels_like = round(cur["apparent_temperature"])
-        wind = round(cur["windspeed_10m"])
-        high = round(daily["temperature_2m_max"][0])
-        low = round(daily["temperature_2m_min"][0])
-        precip = round(daily["precipitation_sum"][0], 2)
-        # Pick emoji based on weather code
-        if code == 0:
-            w_emoji = "☀️"
-        elif code in (1, 2):
-            w_emoji = "🌤"
-        elif code == 3:
-            w_emoji = "☁️"
-        elif code in (45, 48):
-            w_emoji = "🌫"
-        elif code in (51, 53, 55, 61, 63, 65, 80, 81, 82):
-            w_emoji = "🌧"
-        elif code in (71, 73, 75, 77, 85, 86):
-            w_emoji = "❄️"
-        elif code in (95, 96, 99):
-            w_emoji = "⛈"
-        else:
-            w_emoji = "🌤"
-        lines = [
-            f"{w_emoji} <b>Weather - Salt Lake City</b>",
-            f"Now: {temp_now}F (feels {feels_like}F) - {description}",
-            f"High: {high}F  |  Low: {low}F  |  Wind: {wind} mph",
+        wttr_url = "https://wttr.in/Salt+Lake+City?format=j1"
+        resp2 = requests.get(wttr_url, timeout=10)
+        w = resp2.json()
+        cur2 = w["current_condition"][0]
+        temp_f = cur2["temp_F"]
+        feels_f = cur2["FeelsLikeF"]
+        desc2 = cur2["weatherDesc"][0]["value"]
+        today2 = w["weather"][0]
+        high2 = today2["maxtempF"]
+        low2 = today2["mintempF"]
+        lines2 = [
+            "\u2600\ufe0f <b>Weather - Salt Lake City</b> (backup)",
+            f"Now: {temp_f}F (feels {feels_f}F) - {desc2}",
+            f"Today: High {high2}F / Low {low2}F",
         ]
-        if precip > 0:
-            lines.append(f"Precip: {precip} in")
-        result = "\n".join(lines)
-        cache_set("weather_slc", result)
-        return result
-    except Exception as e:
-        return f"Weather unavailable ({str(e)[:50]})"
+        result2 = "\n".join(lines2)
+        cache_set("weather_slc", result2)
+        return result2
+    except Exception as e2:
+        return f"Weather unavailable ({str(last_err)[:50]})"
 
 
 def get_todays_calendar_events_briefing(service):
@@ -1060,8 +1080,11 @@ def get_todays_calendar_events_briefing(service):
                 time_str = "All day"
             title = event.get("summary", "Untitled")
             cal_name = event.get("_calendar_name", "")
+            # Skip events where title looks like an email address
+            if "@" in title and "." in title and " " not in title.strip():
+                continue
             label = f"  * {time_str} - {title}"
-            if cal_name and cal_name.lower() not in ("ty wass", "primary"):
+            if cal_name and cal_name.lower() not in ("ty wass", "primary", "wasonaiemail@gmail.com"):
                 label += f" ({cal_name})"
             lines.append(label)
         return "\n".join(lines)
@@ -1305,7 +1328,11 @@ async def show_events(update, days, label):
         busy_tag = ""
         if day_cal_counts[(start[:10], cal_name)] >= 3:
             busy_tag = f" <b>[Busy day - {cal_name}]</b>"
-        lines.append(f"* {e.get('summary', 'No title')} - {time_str}{busy_tag}")
+        _evt_title = e.get('summary', 'No title')
+        # Skip events that look like email addresses
+        if "@" in _evt_title and "." in _evt_title and " " not in _evt_title.strip():
+            continue
+        lines.append(f"* {_evt_title} - {time_str}{busy_tag}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
@@ -1520,9 +1547,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                            "sponge", "bleach", "laundry", "dish soap", "cleaning", "batteries", "light bulb", "candle"]
     _wishlist_keywords = ["airpod", "iphone", "ipad", "laptop", "tv", "headphone", "watch", "console",
                           "game", "gadget", "camera", "speaker", "keyboard"]
-    _explicit_patterns = [
+    # Skip shopping bypass if message is clearly a todo add
+    _is_todo_add = any(phrase in text_lower for phrase in [
+        "to todo", "to my todo", "to the todo", "to my task", "to my list of todo",
+        "as a todo", "as a task", "to my tasks"
+    ])
+    _explicit_patterns = [] if _is_todo_add else [
         (_re_g.match(r'^add (.+) to (?:my )?grocery(?: list)?$', text_lower.strip()), "grocery"),
-        (_re_g.match(r'^add (.+) to (?:my )?(?:baby|luna)(?: list)?$', text_lower.strip()), "baby"),
+        (_re_g.match(r'^add (.+?) (?:for (?:luna|baby|the baby) )?to (?:my )?(?:baby|luna)(?: list)?$', text_lower.strip()), "baby"),
         (_re_g.match(r'^add (.+) to (?:my )?household(?: list)?$', text_lower.strip()), "household"),
         (_re_g.match(r'^add (.+) to (?:my )?wishlist$', text_lower.strip()), "wishlist"),
         (_re_g.match(r'^add (.+) to (?:my )?shopping list$', text_lower.strip()), "grocery"),
@@ -1534,6 +1566,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _si = _sm.group(1).strip()
             # Remove trailing "to my list" etc
             _si = _re_g.sub(r' (?:to my list|to the list|for me)$', '', _si).strip()
+            _si = _re_g.sub(r' for (?:luna|baby|the baby)$', '', _si, flags=_re_g.IGNORECASE).strip()
             if not _si or len(_si) < 2:
                 continue
             # Auto-assign list if not explicit
@@ -1938,484 +1971,297 @@ def format_sports_recap(date_label="yesterday", my_teams_only=False):
 # Phase 6 - Quote and word of the day via GPT
 
 def get_stoic_quote():
+    """Fetch a random stoic quote from free API, fall back to GPT if unavailable."""
     try:
-        resp = client.chat.completions.create(
+        resp = requests.get("https://stoic-quotes.azurewebsites.net/api/random", timeout=8)
+        data = resp.json()
+        quote = data.get("body", "").strip()
+        author = data.get("author", "").strip()
+        if quote and author:
+            return f'"{quote}"\n- {author}'
+    except Exception:
+        pass
+    # GPT fallback
+    try:
+        import random as _rq
+        _seed = datetime.datetime.now().strftime("%Y-%m-%d") + str(_rq.randint(100, 999))
+        resp2 = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": (
-                "Give me one authentic stoic quote from Marcus Aurelius, Seneca, or Epictetus. "
-                "Return ONLY this format, nothing else:\n"
-                "Quote text here\n- Author Name"
+                f"Seed:{_seed}. Give me one authentic stoic quote - NOT from Marcus Aurelius Meditations Book 1. "
+                "Choose from Seneca Letters, Epictetus Enchiridion, or lesser-known Marcus passages. "
+                "Return ONLY this format:\nQuote text here\n- Author Name"
             )}],
             max_tokens=120,
             temperature=0.9
         )
-        return resp.choices[0].message.content.strip()
+        return resp2.choices[0].message.content.strip()
     except Exception:
         return None
 
 
-def get_word_of_the_day():
-    try:
-        import random as _random
-        _seed_date = datetime.datetime.now().strftime("%Y-%m-%d")
-        _rand_n = _random.randint(1000, 9999)
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": (
-                f"Today is {_seed_date} (seed:{_rand_n}). Give me a DIFFERENT interesting English word of the day - "
-                "NOT serendipity, NOT ubiquitous, NOT ephemeral. Pick something fresh and unexpected. "
-                "Pick a real word that is genuinely useful in everyday conversation - "
-                "not too obscure, not too common. Something someone could actually use this week. "
-                "Return ONLY this exact format with no extra text:\n"
-                "WORD: the word\n"
-                "PART: noun/verb/adjective/etc\n"
-                "MEANING: one clear sentence definition\n"
-                "EXAMPLE: one natural example sentence using the word"
-            )}],
-            max_tokens=120,
-            temperature=0.9
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception:
-        return None
-
-
-# Phase 6 - Voice message handler
-
-async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    voice_file = await update.message.voice.get_file()
-    ogg_path = f"/tmp/voice_{update.message.message_id}.ogg"
-    try:
-        await voice_file.download_to_drive(ogg_path)
-        with open(ogg_path, "rb") as audio:
-            transcription = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio,
-                response_format="text"
-            )
-        text = transcription.strip()
-        if not text:
-            await update.message.reply_text("Could not make out what you said. Try again?")
-            return
-        await update.message.reply_text(f"You said: {text}\n\nProcessing...")
-        # Process transcribed text directly through GPT
-        user_id = update.effective_user.id
-        if user_id not in conversation_history:
-            saved = load_conversation()
-            conversation_history[user_id] = saved.get(str(user_id), [])
-        # Check habit keywords first
-        text_lower = text.lower()
-        habit_response = check_habit_from_message(text_lower, load_data())
-        if habit_response:
-            await update.message.reply_text(habit_response)
-            return
-        conversation_history[user_id].append({"role": "user", "content": text[:2000]})
-        if len(conversation_history[user_id]) > 20:
-            conversation_history[user_id] = conversation_history[user_id][-20:]
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        now = datetime.datetime.now().strftime("%A, %B %-d, %Y, %-I:%M %p")
-        contacts = load_contacts()
-        contact_ctx = ""
-        if contacts:
-            contact_ctx = "\n\nKnown contacts:\n"
-            for name, facts in list(contacts.items())[:10]:
-                facts_list = facts if isinstance(facts, list) else [facts]
-                contact_ctx += f"- {name}: {'; '.join(facts_list[:3])}\n"
-        system = SYSTEM_PROMPT + CONTACT_SYSTEM_ADDON + f"\n\nCurrent date/time: {now} (Mountain Time)" + contact_ctx
-        messages = [{"role": "system", "content": system}] + conversation_history[user_id]
-        response = client.chat.completions.create(
-            model="gpt-4o-mini", messages=messages, max_tokens=900, temperature=0.7
-        )
-        assistant_message = response.choices[0].message.content
-        reply_lines = []
-        for line in assistant_message.split("\n"):
-            if line.startswith("CALENDAR_ACTION:"):
-                try:
-                    action_data = json.loads(line.replace("CALENDAR_ACTION:", "").strip())
-                    cal_reply = await handle_calendar_action(action_data, update)
-                    if cal_reply:
-                        reply_lines.append(cal_reply)
-                except Exception as e:
-                    logger.error(f"Voice cal action error: {e}")
-            elif line.startswith("DATA_ACTION:"):
-                try:
-                    action_data = json.loads(line.replace("DATA_ACTION:", "").strip())
-                    data_reply = await handle_data_action(action_data)
-                    if data_reply:
-                        reply_lines.append(data_reply)
-                        if action_data.get("action") in ("todo_list", "sleep_list", "mood_list", "habit_list"):
-                            context.user_data["_last_html_reply"] = True
-                except Exception as e:
-                    logger.error(f"Voice data action error: {e}")
-            elif line.startswith("CONTACT_ACTION:"):
-                try:
-                    contact_data = json.loads(line.replace("CONTACT_ACTION:", "").strip())
-                    contacts = load_contacts()
-                    name = contact_data.get("name", "").title()
-                    fact = contact_data.get("fact", "").strip()
-                    if name and fact:
-                        if name not in contacts:
-                            contacts[name] = []
-                        if isinstance(contacts[name], str):
-                            contacts[name] = [contacts[name]]
-                        contacts[name].append(fact)
-                        save_contacts(contacts)
-                        reply_lines.append(f"Got it! Saved note about {name}: {fact}")
-                except Exception as e:
-                    logger.error(f"Voice contact action error: {e}")
-            else:
-                if line.strip():
-                    reply_lines.append(line)
-        final_reply = "\n".join(reply_lines).strip() or "Done!"
-        conversation_history[user_id].append({"role": "assistant", "content": final_reply})
-        all_history = load_conversation()
-        all_history[str(user_id)] = conversation_history[user_id]
-        save_conversation(all_history)
-        await send_long_message(update.message, final_reply)
-    except Exception as e:
-        logger.error(f"Voice error: {e}")
-        await update.message.reply_text("Had trouble processing that voice message. Please try again.")
-    finally:
-        try:
-            os.remove(ogg_path)
-        except Exception:
-            pass
-
-
-# Phase 6 - Photo/screenshot handler
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    photo = update.message.photo[-1]
-    photo_file = await photo.get_file()
-    img_path = f"/tmp/photo_{update.message.message_id}.jpg"
-    try:
-        await photo_file.download_to_drive(img_path)
-        with open(img_path, "rb") as f:
-            import base64
-            img_data = base64.b64encode(f.read()).decode("utf-8")
-        caption = update.message.caption or ""
-        prompt = (
-            "Look at this image carefully. Determine what it is and respond helpfully. "
-            "If it is a receipt or expense: extract the total amount, store name, date, and spending category if visible. "
-            "If the caption mentions a category (e.g. groceries, gas, coffee) use that as the category. "
-            "Then say RECEIPT_DETECTED: {amount} at {store} on {date} category:{category} and ask if they want to log it. "
-            "If it is a whiteboard, handwritten notes, sticky notes, or any written/typed text content: "
-            "transcribe all the text clearly, then say NOTE_DETECTED: and offer to save it as a note. "
-            "If it is a menu, recipe, or food item list: list what you see, then say MEAL_DETECTED: and offer to save meals to their list. "
-            "If it is a calendar event or appointment screenshot: extract ALL details (title, date, start time, "
-            "end time, location, description) and say CALENDAR_EVENT_DETECTED: then list the details clearly, "
-            "then ask if they want to add it to their calendar. "
-            "If it is a message, text, email, or DM someone sent them: offer 3 reply options "
-            "(Option 1, Option 2, Option 3 with tone labels). "
-            "If it is anything else: describe what you see and answer any question in the caption. "
-            f"Caption from user: {caption if caption else 'None'}"
-        )
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {
-                        "url": f"data:image/jpeg;base64,{img_data}"
-                    }}
-                ]
-            }],
-            max_tokens=600
-        )
-        reply = response.choices[0].message.content.strip()
-        import re as _re
-        reply = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', reply)
-        if "RECEIPT_DETECTED:" in reply:
-            context.user_data["pending_receipt"] = reply
-        if "CALENDAR_EVENT_DETECTED:" in reply:
-            context.user_data["pending_calendar_event"] = reply
-        if "NOTE_DETECTED:" in reply:
-            context.user_data["pending_photo_note"] = reply
-        if "MEAL_DETECTED:" in reply:
-            context.user_data["pending_photo_meal"] = reply
-        await update.message.reply_text(reply, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Photo error: {e}")
-        await update.message.reply_text("Had trouble reading that image. Please try again.")
-    finally:
-        try:
-            os.remove(img_path)
-        except Exception:
-            pass
-
-
-# Phase 6 - Calendar range commands
-
-async def weekend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    tz = pytz.timezone("America/Denver")
-    now = datetime.datetime.now(tz)
-    days_until_sat = (5 - now.weekday()) % 7
-    if days_until_sat == 0 and now.weekday() == 5:
-        days_until_sat = 0
-    sat = now + datetime.timedelta(days=days_until_sat)
-    sun = sat + datetime.timedelta(days=1)
-    service = get_calendar_service()
-    if not service:
-        await update.message.reply_text("Calendar not connected yet. Use /auth to connect.")
-        return
-    sat_start = sat.replace(hour=0, minute=0, second=0, microsecond=0)
-    sun_end = sun.replace(hour=23, minute=59, second=59, microsecond=0)
-    all_events = []
-    try:
-        calendars = service.calendarList().list().execute().get("items", [])
-        for cal in calendars:
-            try:
-                result = service.events().list(
-                    calendarId=cal["id"],
-                    timeMin=sat_start.isoformat(),
-                    timeMax=sun_end.isoformat(),
-                    singleEvents=True,
-                    orderBy="startTime"
-                ).execute()
-                for event in result.get("items", []):
-                    event["_calendar_name"] = cal.get("summary", "")
-                    all_events.append(event)
-            except Exception:
-                pass
-    except Exception:
-        await update.message.reply_text("Could not fetch calendar events.")
-        return
-    all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
-    if not all_events:
-        await update.message.reply_text("Nothing on the calendar this weekend.")
-        return
-    lines = ["Your weekend:\n"]
-    for e in all_events:
-        start = e["start"].get("dateTime", e["start"].get("date", ""))
-        if "T" in start:
-            dt = datetime.datetime.fromisoformat(start)
-            if dt.tzinfo is None:
-                dt = tz.localize(dt)
-            else:
-                dt = dt.astimezone(tz)
-            time_str = dt.strftime("%a %-I:%M %p")
-        else:
-            dt = datetime.datetime.fromisoformat(start)
-            time_str = dt.strftime("%a (all day)")
-        title = e.get("summary", "Untitled")
-        cal_name = e.get("_calendar_name", "")
-        line = f"* {time_str} - {title}"
-        if cal_name and cal_name.lower() not in ("ty wass", "primary"):
-            line += f" ({cal_name})"
-        lines.append(line)
-    await update.message.reply_text("\n".join(lines))
-
-
-async def rest_of_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    tz = pytz.timezone("America/Denver")
-    now = datetime.datetime.now(tz)
-    end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
-    service = get_calendar_service()
-    if not service:
-        await update.message.reply_text("Calendar not connected yet. Use /auth to connect.")
-        return
-    all_events = []
-    try:
-        calendars = service.calendarList().list().execute().get("items", [])
-        for cal in calendars:
-            try:
-                result = service.events().list(
-                    calendarId=cal["id"],
-                    timeMin=now.isoformat(),
-                    timeMax=end_of_day.isoformat(),
-                    singleEvents=True,
-                    orderBy="startTime"
-                ).execute()
-                for event in result.get("items", []):
-                    event["_calendar_name"] = cal.get("summary", "")
-                    all_events.append(event)
-            except Exception:
-                pass
-    except Exception:
-        await update.message.reply_text("Could not fetch calendar events.")
-        return
-    all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
-    if not all_events:
-        await update.message.reply_text("Nothing left on the calendar today.")
-        return
-    lines = ["Rest of today:\n"]
-    for e in all_events:
-        start = e["start"].get("dateTime", e["start"].get("date", ""))
-        if "T" in start:
-            dt = datetime.datetime.fromisoformat(start)
-            if dt.tzinfo is None:
-                dt = tz.localize(dt)
-            else:
-                dt = dt.astimezone(tz)
-            time_str = dt.strftime("%-I:%M %p")
-        else:
-            time_str = "All day"
-        title = e.get("summary", "Untitled")
-        cal_name = e.get("_calendar_name", "")
-        line = f"* {time_str} - {title}"
-        if cal_name and cal_name.lower() not in ("ty wass", "primary"):
-            line += f" ({cal_name})"
-        lines.append(line)
-    await update.message.reply_text("\n".join(lines))
-
-
-async def scores_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    args = context.args or []
-    my_teams = "myteams" in " ".join(args).lower() or "myteam" in " ".join(args).lower()
-    await update.message.reply_text("Fetching scores for your teams..." if my_teams else "Fetching yesterday's scores...")
-    recap = format_sports_recap("yesterday", my_teams_only=my_teams)
-    if recap:
-        await update.message.reply_text(recap)
-    else:
-        await update.message.reply_text("No games played yesterday.")
-
-
-# Update build_briefing_message to include Phase 6 content
-
-async def build_briefing_sections(user_data, cal_service=None):
-    """Returns a list of message strings, each sent as a separate Telegram message."""
-    tz = pytz.timezone("America/Denver")
-    now = datetime.datetime.now(tz)
-    date_str = now.strftime("%A, %B %-d")
-
-    sections = []
-
-    # Message 1: Header + Weather
-    try:
-        header = f"🌅 <b>Good morning, Ty!</b>\n{date_str}"
-        weather = get_weather_slc()
-        sections.append(header + "\n\n" + weather)
-    except Exception as e:
-        sections.append(f"🌅 <b>Good morning, Ty!</b>\n{date_str}\n\nWeather unavailable")
-
-    # Message 2: Calendar
-    try:
-        if cal_service:
-            cal = get_todays_calendar_events_briefing(cal_service)
-        else:
-            cal = "📅 Calendar - Not connected (use /auth to connect)"
-        sections.append(cal)
-    except Exception:
-        sections.append("📅 Calendar unavailable")
-
-    # Message 3: To-dos + Shopping + Reminders (grouped)
-    try:
-        daily_tasks = []
-        daily_tasks.append(get_briefing_todos(user_data))
-        shopping = get_briefing_shopping(user_data)
-        if shopping:
-            daily_tasks.append(shopping)
-        reminders = get_briefing_reminders(user_data)
-        if reminders:
-            daily_tasks.append(reminders)
-        sections.append("\n\n".join(daily_tasks))
-    except Exception as e:
-        sections.append(f"Tasks unavailable: {str(e)[:60]}")
-
-    # Message 4: Habits streak (if any tracked)
-    try:
-        habits_msg = get_briefing_habits(user_data)
-        if habits_msg:
-            sections.append(habits_msg)
-    except Exception:
-        pass
-
-    # Message 5: Workouts + Expenses
-    try:
-        stats = []
-        workouts = get_briefing_workouts(user_data)
-        if workouts:
-            stats.append(workouts)
-        expenses = get_briefing_expenses(user_data)
-        if expenses:
-            stats.append(expenses)
-        if stats:
-            sections.append("\n\n".join(stats))
-    except Exception:
-        pass
-
-    # Message 6: Sports recap (my teams only)
-    try:
-        recap = format_sports_recap("yesterday", my_teams_only=True)
-        if recap:
-            sections.append("🏆 <b>Yesterday in Sports</b>\n" + recap)
-    except Exception:
-        pass
-
-    # Message 7: Quote + Word of the day
-    try:
-        inspiration = []
-        quote = get_stoic_quote()
-        if quote:
-            inspiration.append("💭 <b>Stoic Quote</b>\n" + quote)
-        word = get_word_of_the_day()
-        if word:
-            inspiration.append("📖 <b>Word of the Day</b>\n" + word)
-        if inspiration:
-            sections.append("\n\n".join(inspiration))
-    except Exception:
-        pass
-
-    return sections
-
-
-async def build_briefing_message(user_data, cal_service=None):
-    """Legacy single-message version kept for compatibility."""
-    sections = await build_briefing_sections(user_data, cal_service)
-    return "\n\n".join(sections)
-
-
-
-# Phase 7 - Habit Tracker
-
-HABITS = [
-    "workout",
-    "water",
-    "meditation",
-    "morning_routine",
-    "journaling",
-    "vitamins",
-    "stretching",
-    "outdoor_time",
-    "gratitude",
+DAILY_WORDS = [
+    ("aberrant","adjective","departing from normal or expected","His aberrant behavior alarmed his colleagues."),
+    ("abscond","verb","to leave hurriedly to avoid consequences","The thief absconded with the jewels before dawn."),
+    ("acumen","noun","keen insight or shrewdness","Her business acumen helped the company thrive."),
+    ("adroit","adjective","clever and skillful","He was adroit at navigating difficult conversations."),
+    ("aesthetic","noun","appreciation of beauty","The gallery had a minimalist aesthetic."),
+    ("affable","adjective","friendly and easy to talk to","The affable host made everyone feel welcome."),
+    ("alacrity","noun","brisk and cheerful readiness","She accepted the challenge with alacrity."),
+    ("amalgam","noun","a mixture or blend","The song was an amalgam of jazz and classical."),
+    ("ambivalent","adjective","having mixed feelings","He felt ambivalent about the job offer."),
+    ("ameliorate","verb","to make something bad better","Rest will ameliorate your symptoms."),
+    ("anachronism","noun","something out of its time period","A typewriter in a modern office is an anachronism."),
+    ("anomaly","noun","something that deviates from the norm","The warm February was a weather anomaly."),
+    ("antipathy","noun","strong dislike","She felt a deep antipathy toward dishonesty."),
+    ("apathy","noun","lack of interest or enthusiasm","Voter apathy lowered turnout at the election."),
+    ("apprise","verb","to inform or notify","Please apprise me of any changes to the plan."),
+    ("arcane","adjective","understood by few, mysterious","The manual was full of arcane technical jargon."),
+    ("ardent","adjective","enthusiastic and passionate","She was an ardent supporter of the cause."),
+    ("arduous","adjective","involving great effort","The mountain hike was arduous but rewarding."),
+    ("articulate","adjective","able to express clearly","She was articulate and persuasive in her speech."),
+    ("ascertain","verb","to find out for certain","He called to ascertain the meeting time."),
+    ("assiduous","adjective","showing great care and effort","Her assiduous study habits paid off at exam time."),
+    ("astute","adjective","having sharp judgment","The astute investor spotted the trend early."),
+    ("attrition","noun","gradual reduction by wearing down","Staff attrition left the team understaffed."),
+    ("audacious","adjective","showing bold confidence","It was an audacious move that paid off."),
+    ("augment","verb","to make larger or stronger","Exercise can augment your mental clarity."),
+    ("auspicious","adjective","showing signs of future success","It was an auspicious start to the new year."),
+    ("authentic","adjective","genuine, not a copy","The restaurant served authentic Thai cuisine."),
+    ("avarice","noun","extreme greed for wealth","His avarice led to corrupt decisions."),
+    ("avid","adjective","having a keen interest in something","She was an avid reader of historical fiction."),
+    ("banal","adjective","so common as to be boring","The speech was filled with banal platitudes."),
+    ("beguile","verb","to charm or enchant","The storyteller beguiled the audience for hours."),
+    ("belabor","verb","to argue about in excessive detail","There is no need to belabor the point."),
+    ("benevolent","adjective","well-meaning and kindly","The benevolent donor funded the new library."),
+    ("boon","noun","a welcome benefit","The rain was a boon for the drought-stricken farm."),
+    ("brevity","noun","concise and exact use of words","Brevity is the soul of wit."),
+    ("buoyant","adjective","cheerful and optimistic","She remained buoyant despite setbacks."),
+    ("byzantine","adjective","excessively complicated","The tax code is notoriously byzantine."),
+    ("cacophony","noun","a harsh mixture of sounds","The construction site was a cacophony."),
+    ("candid","adjective","truthful and straightforward","She gave a candid assessment of the situation."),
+    ("catalyst","noun","something that causes change","The protest was a catalyst for new legislation."),
+    ("caustic","adjective","sharply critical or sarcastic","His caustic wit could sting if you were the target."),
+    ("circumspect","adjective","wary and cautious","Be circumspect when sharing personal information."),
+    ("clandestine","adjective","kept secret or done covertly","They held clandestine meetings after hours."),
+    ("cogent","adjective","clear and persuasive","She made a cogent argument for the proposal."),
+    ("complacent","adjective","self-satisfied and unaware of danger","Success made him complacent about competition."),
+    ("conundrum","noun","a difficult problem or question","Balancing work and family is a constant conundrum."),
+    ("copious","adjective","abundant in supply","She took copious notes during the lecture."),
+    ("corroborate","verb","to confirm or give support to","Witnesses corroborated the account."),
+    ("credulous","adjective","too ready to believe things","The credulous buyer paid far too much."),
+    ("culpable","adjective","responsible for a fault","He was found culpable for the data breach."),
+    ("cursory","adjective","hasty and therefore not thorough","A cursory glance revealed several errors."),
+    ("cynical","adjective","distrustful of human sincerity","Years of disappointment made her cynical."),
+    ("dauntless","adjective","fearless","The dauntless explorer pressed into unknown territory."),
+    ("deft","adjective","neatly skillful and quick","She was deft at handling awkward conversations."),
+    ("deliberate","adjective","done consciously and intentionally","His choice of words was deliberate."),
+    ("deluge","noun","a severe flood or overwhelming amount","The launch was followed by a deluge of orders."),
+    ("demagogue","noun","a leader who appeals to emotions over reason","The demagogue exploited public fears."),
+    ("demerit","noun","a fault or disadvantage","One demerit of the plan was its high cost."),
+    ("deplore","verb","to feel strong disapproval of","She deplored the lack of transparency."),
+    ("deride","verb","to express contempt for","Critics derided the film as shallow."),
+    ("dexterous","adjective","showing skill with hands or mind","The dexterous surgeon worked with great precision."),
+    ("dichotomy","noun","a division into two contrasting things","There is a dichotomy between theory and practice."),
+    ("diffident","adjective","modest or shy due to lack of confidence","He was diffident about sharing his ideas."),
+    ("diligent","adjective","having steady effort","Her diligent work ethic set her apart."),
+    ("discerning","adjective","having good judgment","A discerning reader catches subtle details."),
+    ("disparate","adjective","fundamentally different","The report combined disparate data sources."),
+    ("dissonance","noun","lack of agreement or harmony","There was cognitive dissonance in his reasoning."),
+    ("divisive","adjective","causing disagreement between groups","The policy was divisive among voters."),
+    ("dogmatic","adjective","inclined to lay down principles as absolute truth","His dogmatic stance left no room for debate."),
+    ("durable","adjective","able to withstand wear over time","Choose durable materials for outdoor furniture."),
+    ("ebullient","adjective","cheerful and full of energy","Her ebullient personality lit up the room."),
+    ("eclectic","adjective","deriving from a broad range of sources","Her music taste was wonderfully eclectic."),
+    ("edify","verb","to instruct or improve morally","Great literature has the power to edify readers."),
+    ("efficacious","adjective","successful in producing a desired result","The treatment proved efficacious in trials."),
+    ("effusive","adjective","expressing feelings in an unrestrained way","The effusive praise made him blush."),
+    ("egregious","adjective","outstandingly bad","It was an egregious violation of the rules."),
+    ("elicit","verb","to draw out a response","The comedian elicited laughter from the crowd."),
+    ("eloquent","adjective","fluent and persuasive in speaking","She gave an eloquent defense of the policy."),
+    ("emulate","verb","to match or surpass by imitation","He tried to emulate his mentor's success."),
+    ("endemic","adjective","regularly found among a particular group","Corruption was endemic in the institution."),
+    ("enigmatic","adjective","difficult to interpret","The Mona Lisa's smile is famously enigmatic."),
+    ("equanimity","noun","calmness and composure","She faced adversity with remarkable equanimity."),
+    ("equivocal","adjective","open to more than one interpretation","His equivocal answer left everyone uncertain."),
+    ("erudite","adjective","having great knowledge","The erudite professor wrote dozens of books."),
+    ("esoteric","adjective","intended for a small specialized audience","The lecture was far too esoteric for beginners."),
+    ("exacerbate","verb","to make worse","Poor sleep can exacerbate stress."),
+    ("exemplary","adjective","serving as a desirable model","Her exemplary conduct earned high praise."),
+    ("exhaustive","adjective","examining every detail","The audit was exhaustive and thorough."),
+    ("expedient","adjective","useful for achieving a particular end","It was expedient to delay the announcement."),
+    ("explicit","adjective","stated clearly and in detail","The contract included explicit payment terms."),
+    ("exuberant","adjective","filled with lively energy","The crowd gave an exuberant cheer."),
+    ("facetious","adjective","treating serious issues with inappropriate humor","His facetious remark fell flat at the meeting."),
+    ("fallacious","adjective","based on a mistaken belief","The argument was logically fallacious."),
+    ("fastidious","adjective","very attentive to accuracy and detail","She was fastidious about keeping records."),
+    ("fervent","adjective","having passionate intensity","He was a fervent advocate for education."),
+    ("fidelity","noun","faithfulness to a person or cause","The soldiers showed unwavering fidelity."),
+    ("flagrant","adjective","conspicuously wrong","It was a flagrant breach of trust."),
+    ("flippant","adjective","not showing appropriate seriousness","His flippant response angered the committee."),
+    ("fortuitous","adjective","happening by lucky chance","Their meeting was entirely fortuitous."),
+    ("frugal","adjective","economical in use of resources","Living frugally allowed them to retire early."),
+    ("garrulous","adjective","excessively talkative","The garrulous neighbor talked for an hour."),
+    ("germane","adjective","relevant and appropriate","Your point is highly germane to the discussion."),
+    ("grandiose","adjective","impressively large and ambitious","The grandiose project was scaled back quickly."),
+    ("gratuitous","adjective","uncalled for and lacking justification","The film had gratuitous violence."),
+    ("gregarious","adjective","fond of company and sociable","He was gregarious and made friends easily."),
+    ("guile","noun","cunning intelligence","She used guile to navigate office politics."),
+    ("hackneyed","adjective","overused and lacking originality","The speech was full of hackneyed phrases."),
+    ("harangue","verb","to lecture at length","The coach harangued the team after the loss."),
+    ("hegemony","noun","leadership or dominance of one group over others","The company sought hegemony in the market."),
+    ("hyperbole","noun","exaggerated statements not meant to be taken literally","Saying I have a million things to do is hyperbole."),
+    ("iconoclast","noun","a person who challenges cherished beliefs","The startup founder was an iconoclast."),
+    ("idiosyncratic","adjective","peculiar to the individual","Her idiosyncratic style made her recognizable."),
+    ("ignoble","adjective","not honorable or worthy","It was an ignoble end to a great career."),
+    ("immutable","adjective","unchanging over time","Some scientific laws appear immutable."),
+    ("impartial","adjective","treating all rivals equally","A mediator must be impartial."),
+    ("impeccable","adjective","in accordance with the highest standards","He had impeccable taste in design."),
+    ("imperious","adjective","assuming power without justification","Her imperious tone put people off."),
+    ("impetuous","adjective","acting without thought or care","An impetuous decision cost him the deal."),
+    ("incisive","adjective","intelligently analytical","Her incisive critique improved the proposal."),
+    ("incoherent","adjective","expressed in a confused way","The argument was rambling and incoherent."),
+    ("incongruent","adjective","not consistent with the surroundings","The modern building felt incongruent in the old town."),
+    ("indefatigable","adjective","persisting tirelessly","She was an indefatigable campaigner."),
+    ("indolent","adjective","wanting to avoid activity or exertion","The indolent student barely passed."),
+    ("ineffable","adjective","too great to be expressed in words","The beauty of the sunrise was ineffable."),
+    ("inexorable","adjective","impossible to stop or prevent","The inexorable march of technology continues."),
+    ("ingenious","adjective","clever and inventive","The ingenious solution saved hours of work."),
+    ("innate","adjective","existing from birth","She had an innate sense of rhythm."),
+    ("inscrutable","adjective","impossible to understand","His expression was completely inscrutable."),
+    ("insidious","adjective","proceeding in a subtle but harmful way","The insidious effects of stress build slowly."),
+    ("integrity","noun","the quality of being honest and having strong principles","His integrity was never in question."),
+    ("intrepid","adjective","fearless and adventurous","The intrepid journalist reported from the front line."),
+    ("intuitive","adjective","based on what one feels to be true","She had an intuitive grasp of the problem."),
+    ("irascible","adjective","having or showing a tendency to be easily angered","The irascible boss made the office tense."),
+    ("juxtaposition","noun","placing things side by side to highlight contrast","The juxtaposition of old and new was striking."),
+    ("laconic","adjective","using very few words","His laconic reply was just: done."),
+    ("languid","adjective","weak from illness or fatigue","She felt languid after a week of poor sleep."),
+    ("lassitude","noun","physical or mental weariness","A feeling of lassitude set in by Friday afternoon."),
+    ("laudable","adjective","deserving praise","It was a laudable effort under difficult conditions."),
+    ("lethargic","adjective","affected by lethargy, sluggish","Cold weather made him feel lethargic."),
+    ("levity","noun","humor in a serious situation","A touch of levity broke the tension."),
+    ("loquacious","adjective","tending to talk a great deal","The loquacious guest dominated the dinner conversation."),
+    ("lucid","adjective","expressed clearly","She gave a lucid explanation of the process."),
+    ("magnanimous","adjective","generous in forgiving","He was magnanimous in victory."),
+    ("malleable","adjective","easily influenced or shaped","Young minds are remarkably malleable."),
+    ("manifest","verb","to display or show clearly","His anxiety manifested as restlessness."),
+    ("maverick","noun","an independent-minded person","She was a maverick who challenged every convention."),
+    ("mendacious","adjective","not telling the truth","The mendacious report misled investors."),
+    ("mercurial","adjective","subject to sudden changes of mood","His mercurial temperament made him unpredictable."),
+    ("meticulous","adjective","showing great attention to detail","The meticulous accountant never made errors."),
+    ("mitigate","verb","to lessen the severity of something","Sunscreen mitigates the risk of sunburn."),
+    ("modicum","noun","a small quantity of something","He showed a modicum of humility."),
+    ("mollify","verb","to appease the anger of","A sincere apology mollified the upset customer."),
+    ("mundane","adjective","lacking interest or excitement","Even mundane tasks deserve full attention."),
+    ("nebulous","adjective","unclear or vague","The plan was still nebulous at this stage."),
+    ("nefarious","adjective","wicked or criminal","The nefarious scheme was uncovered by auditors."),
+    ("nuanced","adjective","acknowledging subtle distinctions","A nuanced perspective considers all angles."),
+    ("obdurate","adjective","stubbornly refusing to change","He remained obdurate despite the evidence."),
+    ("obfuscate","verb","to make unclear or confusing","Dense jargon can obfuscate the real message."),
+    ("obstinate","adjective","stubbornly refusing to change","He was obstinate in his refusal to apologize."),
+    ("obtuse","adjective","slow to understand","He was being deliberately obtuse about the rules."),
+    ("omniscient","adjective","knowing everything","The narrator of the novel was omniscient."),
+    ("opaque","adjective","not transparent, difficult to understand","The policy document was unnecessarily opaque."),
+    ("ostensible","adjective","appearing to be true but not necessarily so","The ostensible reason was budget cuts."),
+    ("ostentatious","adjective","designed to impress","His ostentatious display of wealth alienated colleagues."),
+    ("palpable","adjective","able to be touched or felt","The tension in the room was palpable."),
+    ("paradigm","noun","a typical example or pattern","The invention shifted the paradigm."),
+    ("paradox","noun","a situation that seems contradictory but is true","It is a paradox that standing still takes effort."),
+    ("parsimonious","adjective","unwilling to spend money","The parsimonious owner kept costs very low."),
+    ("pedantic","adjective","overly concerned with minor details","His pedantic corrections annoyed the team."),
+    ("penchant","noun","a strong liking for something","She had a penchant for bold color combinations."),
+    ("pensive","adjective","engaged in deep thought","He stared out the window in a pensive mood."),
+    ("perennial","adjective","lasting or occurring repeatedly","Traffic is a perennial problem in the city."),
+    ("perfidious","adjective","deceitful and untrustworthy","The perfidious ally switched sides."),
+    ("perfunctory","adjective","carried out with little effort","The review was perfunctory at best."),
+    ("perseverance","noun","continued effort in spite of difficulty","Perseverance is the key to mastery."),
+    ("perspicacious","adjective","having ready insight","A perspicacious analyst spotted the trend."),
+    ("pertinacious","adjective","holding firmly to an opinion","His pertinacious insistence finally paid off."),
+    ("plausible","adjective","seeming reasonable or probable","The explanation was plausible but unproven."),
+    ("poignant","adjective","evoking a keen sense of sadness","The film had a deeply poignant ending."),
+    ("pragmatic","adjective","dealing with things sensibly and practically","Take a pragmatic approach to problem solving."),
+    ("precipitate","verb","to cause something to happen suddenly","The news precipitated a sharp market drop."),
+    ("prestige","noun","widespread respect from achievement","The award brought prestige to the program."),
+    ("prevaricate","verb","to speak in an evasive way","He prevaricated when asked about the deadline."),
+    ("prolific","adjective","producing many results","She was a prolific writer with thirty novels."),
+    ("propitious","adjective","giving or indicating a good chance of success","It was a propitious moment to launch."),
+    ("prosaic","adjective","dull and lacking imagination","The meeting was prosaic and uneventful."),
+    ("prudent","adjective","acting with careful thought","It is prudent to save before spending."),
+    ("pugnacious","adjective","eager or quick to argue","His pugnacious style won him enemies."),
+    ("punctilious","adjective","showing great attention to correct behavior","She was punctilious about meeting deadlines."),
+    ("querulous","adjective","complaining in a petulant way","The querulous passenger complained about everything."),
+    ("quixotic","adjective","exceedingly idealistic and impractical","The quixotic scheme was doomed from the start."),
+    ("recalcitrant","adjective","having an obstinate uncooperative attitude","The recalcitrant employee refused all training."),
+    ("reclusive","adjective","avoiding the company of others","The reclusive author rarely gave interviews."),
+    ("redolent","adjective","strongly reminiscent of something","The melody was redolent of her childhood."),
+    ("remonstrate","verb","to make a forceful protest","She remonstrated with the manager about the error."),
+    ("repudiate","verb","to refuse to accept or be associated with","He repudiated the false claims immediately."),
+    ("resilient","adjective","able to recover quickly from difficulty","She was resilient in the face of adversity."),
+    ("resolute","adjective","admirably purposeful and determined","She remained resolute under pressure."),
+    ("reticent","adjective","not revealing one's thoughts readily","He was reticent about his personal life."),
+    ("sagacious","adjective","having good judgment","The sagacious advisor guided the team wisely."),
+    ("salient","adjective","most noticeable or important","The salient point was buried in footnotes."),
+    ("sanguine","adjective","optimistic especially in difficult situations","She was sanguine about the outcome."),
+    ("sardonic","adjective","grimly mocking","His sardonic humor put people on edge."),
+    ("scrupulous","adjective","diligent and careful","She was scrupulous about citing her sources."),
+    ("sedulous","adjective","showing dedication and diligence","He was sedulous in his preparation."),
+    ("serendipity","noun","fortunate happenstance","Finding that cafe was pure serendipity."),
+    ("shrewd","adjective","having sharp judgment in practical matters","A shrewd negotiator always reads the room."),
+    ("solicitous","adjective","showing interest and concern","The doctor was solicitous about her recovery."),
+    ("solvent","adjective","having assets in excess of liabilities","The company remained solvent through the downturn."),
+    ("specious","adjective","superficially plausible but wrong","The argument was specious on closer inspection."),
+    ("stoic","adjective","enduring pain without complaint","He faced the diagnosis with stoic calm."),
+    ("strident","adjective","loud and harsh in tone","Her strident criticism overshadowed valid points."),
+    ("stringent","adjective","strict and precise","The new regulations are stringent but necessary."),
+    ("succinct","adjective","briefly and clearly expressed","Keep your summary succinct and to the point."),
+    ("superfluous","adjective","unnecessary, especially through being more than enough","Remove all superfluous words from your writing."),
+    ("surreptitious","adjective","kept secret because it would not be approved","He took a surreptitious glance at his phone."),
+    ("sycophant","noun","a person who flatters to gain favor","The boss was surrounded by sycophants."),
+    ("tacit","adjective","understood without being stated","There was a tacit agreement to drop the subject."),
+    ("tangential","adjective","only slightly related to the matter","The comment was tangential to the main discussion."),
+    ("tenacious","adjective","not giving up easily","Her tenacious spirit saw the project to completion."),
+    ("terse","adjective","sparing in use of words","His terse reply ended the conversation."),
+    ("timorous","adjective","showing or suffering from nervousness","The timorous speaker barely raised her voice."),
+    ("torpid","adjective","mentally or physically inactive","The heat made everyone torpid by afternoon."),
+    ("tractable","adjective","easy to control or manage","The tractable team accepted feedback well."),
+    ("transient","adjective","lasting only a short time","Fame is transient but character endures."),
+    ("trenchant","adjective","vigorous and to the point","The trenchant review praised nothing."),
+    ("trepidation","noun","a feeling of fear about something that might happen","She approached the meeting with trepidation."),
+    ("truculent","adjective","eager to argue or fight","His truculent attitude made collaboration difficult."),
+    ("ubiquitous","adjective","present everywhere at the same time","Smartphones have become ubiquitous."),
+    ("umbrage","noun","offense or annoyance","He took umbrage at the offhand remark."),
+    ("unequivocal","adjective","leaving no doubt","Her unequivocal answer left no room for confusion."),
+    ("unfettered","adjective","not confined or restricted","She had unfettered access to all records."),
+    ("unilateral","adjective","performed by or affecting only one side","The decision was made unilaterally."),
+    ("vacuous","adjective","having or showing a lack of thought","The celebrity interview was completely vacuous."),
+    ("veracious","adjective","speaking or representing the truth","She had a reputation for being veracious."),
+    ("verbose","adjective","using more words than necessary","His verbose report could be cut in half."),
+    ("viable","adjective","capable of working successfully","Is this a viable long-term solution?"),
+    ("vicarious","adjective","experienced through another person","She lived vicariously through travel documentaries."),
+    ("vindictive","adjective","having a strong desire for revenge","His vindictive response shocked the team."),
+    ("visceral","adjective","relating to deep feelings rather than intellect","The film provoked a visceral reaction."),
+    ("vociferous","adjective","expressing feelings in a loud way","The vociferous crowd demanded action."),
+    ("volatile","adjective","liable to change rapidly and unpredictably","The volatile market unnerved investors."),
+    ("wary","adjective","feeling cautious about possible dangers","Be wary of offers that seem too good to be true."),
+    ("zealous","adjective","having great energy for a cause","She was zealous in her pursuit of fairness."),
+    ("zeitgeist","noun","the defining spirit of a particular period","The film perfectly captures the zeitgeist of the era."),
 ]
 
-HABIT_LABELS = {
-    "workout": "Daily workout",
-    "water": "Water intake",
-    "meditation": "Meditation",
-    "morning_routine": "Morning routine",
-    "journaling": "Journaling",
-    "vitamins": "Vitamins",
-    "stretching": "Stretching",
-    "outdoor_time": "Outdoor time",
-    "gratitude": "Gratitude practice",
-}
-
-HABIT_KEYWORDS = {
-    "workout": ["workout", "worked out", "exercise", "exercised", "hit the gym", "gym done"],
-    "water": ["drank water", "water intake", "hydrated", "finished my water"],
-    "meditation": ["meditated", "meditation done", "mindfulness", "did meditation"],
-    "morning_routine": ["morning routine", "morning done", "got my morning in"],
-    "journaling": ["journaled", "journaling done", "wrote in journal", "did my journal"],
-    "vitamins": ["took vitamins", "took my vitamins", "vitamins done", "took my supplements", "supplements done", "vitamins taken", "had my vitamins"],
-    "stretching": ["stretched", "stretching done", "did my stretches", "mobility done"],
-    "outdoor_time": ["went outside", "outdoor time", "fresh air", "took a walk outside"],
-    "gratitude": ["gratitude done", "did gratitude", "grateful today", "wrote gratitude"],
-}
+def get_word_of_the_day():
+    """Pick word by day-of-year from hardcoded list - never repeats within a year."""
+    try:
+        day_of_year = datetime.datetime.now().timetuple().tm_yday
+        word_data = DAILY_WORDS[(day_of_year - 1) % len(DAILY_WORDS)]
+        word, part, meaning, example = word_data
+        return (
+            f"WORD: {word}\n"
+            f"PART: {part}\n"
+            f"MEANING: {meaning}\n"
+            f"EXAMPLE: {example}"
+        )
+    except Exception:
+        return None
 
 
 def get_habit_streak(habit_log, habit_key):
@@ -3195,6 +3041,38 @@ def cache_set(key, value):
 
 # Main
 
+async def check_calendar_auth(context):
+    """Daily job at 6:50am - warn if calendar token is expired or missing."""
+    try:
+        service = get_calendar_service()
+        if not service:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text="Warning: Google Calendar is not connected. Use /auth to reconnect before your briefing."
+            )
+    except Exception as e:
+        await context.bot.send_message(
+            chat_id=ALLOWED_USER_ID,
+            text=f"Warning: Calendar auth check failed: {str(e)[:80]}\nUse /auth to reconnect."
+        )
+
+
+async def cmd_checkauth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check if Google Calendar is currently connected."""
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    try:
+        service = get_calendar_service()
+        if service:
+            # Try a quick API call to verify it actually works
+            service.calendarList().list(maxResults=1).execute()
+            await update.message.reply_text("Google Calendar is connected and working.")
+        else:
+            await update.message.reply_text("Google Calendar is NOT connected. Use /auth to reconnect.")
+    except Exception as e:
+        await update.message.reply_text(f"Google Calendar connection failed: {str(e)[:100]}\nUse /auth to reconnect.")
+
+
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -3223,6 +3101,7 @@ def main():
     app.add_handler(CommandHandler("braindump", brain_dump_command))
     app.add_handler(CommandHandler("synctasks", cmd_synctasks))
     app.add_handler(CommandHandler("clear", clear))
+    app.add_handler(CommandHandler("checkauth", cmd_checkauth))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
@@ -3248,6 +3127,10 @@ def main():
     # Google Tasks sync: every morning at 7:05 AM (just after briefing)
     tasks_sync_time = datetime.time(hour=7, minute=5, tzinfo=mtn)
     app.job_queue.run_daily(auto_sync_tasks, time=tasks_sync_time, name="tasks_sync")
+
+    # Calendar health check: every day at 6:50 AM (10 min before briefing)
+    cal_check_time = datetime.time(hour=6, minute=50, tzinfo=mtn)
+    app.job_queue.run_daily(check_calendar_auth, time=cal_check_time, name="cal_health_check")
 
     logger.info("Bot is running (Phase 8)...")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query", "voice", "photo"])
