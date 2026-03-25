@@ -1336,6 +1336,77 @@ async def show_events(update, days, label):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
+
+async def weekend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    tz = pytz.timezone("America/Denver")
+    now = datetime.datetime.now(tz)
+    # Find next Saturday
+    days_until_sat = (5 - now.weekday()) % 7
+    if days_until_sat == 0 and now.hour >= 20:
+        days_until_sat = 7
+    sat = now + datetime.timedelta(days=days_until_sat)
+    sun = sat + datetime.timedelta(days=1)
+    sat_str = sat.strftime("%A, %B %-d")
+    sun_str = sun.strftime("%A, %B %-d")
+    await update.message.reply_text(f"Fetching your weekend ({sat_str} - {sun_str})...")
+    await show_events(update, days=days_until_sat + 2, label=f"this weekend ({sat_str} - {sun_str})")
+
+
+async def rest_of_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    tz = pytz.timezone("America/Denver")
+    now = datetime.datetime.now(tz)
+    service = get_calendar_service()
+    if not service:
+        await update.message.reply_text("Calendar not connected. Use /auth to connect.")
+        return
+    events = list_events(days=1)
+    if not events:
+        await update.message.reply_text("No more events today.")
+        return
+    remaining = []
+    for e in events:
+        start = e["start"].get("dateTime", e["start"].get("date", ""))
+        if "T" in start:
+            dt = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
+            if dt > now:
+                remaining.append(e)
+        else:
+            remaining.append(e)
+    if not remaining:
+        await update.message.reply_text("No more events for the rest of today.")
+        return
+    lines = ["<b>Rest of today</b>\n"]
+    for e in remaining:
+        start = e["start"].get("dateTime", e["start"].get("date", ""))
+        if "T" in start:
+            dt = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
+            time_str = dt.strftime("%-I:%M %p")
+        else:
+            time_str = "All day"
+        title = e.get("summary", "No title")
+        if "@" in title and "." in title and " " not in title.strip():
+            continue
+        lines.append(f"* {time_str} - {title}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def scores_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ALLOWED_USER_ID:
+        return
+    args = context.args or []
+    my_teams = "myteams" in " ".join(args).lower() or "myteam" in " ".join(args).lower()
+    await update.message.reply_text("Fetching scores for your teams..." if my_teams else "Fetching yesterday's scores...")
+    recap = format_sports_recap("yesterday", my_teams_only=my_teams)
+    if recap:
+        await update.message.reply_text("\U0001f3c6 <b>Yesterday in Sports</b>\n" + recap, parse_mode="HTML")
+    else:
+        await update.message.reply_text("No scores found for yesterday.")
+
+
 async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
