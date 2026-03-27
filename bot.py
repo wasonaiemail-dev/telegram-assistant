@@ -1,3210 +1,1157 @@
-import os
-import json
-import logging
-import datetime
-import asyncio
-import requests
-import pytz
-from openai import OpenAI
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
-
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
-ALLOWED_USER_ID = int(os.environ["ALLOWED_USER_ID"])
-GOOGLE_CREDENTIALS = os.environ["GOOGLE_CREDENTIALS"]
-
-client = OpenAI()
-
-conversation_history = {}
-SCOPES = ["https://www.googleapis.com/auth/calendar", "https://www.googleapis.com/auth/tasks"]
-# Use persistent volume if mounted, otherwise fall back to /tmp
-PERSIST_DIR = "/data" if os.path.isdir("/data") else "/tmp"
-TOKEN_FILE = os.path.join(PERSIST_DIR, "google_token.json")
-AUTH_STATE_FILE = os.path.join(PERSIST_DIR, "auth_state.json")
-DATA_FILE = os.path.join(PERSIST_DIR, "userdata.json")
-LOG_FILE = os.path.join(PERSIST_DIR, "audit.log")
-CONTACTS_FILE = os.path.join(PERSIST_DIR, "contacts.json")
-CONVO_FILE = os.path.join(PERSIST_DIR, "conversation.json")
-
-# Data helpers
-
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            data = json.load(f)
-        # Migrate old flat shopping list -> shopping_lists structure
-        if "shopping_lists" not in data:
-            old_shopping = data.get("shopping", [])
-            data["shopping_lists"] = {
-                "grocery": old_shopping if old_shopping else [],
-                "household": [],
-                "baby": [],
-                "wishlist": []
-            }
-            data.pop("shopping", None)
-            with open(DATA_FILE, "w") as f:
-                json.dump(data, f, indent=2)
-        # Ensure all list keys exist
-        for k in ("grocery", "household", "baby", "wishlist"):
-            data["shopping_lists"].setdefault(k, [])
-        return data
-    return {
-        "todos": [],
-        "shopping_lists": {"grocery": [], "household": [], "baby": [], "wishlist": []},
-        "notes": [],
-        "reminders": [],
-        "expenses": [],
-        "meals": [],
-        "workouts": [],
-        "gifts": {},
-        "habits": {},
-        "habit_log": []
-    }
-
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-
-def load_contacts():
-    if os.path.exists(CONTACTS_FILE):
-        with open(CONTACTS_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-
-def save_contacts(contacts):
-    with open(CONTACTS_FILE, "w") as f:
-        json.dump(contacts, f, indent=2)
-
-
-def load_conversation():
-    if os.path.exists(CONVO_FILE):
-        with open(CONVO_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-
-def save_conversation(history):
-    with open(CONVO_FILE, "w") as f:
-        json.dump(history, f, indent=2)
-
-
-def audit_log(event):
-    try:
-        tz = pytz.timezone("America/Denver")
-        ts = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-        with open(LOG_FILE, "a") as f:
-            f.write(f"{ts} | {event}\n")
-    except Exception:
-        pass
-
-
-def send_error_alert(bot, msg):
-    import asyncio
-    try:
-        asyncio.create_task(
-            bot.send_message(chat_id=ALLOWED_USER_ID, text=f"Bot error: {msg[:300]}")
-        )
-    except Exception:
-        pass
-
-# System prompt - NO apostrophes anywhere inside this string
-
-SYSTEM_PROMPT = """You are a personal assistant accessible via Telegram. You are helpful, concise, and friendly.
-
-You help with scheduling, lists, notes, tracking, and general questions.
-
-== CALENDAR ==
-When the user asks to add/create/schedule a calendar event, respond with this on its own line:
-CALENDAR_ACTION: {"action": "create", "title": "...", "start": "YYYY-MM-DDTHH:MM:00", "end": "YYYY-MM-DDTHH:MM:00", "description": "...", "recurrence": ""}
-
-For recurring events, set recurrence to one of: "RRULE:FREQ=DAILY", "RRULE:FREQ=WEEKLY", "RRULE:FREQ=MONTHLY", "RRULE:FREQ=YEARLY". Leave empty for single events.
-Examples: "every Monday" -> "RRULE:FREQ=WEEKLY;BYDAY=MO", "daily" -> "RRULE:FREQ=DAILY", "every week" -> "RRULE:FREQ=WEEKLY"
-
-When the user asks what is on their calendar or schedule, respond with:
-CALENDAR_ACTION: {"action": "list", "days": 7}
-
-When the user asks to delete or remove a calendar event, tell them: to delete events, open Google Calendar directly since the bot cannot delete events for safety reasons.
-When the user asks to edit or update a calendar event time/title, tell them the same.
-
-== TO-DO LIST ==
-When the user asks to add a task or to-do, respond with:
-DATA_ACTION: {"action": "todo_add", "item": "...", "priority": "normal"}
-
-If the user says "high priority", "urgent", "important", or "asap" use priority "high".
-If the user says "low priority", "whenever", "someday" use priority "low".
-Otherwise use "normal".
-
-When the user asks to see their to-do list, respond with:
-DATA_ACTION: {"action": "todo_list"}
-
-When the user marks a task done or checks off a to-do (by number or name), respond with:
-DATA_ACTION: {"action": "todo_done", "index": <number starting at 1>}
-
-When the user asks to clear all completed todos or clear the list:
-DATA_ACTION: {"action": "todo_clear"}
-
-When the user wants to delete or remove a specific todo by number or name:
-DATA_ACTION: {"action": "todo_delete", "index": <number starting at 1>}
-
-When the user wants to change the priority of a todo (e.g. "make todo 2 high priority"):
-DATA_ACTION: {"action": "todo_priority", "index": <number starting at 1>, "priority": "high|normal|low"}
-
-== SHOPPING LISTS ==
-There are 4 shopping lists: grocery, household, baby (for Luna), wishlist.
-Auto-assign items to the correct list:
-- grocery: food, drinks, produce, dairy, meat, snacks, beverages, kitchen staples
-- household: cleaning supplies, paper towels, soap, laundry, home supplies, batteries, light bulbs
-- baby: diapers, wipes, formula, baby food, baby clothes, Luna items, anything for the baby
-- wishlist: electronics, gadgets, clothing for self, personal wants, things to buy someday
-
-When the user adds a shopping item (naturally or explicitly):
-DATA_ACTION: {"action": "shop_add", "item": "...", "list": "grocery|household|baby|wishlist"}
-
-If the user says "add to grocery/household/baby/wishlist" use that list explicitly.
-If unclear, use grocery as default for food items, wishlist for non-essential personal items.
-
-When the user asks to see their shopping list or /shopping:
-DATA_ACTION: {"action": "shop_list"}
-
-When the user marks a shopping item as gotten or bought (by number or name):
-DATA_ACTION: {"action": "shop_done", "index": <number starting at 1>, "list": "grocery|household|baby|wishlist"}
-
-When the user asks to delete or remove a shopping item:
-DATA_ACTION: {"action": "shop_delete", "index": <number starting at 1>, "list": "grocery|household|baby|wishlist"}
-
-When the user asks to clear bought/done items from a list:
-DATA_ACTION: {"action": "shop_clear", "list": "grocery|household|baby|wishlist|all"}
-
-When the user wants to remove/delete a specific shopping item (not mark it bought, but remove it entirely):
-DATA_ACTION: {"action": "shop_delete", "index": <number>}
-
-== NOTES ==
-When the user says note, remember this, save this, jot this down, or anything like note: ...:
-DATA_ACTION: {"action": "note_add", "text": "..."}
-
-When the user asks to see their notes:
-DATA_ACTION: {"action": "note_list"}
-
-When the user wants to search notes or find a note about something:
-DATA_ACTION: {"action": "note_search", "query": "...search term..."}
-
-When the user asks to delete a note by number:
-DATA_ACTION: {"action": "note_delete", "index": <number starting at 1>}
-
-== REMINDERS ==
-When the user asks to be reminded of something at a specific time, respond with:
-DATA_ACTION: {"action": "reminder_add", "text": "...", "time": "YYYY-MM-DDTHH:MM:00"}
-
-When the user asks to see their reminders:
-DATA_ACTION: {"action": "reminder_list"}
-
-When the user wants to cancel or delete a specific reminder by number:
-DATA_ACTION: {"action": "reminder_cancel", "index": <number starting at 1>}
-
-== EXPENSES ==
-When the user logs an expense (e.g. spent $45 on groceries, bought gas for $60):
-DATA_ACTION: {"action": "expense_add", "amount": <number>, "category": "...", "note": "..."}
-
-When the user asks for spending summary or to see expenses:
-DATA_ACTION: {"action": "expense_list"}
-
-== MEAL PLANNING ==
-When the user saves a meal idea or recipe name:
-DATA_ACTION: {"action": "meal_add", "meal": "..."}
-
-When the user asks for meal ideas or their meal list:
-DATA_ACTION: {"action": "meal_list"}
-
-When the user asks to plan the weekly meals:
-DATA_ACTION: {"action": "meal_plan"}
-
-== WORKOUT LOG ==
-When the user logs a workout (e.g. just did 30 min run, did chest day, walked 2 miles):
-DATA_ACTION: {"action": "workout_add", "description": "..."}
-
-When the user asks to see their workout history:
-DATA_ACTION: {"action": "workout_list"}
-
-== SLEEP TRACKING ==
-When the user mentions sleep (e.g. slept 7 hours, got 6 hours of sleep, only slept 5 hours, slept great):
-DATA_ACTION: {"action": "sleep_add", "hours": <number or null if unknown>, "quality": "good|okay|poor or null"}
-
-When the user asks to see their sleep log:
-DATA_ACTION: {"action": "sleep_list"}
-
-== MOOD TRACKING ==
-When the user mentions how they are feeling (e.g. feeling tired, stressed, anxious, great, happy, good, exhausted):
-DATA_ACTION: {"action": "mood_add", "mood": "great|good|okay|tired|stressed|anxious|low", "note": "...optional context..."}
-
-When the user asks to see their mood log:
-DATA_ACTION: {"action": "mood_list"}
-
-== GIFT IDEAS ==
-When the user saves a gift idea for someone, extract person, idea, occasion, and target date if mentioned:
-DATA_ACTION: {"action": "gift_add", "person": "...", "idea": "...", "occasion": "birthday|christmas|anniversary|just because|other", "date": "YYYY-MM-DD or empty"}
-
-When the user asks to see gift ideas (optionally for a person):
-DATA_ACTION: {"action": "gift_list", "person": "..."}
-
-== SMART REPLY DRAFTING ==
-When the user asks for help replying to a message, email, or DM - or pastes a message and says things like help me reply, how should I respond, draft a response, what should I say, reply to this - generate exactly 3 reply options.
-
-Automatically detect the type and tone:
-- Is it a text/iMessage, work email, or social media DM?
-- Is the sender a friend, family member, colleague, or stranger?
-- What is the context - casual, professional, sensitive, urgent?
-
-Format your response EXACTLY like this (always use these exact labels):
-
-**Option 1 - [tone label, e.g. Warm and friendly]:**
-[reply text]
-
-**Option 2 - [tone label, e.g. Professional]:**
-[reply text]
-
-**Option 3 - [tone label, e.g. Short and direct]:**
-[reply text]
-
-After the options, add one line: Want me to tweak any of these?
-
-If the user asks to refine an option (e.g. make option 2 more casual, make option 1 shorter), rewrite just that option.
-If the user says send option 2 or use option 1, just confirm which they picked - you cannot actually send it for them.
-
-== HABIT LOGGING ==
-The user tracks these daily habits: Daily workout, Water intake, Meditation, Morning routine, Journaling, Vitamins, Stretching, Outdoor time, Gratitude practice.
-When the user mentions completing any of these (e.g. "did my workout", "meditated today", "took vitamins"), the habit checker handles it automatically - just respond naturally and encouragingly.
-
-== CONTACT MEMORY ==
-When the user says things like "remember that John prefers texts over calls" or "note about Sarah: birthday is April 3rd", respond with:
-CONTACT_ACTION: {"name": "...", "fact": "..."}
-When the user asks about a person you have notes on, include the relevant facts naturally in your response.
-
-== GENERAL ==
-For everything else, respond normally in plain conversational text.
-Keep responses concise. The current date and time will be provided in each message.
-When performing a DATA_ACTION or CALENDAR_ACTION, also include a brief friendly confirmation message on a separate line before or after the action line."""
-
-
-# Calendar helpers
-
-def get_calendar_service():
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        with open(TOKEN_FILE, "w") as f:
-            f.write(creds.to_json())
-    if not creds or not creds.valid:
-        return None
-    return build("calendar", "v3", credentials=creds)
-
-
-def create_event(title, start, end, description="", recurrence=None):
-    service = get_calendar_service()
-    if not service:
-        return None
-    event = {
-        "summary": title,
-        "description": description,
-        "start": {"dateTime": start, "timeZone": "America/Denver"},
-        "end": {"dateTime": end, "timeZone": "America/Denver"},
-    }
-    if recurrence:
-        event["recurrence"] = recurrence
-    return service.events().insert(calendarId="primary", body=event).execute()
-
-
-def list_events(days=7):
-    service = get_calendar_service()
-    if not service:
-        return None
-    now = datetime.datetime.utcnow().isoformat() + "Z"
-    future = (datetime.datetime.utcnow() + datetime.timedelta(days=days)).isoformat() + "Z"
-    all_events = []
-    try:
-        calendars = service.calendarList().list().execute().get("items", [])
-        for cal in calendars:
-            try:
-                result = service.events().list(
-                    calendarId=cal["id"],
-                    timeMin=now,
-                    timeMax=future,
-                    singleEvents=True,
-                    orderBy="startTime"
-                ).execute()
-                for event in result.get("items", []):
-                    event["_calendar_name"] = cal.get("summary", "")
-                    all_events.append(event)
-            except Exception:
-                pass
-    except Exception:
-        result = service.events().list(
-            calendarId="primary",
-            timeMin=now,
-            timeMax=future,
-            singleEvents=True,
-            orderBy="startTime"
-        ).execute()
-        return result.get("items", [])
-    all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
-    return all_events
-
-
-# Data action handler
-
-async def handle_data_action(action_data):
-    data = load_data()
-    action = action_data.get("action", "")
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    # TO-DO
-    if action == "todo_add":
-        item = action_data.get("item", "").strip()
-        priority = action_data.get("priority", "normal").lower()
-        if priority not in ("high", "normal", "low"):
-            priority = "normal"
-        # Dedup check - warn if very similar item exists
-        existing = [t["text"].lower() for t in data.get("todos", []) if not t.get("done")]
-        item_lower = item.lower()
-        for ex in existing:
-            if item_lower in ex or ex in item_lower or (len(item_lower) > 5 and item_lower[:8] in ex):
-                # Store in a separate pending key for "add anyway" override
-                # Note: can't access context here so we just return the warning
-                return f"Similar todo already exists: \"{ex}\"\nSay \"add anyway\" if you still want to add \"{item}\""
-        data["todos"].append({"text": item, "done": False, "added": now_str, "priority": priority})
-        save_data(data)
-        flag = " [HIGH PRIORITY]" if priority == "high" else (" [low priority]" if priority == "low" else "")
-        return f"Added to your to-do list: {item}{flag}"
-
-    elif action == "todo_list":
-        todos = data.get("todos", [])
-        if not todos:
-            return "Your to-do list is empty!"
-        priority_order = {"high": 0, "normal": 1, "low": 2}
-        active = sorted([t for t in todos if not t.get("done")],
-                        key=lambda t: priority_order.get(t.get("priority", "normal"), 1))
-        done_items = [t for t in todos if t.get("done")]
-        def _esc(s):
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        lines = ["<b>To-Do List</b>\n"]
-        if active:
-            for i, t in enumerate(active, 1):
-                p = t.get("priority", "normal")
-                if p == "high":
-                    icon = "🔴"
-                elif p == "low":
-                    icon = "🔵"
-                else:
-                    icon = "⚪"
-                lines.append(f"{icon} {i}. {_esc(t['text'])}")
-        if done_items:
-            lines.append("\n<i>Completed:</i>")
-            for t in done_items:
-                lines.append(f"✅ {_esc(t['text'])}")
-        return "\n".join(lines)
-
-    elif action == "todo_done":
-        idx = action_data.get("index", 0) - 1
-        todos = data.get("todos", [])
-        if 0 <= idx < len(todos):
-            todos[idx]["done"] = True
-            save_data(data)
-            return f"Marked done: {todos[idx]['text']}"
-        return "Couldn't find that item."
-
-    elif action == "todo_clear":
-        data["todos"] = [t for t in data["todos"] if not t["done"]]
-        save_data(data)
-        return "Cleared completed to-dos."
-
-    elif action == "todo_delete":
-        active = [t for t in data.get("todos", []) if not t.get("done")]
-        idx = action_data.get("index", 0) - 1
-        if 0 <= idx < len(active):
-            item_text = active[idx]["text"]
-            data["todos"] = [t for t in data["todos"] if t is not active[idx]]
-            save_data(data)
-            return f"Deleted: {item_text}"
-        return "Could not find that todo item."
-
-    elif action == "todo_priority":
-        active = [t for t in data.get("todos", []) if not t.get("done")]
-        idx = action_data.get("index", 0) - 1
-        new_p = action_data.get("priority", "normal").lower()
-        if new_p not in ("high", "normal", "low"):
-            new_p = "normal"
-        if 0 <= idx < len(active):
-            active[idx]["priority"] = new_p
-            save_data(data)
-            flag = "🔴 HIGH" if new_p == "high" else ("🔵 low" if new_p == "low" else "⚪ normal")
-            return f"Updated priority to {flag}: {active[idx]['text']}"
-        return "Could not find that todo item."
-
-    # SHOPPING
-    elif action == "shop_add":
-        # Migrate old shopping list if needed
-        if "shopping_lists" not in data:
-            data["shopping_lists"] = {"grocery": [], "household": [], "baby": [], "wishlist": []}
-            for old_item in data.get("shopping", []):
-                data["shopping_lists"]["grocery"].append(old_item)
-        item = action_data.get("item", "").strip()
-        lst = action_data.get("list", "grocery").lower()
-        if lst not in ("grocery", "household", "baby", "wishlist"):
-            lst = "grocery"
-        if "shopping_lists" not in data:
-            data["shopping_lists"] = {"grocery": [], "household": [], "baby": [], "wishlist": []}
-        data["shopping_lists"][lst].append({"text": item, "done": False, "added": now_str})
-        save_data(data)
-        list_label = {"grocery": "Grocery", "household": "Household", "baby": "Luna (Baby)", "wishlist": "Wishlist"}[lst]
-        return f"Added to {list_label}: {item}"
-
-    elif action == "shop_list":
-        # Migrate old shopping list if needed
-        if "shopping_lists" not in data:
-            data["shopping_lists"] = {"grocery": [], "household": [], "baby": [], "wishlist": []}
-            for old_item in data.get("shopping", []):
-                data["shopping_lists"]["grocery"].append(old_item)
-            save_data(data)
-        lists = data.get("shopping_lists", {"grocery": [], "household": [], "baby": [], "wishlist": []})
-        list_icons = {"grocery": "\U0001f6d2 <b>Grocery</b>", "household": "\U0001f3e0 <b>Household</b>",
-                      "baby": "\U0001f476 <b>Luna (Baby)</b>", "wishlist": "\u2b50 <b>Wishlist</b>"}
-        sections = []
-        for lst_key in ("grocery", "household", "baby", "wishlist"):
-            items = [i for i in lists.get(lst_key, []) if not i.get("done")]
-            if items:
-                lines = [list_icons[lst_key]]
-                for i, t in enumerate(items, 1):
-                    lines.append(f"  {i}. {t['text']}")
-                sections.append("\n".join(lines))
-        if not sections:
-            return "All shopping lists are empty!"
-        return "\n\n".join(sections)
-
-    elif action == "shop_done":
-        lst = action_data.get("list", "grocery").lower()
-        if lst not in ("grocery", "household", "baby", "wishlist"):
-            lst = "grocery"
-        idx = action_data.get("index", 0) - 1
-        lists = data.get("shopping_lists", {})
-        items = [i for i in lists.get(lst, []) if not i.get("done")]
-        if 0 <= idx < len(items):
-            items[idx]["done"] = True
-            save_data(data)
-            return f"Got it: {items[idx]['text']}"
-        return "Couldn't find that item."
-
-    elif action == "shop_delete":
-        lst = action_data.get("list", "grocery").lower()
-        if lst not in ("grocery", "household", "baby", "wishlist"):
-            lst = "grocery"
-        idx = action_data.get("index", 0) - 1
-        lists = data.get("shopping_lists", {})
-        items = [i for i in lists.get(lst, []) if not i.get("done")]
-        if 0 <= idx < len(items):
-            removed = items[idx]["text"]
-            lists[lst] = [i for i in lists.get(lst, []) if i is not items[idx]]
-            save_data(data)
-            return f"Removed from list: {removed}"
-        return "Couldn't find that item."
-
-    elif action == "shop_clear":
-        lst = action_data.get("list", "all").lower()
-        if "shopping_lists" not in data:
-            data["shopping_lists"] = {"grocery": [], "household": [], "baby": [], "wishlist": []}
-        if lst == "all":
-            for k in data["shopping_lists"]:
-                data["shopping_lists"][k] = [i for i in data["shopping_lists"][k] if not i.get("done")]
-        elif lst in data["shopping_lists"]:
-            data["shopping_lists"][lst] = [i for i in data["shopping_lists"][lst] if not i.get("done")]
-        save_data(data)
-        return "Cleared purchased items."
-
-    elif action == "shop_delete":
-        active = [t for t in data.get("shopping", []) if not t.get("done")]
-        idx = action_data.get("index", 0) - 1
-        if 0 <= idx < len(active):
-            item_text = active[idx]["text"]
-            data["shopping"] = [t for t in data["shopping"] if t is not active[idx]]
-            save_data(data)
-            return f"Removed from shopping list: {item_text}"
-        return "Could not find that item."
-
-    # NOTES
-    elif action == "note_add":
-        text = action_data.get("text", "").strip()
-        data["notes"].append({"text": text, "added": now_str})
-        save_data(data)
-        return "Note saved!"
-
-    elif action == "note_list":
-        notes = data.get("notes", [])
-        if not notes:
-            return "No notes saved yet."
-        lines = ["<b>Your Notes</b>\n"]
-        for i, n in enumerate(notes, 1):
-            text = n["text"]
-            # Use first line as title if multiline, else first 50 chars
-            title = text.split("\n")[0][:60]
-            if len(title) < len(text):
-                title += "..."
-            lines.append(f"{i}. {title}\n   <i>{n['added']}</i>")
-        return "\n".join(lines)
-
-    elif action == "note_delete":
-        idx = action_data.get("index", 0) - 1
-        notes = data.get("notes", [])
-        if 0 <= idx < len(notes):
-            removed = notes.pop(idx)
-            save_data(data)
-            return f"Deleted note: {removed['text']}"
-        return "Couldn't find that note."
-
-    elif action == "note_search":
-        query = action_data.get("query", "").lower().strip()
-        notes = data.get("notes", [])
-        matches = [n for n in notes if query in n.get("text", "").lower()]
-        if not matches:
-            return f"No notes found matching: {query}"
-        lines = [f"<b>Notes matching '{query}'</b>\n"]
-        for i, n in enumerate(matches, 1):
-            lines.append(f"{i}. {n['text']}\n   ({n['added']})")
-        return "\n".join(lines)
-
-    # REMINDERS
-    elif action == "reminder_add":
-        text = action_data.get("text", "").strip()
-        time_str = action_data.get("time", "")
-        import uuid as _uuid
-        data["reminders"].append({"text": text, "time": time_str, "sent": False, "added": now_str, "id": str(_uuid.uuid4())[:8]})
-        save_data(data)
-        try:
-            dt = datetime.datetime.fromisoformat(time_str)
-            friendly = dt.strftime("%A, %B %-d at %-I:%M %p")
-        except Exception:
-            friendly = time_str
-        return f"Reminder set: {text}\n{friendly}"
-
-    elif action == "reminder_list":
-        reminders = [r for r in data.get("reminders", []) if not r.get("sent")]
-        if not reminders:
-            return "No upcoming reminders."
-        lines = ["Upcoming Reminders:\n"]
-        for i, r in enumerate(reminders, 1):
-            try:
-                dt = datetime.datetime.fromisoformat(r["time"])
-                friendly = dt.strftime("%a %b %-d at %-I:%M %p")
-            except Exception:
-                friendly = r["time"]
-            lines.append(f"{i}. {r['text']} - {friendly}")
-        return "\n".join(lines)
-
-    elif action == "reminder_cancel":
-        reminders = [r for r in data.get("reminders", []) if not r.get("sent")]
-        idx = action_data.get("index", 0) - 1
-        if 0 <= idx < len(reminders):
-            item = reminders[idx]
-            item["sent"] = True
-            save_data(data)
-            return f"Cancelled reminder: {item['text']}"
-        return "Could not find that reminder."
-
-    # EXPENSES
-    elif action == "expense_add":
-        amount = action_data.get("amount", 0)
-        category = action_data.get("category", "Other")
-        note = action_data.get("note", "")
-        data["expenses"].append({
-            "amount": amount,
-            "category": category,
-            "note": note,
-            "date": now_str
-        })
-        save_data(data)
-        return f"Logged: ${amount:.2f} on {category}{' - ' + note if note else ''}"
-
-    elif action == "expense_list":
-        expenses = data.get("expenses", [])
-        if not expenses:
-            return "No expenses logged yet."
-        totals = {}
-        total = 0
-        for e in expenses:
-            cat = e.get("category", "Other")
-            amt = e.get("amount", 0)
-            totals[cat] = totals.get(cat, 0) + amt
-            total += amt
-        lines = ["Expense Summary:\n"]
-        for cat, amt in sorted(totals.items(), key=lambda x: -x[1]):
-            lines.append(f"* {cat}: ${amt:.2f}")
-        lines.append(f"\nTotal: ${total:.2f}")
-        return "\n".join(lines)
-
-    # MEALS
-    elif action == "meal_add":
-        meal = action_data.get("meal", "").strip()
-        data["meals"].append({"meal": meal, "added": now_str})
-        save_data(data)
-        return f"Saved meal idea: {meal}"
-
-    elif action == "meal_list":
-        meals = data.get("meals", [])
-        if not meals:
-            return "No meal ideas saved yet. Tell me some meals you like!"
-        lines = ["Your Meal Ideas:\n"]
-        for i, m in enumerate(meals, 1):
-            lines.append(f"{i}. {m['meal']}")
-        return "\n".join(lines)
-
-    elif action == "meal_plan":
-        meals = data.get("meals", [])
-        if len(meals) < 7:
-            return f"You only have {len(meals)} meal ideas saved. Add more first, then I can plan a week!"
-        import random
-        picks = random.sample(meals, 7)
-        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        lines = ["Meal Plan for the Week:\n"]
-        for day, meal in zip(days, picks):
-            lines.append(f"* {day}: {meal['meal']}")
-        return "\n".join(lines)
-
-    # WORKOUTS
-    elif action == "workout_add":
-        desc = action_data.get("description", "").strip()
-        data["workouts"].append({"description": desc, "date": now_str})
-        save_data(data)
-        return f"Workout logged: {desc}"
-
-    elif action == "workout_list":
-        workouts = data.get("workouts", [])
-        if not workouts:
-            return "No workouts logged yet. Get after it!"
-        lines = ["Recent Workouts:\n"]
-        for w in reversed(workouts[-10:]):
-            lines.append(f"* {w['date'][:10]}: {w['description']}")
-        return "\n".join(lines)
-
-    # GIFTS
-    elif action == "gift_add":
-        person = action_data.get("person", "").strip().lower()
-        idea = action_data.get("idea", "").strip()
-        occasion = action_data.get("occasion", "").strip()
-        date = action_data.get("date", "").strip()
-        if person not in data["gifts"]:
-            data["gifts"][person] = []
-        entry = {"idea": idea, "added": now_str}
-        if occasion:
-            entry["occasion"] = occasion
-        if date:
-            entry["date"] = date
-        data["gifts"][person].append(entry)
-        save_data(data)
-        extra = f" for {occasion}" if occasion else ""
-        date_str = f" (by {date})" if date else ""
-        return f"Gift idea saved for {person.title()}{extra}{date_str}: {idea}"
-
-    elif action == "gift_list":
-        person = action_data.get("person", "").strip().lower()
-        gifts = data.get("gifts", {})
-        occasion_icons = {"birthday": "\U0001f382", "christmas": "\U0001f384",
-                          "anniversary": "\U0001f496", "just because": "\U0001f381", "other": "\U0001f4dd"}
-        if person and person in gifts:
-            ideas = gifts[person]
-            if not ideas:
-                return f"No gift ideas for {person.title()} yet."
-            lines = [f"\U0001f381 <b>Gift Ideas for {person.title()}</b>\n"]
-            for i, g in enumerate(ideas, 1):
-                icon = occasion_icons.get(g.get("occasion", ""), "\U0001f381")
-                date_label = f" - by {g['date']}" if g.get("date") else ""
-                occ_label = f" ({g['occasion']})" if g.get("occasion") else ""
-                lines.append(f"{icon} {i}. {g['idea']}{occ_label}{date_label}")
-            return "\n".join(lines)
-        elif not person:
-            if not gifts:
-                return "No gift ideas saved yet."
-            # Sort people by earliest upcoming gift date
-            import datetime as _dt
-            def _earliest(items):
-                dates = [i.get("date","") for i in items if i.get("date")]
-                return min(dates) if dates else "9999"
-            sorted_people = sorted(gifts.items(), key=lambda x: _earliest(x[1]))
-            lines = ["\U0001f381 <b>All Gift Ideas</b>\n"]
-            for p, ideas in sorted_people:
-                lines.append(f"\n<b>{p.title()}</b>")
-                for g in ideas:
-                    icon = occasion_icons.get(g.get("occasion", ""), "\U0001f381")
-                    date_label = f" - by {g['date']}" if g.get("date") else ""
-                    occ_label = f" ({g['occasion']})" if g.get("occasion") else ""
-                    lines.append(f"  {icon} {g['idea']}{occ_label}{date_label}")
-            return "\n".join(lines)
-        return f"No gift ideas saved for {person.title()} yet."
-
-    # SLEEP
-    elif action == "sleep_add":
-        hours = action_data.get("hours")
-        quality = action_data.get("quality")
-        entry = {"date": now_str[:10], "added": now_str}
-        if hours is not None:
-            try:
-                entry["hours"] = float(hours)
-            except (ValueError, TypeError):
-                pass
-        if quality:
-            entry["quality"] = quality
-        if "sleep_log" not in data:
-            data["sleep_log"] = []
-        data["sleep_log"].append(entry)
-        save_data(data)
-        parts = []
-        if "hours" in entry:
-            parts.append(f"{entry['hours']:.0f} hours")
-        if "quality" in entry:
-            q_emoji = {"great": "😴✨", "good": "😴", "okay": "😐", "poor": "😔"}.get(entry["quality"], "")
-            parts.append(f"{entry['quality']} {q_emoji}")
-        return "Sleep logged: " + (", ".join(parts) if parts else "noted")
-
-    elif action == "sleep_list":
-        log = data.get("sleep_log", [])
-        if not log:
-            return "No sleep logged yet."
-        recent = log[-7:]
-        lines = ["<b>Sleep Log (last 7 days)</b>\n"]
-        for e in reversed(recent):
-            parts = [e.get("date", "")]
-            if "hours" in e:
-                h = e["hours"]
-                bar = "🟢" if h >= 7 else ("🟡" if h >= 5 else "🔴")
-                parts.append(f"{bar} {h:.0f}h")
-            if "quality" in e:
-                parts.append(e["quality"])
-            lines.append("  ".join(parts))
-        total_h = [e["hours"] for e in recent if "hours" in e]
-        if total_h:
-            avg = sum(total_h) / len(total_h)
-            lines.append(f"\nAvg: {avg:.1f}h / night")
-        return "\n".join(lines)
-
-    # MOOD
-    elif action == "mood_add":
-        mood = action_data.get("mood", "okay")
-        note = action_data.get("note", "")
-        if "mood_log" not in data:
-            data["mood_log"] = []
-        data["mood_log"].append({"date": now_str[:10], "added": now_str, "mood": mood, "note": note})
-        save_data(data)
-        mood_emoji = {"great": "🌟", "good": "😊", "okay": "😐", "tired": "😴", "stressed": "😤", "anxious": "😰", "low": "😔"}.get(mood, "")
-        return f"Mood logged: {mood} {mood_emoji}"
-
-    elif action == "mood_list":
-        log = data.get("mood_log", [])
-        if not log:
-            return "No mood logged yet."
-        recent = log[-7:]
-        lines = ["<b>Mood Log (last 7 days)</b>\n"]
-        emoji_map = {"great": "🌟", "good": "😊", "okay": "😐", "tired": "😴", "stressed": "😤", "anxious": "😰", "low": "😔"}
-        for e in reversed(recent):
-            em = emoji_map.get(e.get("mood", ""), "")
-            note = f" - {e['note']}" if e.get("note") else ""
-            lines.append(f"{e.get('date', '')}  {em} {e.get('mood', '')}{note}")
-        return "\n".join(lines)
-
-    return None
-
-
-# Calendar action handler
-
-async def handle_calendar_action(action_data, update):
-    action = action_data.get("action")
-
-    if action == "create":
-        service = get_calendar_service()
-        if not service:
-            return "I would love to add that, but calendar is not connected yet. Use /auth to connect."
-        recurrence_rule = action_data.get("recurrence", "")
-        recurrence = [recurrence_rule] if recurrence_rule else None
-        event = create_event(
-            title=action_data.get("title", "Event"),
-            start=action_data.get("start"),
-            end=action_data.get("end"),
-            description=action_data.get("description", ""),
-            recurrence=recurrence
-        )
-        if event:
-            title = action_data.get("title", "Event")
-            rec_label = ""
-            if recurrence_rule:
-                if "WEEKLY" in recurrence_rule:
-                    rec_label = " (repeating weekly)"
-                elif "DAILY" in recurrence_rule:
-                    rec_label = " (repeating daily)"
-                elif "MONTHLY" in recurrence_rule:
-                    rec_label = " (repeating monthly)"
-            return f"Added to your calendar: {title}{rec_label}"
-        else:
-            return "Could not add the event - something went wrong."
-
-    elif action == "list":
-        service = get_calendar_service()
-        if not service:
-            return "Calendar not connected. Use /auth to connect."
-        days = action_data.get("days", 7)
-        events = list_events(days=days)
-        if not events:
-            return "No upcoming events found."
-        lines = ["Coming up:\n"]
-        for e in events:
-            start = e["start"].get("dateTime", e["start"].get("date", ""))
-            if "T" in start:
-                dt = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
-                time_str = dt.strftime("%a %b %-d at %-I:%M %p")
-            else:
-                dt = datetime.datetime.fromisoformat(start)
-                time_str = dt.strftime("%a %b %-d (all day)")
-            lines.append(f"* {e.get('summary', 'No title')} - {time_str}")
-        return "\n".join(lines)
-
-    return None
-
-
-# Reminder checker
-
-async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
-    data = load_data()
-    now = datetime.datetime.now()
-    changed = False
-    for r in data.get("reminders", []):
-        if r.get("sent"):
-            continue
-        try:
-            remind_time = datetime.datetime.fromisoformat(r["time"])
-            if now >= remind_time:
-                reminder_id = r.get("id", "")
-                reminder_text = f"Reminder: {r['text']}"
-                await context.bot.send_message(chat_id=ALLOWED_USER_ID, text=reminder_text)
-                r["sent"] = True
-                changed = True
-        except Exception as e:
-            logger.error(f"Reminder error: {e}")
-    if changed:
-        save_data(data)
-
-
-# Message utilities
-
-async def send_long_message(message_obj, text, parse_mode=None):
-    """Split and send messages that exceed Telegram 4096 char limit."""
-    MAX_LEN = 4000
-    if len(text) <= MAX_LEN:
-        await message_obj.reply_text(text, parse_mode=parse_mode)
-        return
-    chunks = []
-    while text:
-        if len(text) <= MAX_LEN:
-            chunks.append(text)
-            break
-        split_at = text.rfind("\n", 0, MAX_LEN)
-        if split_at == -1:
-            split_at = MAX_LEN
-        chunks.append(text[:split_at])
-        text = text[split_at:].lstrip("\n")
-    for chunk in chunks:
-        await message_obj.reply_text(chunk, parse_mode=parse_mode)
-
-
-# Rate limiting
-
-_rate_counters = {}
-
-def check_rate_limit(user_id):
-    """Returns True if user is within rate limit (30 msgs/60s)."""
-    import time
-    now = time.time()
-    window = 60
-    limit = 30
-    if user_id not in _rate_counters:
-        _rate_counters[user_id] = []
-    _rate_counters[user_id] = [t for t in _rate_counters[user_id] if now - t < window]
-    if len(_rate_counters[user_id]) >= limit:
-        return False
-    _rate_counters[user_id].append(now)
-    return True
-
-
-# Phase 5 - Daily Briefing helpers
-
-def get_weather_slc():
-    """Fetch weather with retry logic and wttr.in fallback."""
-    cached = cache_get("weather_slc", max_age_seconds=300)
-    if cached:
-        return cached
-
-    wmo_codes = {
-        0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
-        45: "Foggy", 48: "Icy fog",
-        51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
-        61: "Light rain", 63: "Rain", 65: "Heavy rain",
-        71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
-        80: "Rain showers", 81: "Showers", 82: "Heavy showers",
-        85: "Snow showers", 86: "Heavy snow showers",
-        95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm",
-    }
-
-    # Try Open-Meteo with 2 retries
-    url = (
-        "https://api.open-meteo.com/v1/forecast"
-        "?latitude=40.7608&longitude=-111.8910"
-        "&current=temperature_2m,apparent_temperature,precipitation,weathercode,windspeed_10m"
-        "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode"
-        "&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch"
-        "&timezone=America%2FDenver&forecast_days=2"
-    )
-    last_err = None
-    for attempt in range(3):
-        try:
-            resp = requests.get(url, timeout=10)
-            data = resp.json()
-            cur = data["current"]
-            daily = data["daily"]
-            code = cur.get("weathercode", 0)
-            description = wmo_codes.get(code, "Unknown")
-            temp_now = round(cur["temperature_2m"])
-            feels_like = round(cur["apparent_temperature"])
-            wind = round(cur["windspeed_10m"])
-            high = round(daily["temperature_2m_max"][0])
-            low = round(daily["temperature_2m_min"][0])
-            precip = round(daily["precipitation_sum"][0], 2)
-            tom_code = daily["weathercode"][1] if len(daily["weathercode"]) > 1 else 0
-            tom_desc = wmo_codes.get(tom_code, "Unknown")
-            tom_high = round(daily["temperature_2m_max"][1]) if len(daily["temperature_2m_max"]) > 1 else "?"
-            tom_low = round(daily["temperature_2m_min"][1]) if len(daily["temperature_2m_min"]) > 1 else "?"
-            tom_precip = round(daily["precipitation_sum"][1], 2) if len(daily["precipitation_sum"]) > 1 else 0
-            lines = [
-                "\u2600\ufe0f <b>Weather - Salt Lake City</b>",
-                f"Now: {temp_now}F (feels {feels_like}F) - {description}",
-                f"Today: High {high}F / Low {low}F | Wind {wind} mph",
-            ]
-            if precip > 0:
-                lines.append(f"Precip today: {precip} in")
-            lines.append(f"Tomorrow: {tom_desc} | High {tom_high}F / Low {tom_low}F")
-            if tom_precip > 0:
-                lines.append(f"Precip tomorrow: {tom_precip} in")
-            result = "\n".join(lines)
-            cache_set("weather_slc", result)
-            return result
-        except Exception as e:
-            last_err = e
-            if attempt < 2:
-                import time as _time
-                _time.sleep(3)
-
-    # Fallback: wttr.in
-    try:
-        wttr_url = "https://wttr.in/Salt+Lake+City?format=j1"
-        resp2 = requests.get(wttr_url, timeout=10)
-        w = resp2.json()
-        cur2 = w["current_condition"][0]
-        temp_f = cur2["temp_F"]
-        feels_f = cur2["FeelsLikeF"]
-        desc2 = cur2["weatherDesc"][0]["value"]
-        today2 = w["weather"][0]
-        high2 = today2["maxtempF"]
-        low2 = today2["mintempF"]
-        lines2 = [
-            "\u2600\ufe0f <b>Weather - Salt Lake City</b> (backup)",
-            f"Now: {temp_f}F (feels {feels_f}F) - {desc2}",
-            f"Today: High {high2}F / Low {low2}F",
-        ]
-        result2 = "\n".join(lines2)
-        cache_set("weather_slc", result2)
-        return result2
-    except Exception as e2:
-        return f"Weather unavailable ({str(last_err)[:50]})"
-
-
-def get_todays_calendar_events_briefing(service):
-    try:
-        tz = pytz.timezone("America/Denver")
-        now = datetime.datetime.now(tz)
-        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        all_events = []
-        try:
-            calendars = service.calendarList().list().execute().get("items", [])
-            for cal in calendars:
-                try:
-                    result = service.events().list(
-                        calendarId=cal["id"],
-                        timeMin=start_of_day.isoformat(),
-                        timeMax=end_of_day.isoformat(),
-                        singleEvents=True,
-                        orderBy="startTime",
-                    ).execute()
-                    for event in result.get("items", []):
-                        event["_calendar_name"] = cal.get("summary", "")
-                        all_events.append(event)
-                except Exception:
-                    pass
-        except Exception:
-            result = service.events().list(
-                calendarId="primary",
-                timeMin=start_of_day.isoformat(),
-                timeMax=end_of_day.isoformat(),
-                singleEvents=True,
-                orderBy="startTime",
-            ).execute()
-            all_events = result.get("items", [])
-        all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
-        if not all_events:
-            return "Calendar - No events today"
-        lines = ["📅 <b>Todays Calendar</b>"]
-        for event in all_events:
-            start = event["start"].get("dateTime", event["start"].get("date", ""))
-            if "T" in start:
-                dt = datetime.datetime.fromisoformat(start)
-                if dt.tzinfo is None:
-                    dt = tz.localize(dt)
-                else:
-                    dt = dt.astimezone(tz)
-                time_str = dt.strftime("%-I:%M %p")
-            else:
-                time_str = "All day"
-            title = event.get("summary", "Untitled")
-            cal_name = event.get("_calendar_name", "")
-            # Skip events where title looks like an email address
-            if "@" in title and "." in title and " " not in title.strip():
-                continue
-            label = f"  * {time_str} - {title}"
-            if cal_name and cal_name.lower() not in ("ty wass", "primary", "wasonaiemail@gmail.com"):
-                label += f" ({cal_name})"
-            lines.append(label)
-        return "\n".join(lines)
-    except Exception as e:
-        return f"Calendar unavailable ({str(e)[:60]})"
-
-
-def get_briefing_todos(user_data):
-    todos = [t for t in user_data.get("todos", []) if not t.get("done")]
-    if not todos:
-        return "✅ <b>To-Dos</b> - All clear!"
-    priority_order = {"high": 0, "normal": 1, "low": 2}
-    todos = sorted(todos, key=lambda t: priority_order.get(t.get("priority", "normal"), 1))
-    high = [t for t in todos if t.get("priority") == "high"]
-    rest = [t for t in todos if t.get("priority") != "high"]
-    lines = ["✅ <b>To-Dos</b>"]
-    for item in high:
-        lines.append(f"  🔴 {item['text']}")
-    shown = len(high)
-    for item in rest[:max(0, 8 - shown)]:
-        lines.append(f"  * {item['text']}")
-    remaining = len(todos) - min(len(todos), 8)
-    if remaining > 0:
-        lines.append(f"  ...and {remaining} more")
-    return "\n".join(lines)
-
-
-def get_briefing_shopping(user_data):
-    lists = user_data.get("shopping_lists", {})
-    # Fallback: check old shopping key too
-    old = [s for s in user_data.get("shopping", []) if not s.get("done")]
-    all_items = old[:]
-    for lst_key in ("grocery", "household", "baby", "wishlist"):
-        all_items += [i for i in lists.get(lst_key, []) if not i.get("done")]
-    if not all_items:
-        return None
-    lines = ["🛒 <b>Shopping</b>"]
-    for item in all_items[:8]:
-        lines.append(f"  * {item['text']}")
-    if len(all_items) > 8:
-        lines.append(f"  ...and {len(all_items) - 8} more")
-    return "\n".join(lines)
-
-
-def get_briefing_reminders(user_data):
-    try:
-        tz = pytz.timezone("America/Denver")
-        now = datetime.datetime.now(tz)
-        today_str = now.strftime("%Y-%m-%d")
-        reminders = user_data.get("reminders", [])
-        due_today = []
-        for r in reminders:
-            if r.get("sent"):
-                continue
-            remind_time = r.get("time", "")
-            if remind_time.startswith(today_str):
-                due_today.append(r.get("text", "Reminder"))
-        if not due_today:
-            return None
-        lines = ["⏰ <b>Reminders Due Today</b>"]
-        for r in due_today:
-            lines.append(f"  * {r}")
-        return "\n".join(lines)
-    except Exception:
-        return None
-
-
-def get_briefing_workouts(user_data):
-    try:
-        workouts = user_data.get("workouts", [])
-        if not workouts:
-            return None
-        recent = workouts[-5:]
-        lines = ["💪 <b>Recent Workouts</b>"]
-        for w in reversed(recent):
-            lines.append(f"  * {w['date'][:10]}: {w['description']}")
-        return "\n".join(lines)
-    except Exception:
-        return None
-
-
-def get_briefing_expenses(user_data):
-    try:
-        tz = pytz.timezone("America/Denver")
-        now = datetime.datetime.now(tz)
-        current_month = now.strftime("%Y-%m")
-        expenses = user_data.get("expenses", [])
-        month_expenses = [e for e in expenses if e.get("date", "").startswith(current_month)]
-        if not month_expenses:
-            return None
-        total = 0
-        for e in month_expenses:
-            try:
-                total += float(e.get("amount", 0))
-            except (ValueError, TypeError):
-                pass
-        month_label = now.strftime("%B")
-        return f"Expenses ({month_label}) - {len(month_expenses)} entries, ${total:.2f} total"
-    except Exception:
-        return None
-
-
-# Scheduled morning briefing job
-
-async def send_scheduled_briefing(context: ContextTypes.DEFAULT_TYPE):
-    user_data = load_data()
-    cal_service = None
-    try:
-        cal_service = get_calendar_service()
-    except Exception:
-        pass
-    sections = await build_briefing_sections(user_data, cal_service)
-    for section in sections:
-        await context.bot.send_message(
-            chat_id=ALLOWED_USER_ID,
-            text=section,
-            parse_mode="HTML"
-        )
-
-
-# Commands
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    await update.message.reply_text(
-        "Hey! I am your personal assistant.\n\n"
-        "Calendar: /today /week /auth\n"
-        "Lists: just tell me naturally!\n\n"
-        "Examples:\n"
-        "  Add milk to shopping list\n"
-        "  Remind me at 3pm to call mom\n"
-        "  Spent $45 on groceries\n"
-        "  Log a 30 min run\n"
-        "  Gift idea for Sarah: silk scarf\n"
-        "  Note: password is abc123\n\n"
-        "Commands:\n"
-        "/briefing - Morning briefing\n"
-        "/todos - See to-do list\n"
-        "/shopping - See shopping list\n"
-        "/notes - See saved notes\n"
-        "/expenses - See spending summary\n"
-        "/workouts - See workout log\n"
-        "/gifts - See gift ideas\n"
-        "/reminders - See upcoming reminders\n"
-        "/clear - Clear conversation memory"
-    )
-
-
-async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    creds_data = json.loads(GOOGLE_CREDENTIALS)
-    flow = Flow.from_client_config(creds_data, scopes=SCOPES)
-    flow.redirect_uri = "http://localhost"
-    auth_url, state = flow.authorization_url(access_type="offline", prompt="consent")
-    auth_state = {"state": state, "code_verifier": flow.code_verifier}
-    with open(AUTH_STATE_FILE, "w") as f:
-        json.dump(auth_state, f)
-    await update.message.reply_text(
-        "Click this link and sign in with Google:\n\n"
-        f"{auth_url}\n\n"
-        "After approving, your browser will show an error page - that is normal.\n\n"
-        "Find the part in the address bar that says code= and copy everything after it until &scope\n\n"
-        "Send it like this:\n/code 4/0Afr...(your full code here)"
-    )
-
-
-async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("Paste the code after /code\n\nExample: /code 4/0Afr...")
-        return
-    auth_code = " ".join(context.args).strip()
-    if not os.path.exists(AUTH_STATE_FILE):
-        await update.message.reply_text("No auth session found. Please type /auth first.")
-        return
-    with open(AUTH_STATE_FILE, "r") as f:
-        auth_state = json.load(f)
-    try:
-        creds_data = json.loads(GOOGLE_CREDENTIALS)
-        flow = Flow.from_client_config(creds_data, scopes=SCOPES, state=auth_state.get("state"))
-        flow.redirect_uri = "http://localhost"
-        flow.code_verifier = auth_state.get("code_verifier")
-        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-        flow.fetch_token(code=auth_code)
-        with open(TOKEN_FILE, "w") as f:
-            f.write(flow.credentials.to_json())
-        os.remove(AUTH_STATE_FILE)
-        await update.message.reply_text("Google Calendar connected!\n\nTry /week to see upcoming events.")
-    except Exception as e:
-        logger.error(f"Auth error: {e}")
-        await update.message.reply_text(f"That did not work - {str(e)[:120]}\n\nType /auth to try again.")
-
-
-async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    try:
-        weather = get_weather_slc()
-        await update.message.reply_text(weather, parse_mode="HTML")
-    except Exception:
-        pass
-    await show_events(update, days=1, label="today")
-
-
-async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    await show_events(update, days=7, label="this week")
-
-
-async def show_events(update, days, label):
-    service = get_calendar_service()
-    if not service:
-        await update.message.reply_text("Calendar not connected yet. Use /auth to connect.")
-        return
-    events = list_events(days=days)
-    if not events:
-        await update.message.reply_text(f"No events {label}.")
-        return
-    # Count events per day PER CALENDAR to flag busy days
-    from collections import defaultdict as _dd
-    # key: (day, calendar_name) -> count
-    day_cal_counts = _dd(int)
-    for e in events:
-        start = e["start"].get("dateTime", e["start"].get("date", ""))
-        cal_name = e.get("_calendar_name", "Personal")
-        day_cal_counts[(start[:10], cal_name)] += 1
-    lines = [f"<b>Your events {label}</b>\n"]
-    for e in events:
-        start = e["start"].get("dateTime", e["start"].get("date", ""))
-        if "T" in start:
-            dt = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
-            time_str = dt.strftime("%a %b %-d at %-I:%M %p")
-        else:
-            dt = datetime.datetime.fromisoformat(start)
-            time_str = dt.strftime("%a %b %-d (all day)")
-        cal_name = e.get("_calendar_name", "Personal")
-        busy_tag = ""
-        if day_cal_counts[(start[:10], cal_name)] >= 3:
-            busy_tag = f" <b>[Busy day - {cal_name}]</b>"
-        _evt_title = e.get('summary', 'No title')
-        # Skip events that look like email addresses
-        if "@" in _evt_title and "." in _evt_title and " " not in _evt_title.strip():
-            continue
-        lines.append(f"* {_evt_title} - {time_str}{busy_tag}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
-
-
-async def weekend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    tz = pytz.timezone("America/Denver")
-    now = datetime.datetime.now(tz)
-    # Find next Saturday
-    days_until_sat = (5 - now.weekday()) % 7
-    if days_until_sat == 0 and now.hour >= 20:
-        days_until_sat = 7
-    sat = now + datetime.timedelta(days=days_until_sat)
-    sun = sat + datetime.timedelta(days=1)
-    sat_str = sat.strftime("%A, %B %-d")
-    sun_str = sun.strftime("%A, %B %-d")
-    await update.message.reply_text(f"Fetching your weekend ({sat_str} - {sun_str})...")
-    await show_events(update, days=days_until_sat + 2, label=f"this weekend ({sat_str} - {sun_str})")
-
-
-async def rest_of_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    tz = pytz.timezone("America/Denver")
-    now = datetime.datetime.now(tz)
-    service = get_calendar_service()
-    if not service:
-        await update.message.reply_text("Calendar not connected. Use /auth to connect.")
-        return
-    events = list_events(days=1)
-    if not events:
-        await update.message.reply_text("No more events today.")
-        return
-    remaining = []
-    for e in events:
-        start = e["start"].get("dateTime", e["start"].get("date", ""))
-        if "T" in start:
-            dt = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
-            if dt > now:
-                remaining.append(e)
-        else:
-            remaining.append(e)
-    if not remaining:
-        await update.message.reply_text("No more events for the rest of today.")
-        return
-    lines = ["<b>Rest of today</b>\n"]
-    for e in remaining:
-        start = e["start"].get("dateTime", e["start"].get("date", ""))
-        if "T" in start:
-            dt = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
-            time_str = dt.strftime("%-I:%M %p")
-        else:
-            time_str = "All day"
-        title = e.get("summary", "No title")
-        if "@" in title and "." in title and " " not in title.strip():
-            continue
-        lines.append(f"* {time_str} - {title}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
-
-async def scores_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    args = context.args or []
-    my_teams = "myteams" in " ".join(args).lower() or "myteam" in " ".join(args).lower()
-    await update.message.reply_text("Fetching scores for your teams..." if my_teams else "Fetching yesterday's scores...")
-    recap = format_sports_recap("yesterday", my_teams_only=my_teams)
-    if recap:
-        await update.message.reply_text("\U0001f3c6 <b>Yesterday in Sports</b>\n" + recap, parse_mode="HTML")
-    else:
-        await update.message.reply_text("No scores found for yesterday.")
-
-
-async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    await update.message.reply_text("Building your briefing, one moment...")
-    user_data = load_data()
-    cal_service = None
-    try:
-        cal_service = get_calendar_service()
-    except Exception:
-        pass
-    sections = await build_briefing_sections(user_data, cal_service)
-    for section in sections:
-        await update.message.reply_text(section, parse_mode="HTML")
-
-
-async def cmd_todos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    reply = await handle_data_action({"action": "todo_list"})
-    await update.message.reply_text(reply, parse_mode="HTML")
-
-async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    reply = await handle_data_action({"action": "shop_list"})
-    await update.message.reply_text(reply, parse_mode="HTML")
-
-async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    reply = await handle_data_action({"action": "note_list"})
-    await update.message.reply_text(reply, parse_mode="HTML")
-
-async def cmd_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    reply = await handle_data_action({"action": "expense_list"})
-    await update.message.reply_text(reply)
-
-async def cmd_workouts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    reply = await handle_data_action({"action": "workout_list"})
-    await update.message.reply_text(reply)
-
-async def cmd_gifts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    reply = await handle_data_action({"action": "gift_list", "person": ""})
-    await update.message.reply_text(reply, parse_mode="HTML")
-
-async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    reply = await handle_data_action({"action": "reminder_list"})
-    await update.message.reply_text(reply)
-
-async def cmd_sleep(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    reply = await handle_data_action({"action": "sleep_list"})
-    await update.message.reply_text(reply, parse_mode="HTML")
-
-async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    reply = await handle_data_action({"action": "mood_list"})
-    await update.message.reply_text(reply, parse_mode="HTML")
-
-async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    global ask_history
-    conversation_history.clear()
-    ask_history = []
-    await update.message.reply_text("Memory cleared - starting fresh!")
-
-
-# Main message handler
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != ALLOWED_USER_ID:
-        return
-
-    user_message = update.message.text or ""
-    if not user_message.strip():
-        return
-    _orig_msg = user_message  # preserve original case for $ detection
-
-    if not check_rate_limit(user_id):
-        await update.message.reply_text("Slow down a bit - try again in a minute.")
-        return
-
-    logger.info(f"Received: {user_message}")
-
-    # Brain dump mode check
-    if context.user_data.get("brain_dump_mode"):
-        await process_brain_dump(update, context)
-        return
-
-    # Briefing keyword trigger
-    text_lower = user_message.lower()
-    import re as _re  # used by multiple bypass patterns below
-    if any(phrase in text_lower for phrase in ["morning briefing", "daily briefing", "give me my briefing", "my briefing"]):
-        await briefing_command(update, context)
-        return
-
-    # Brain dump keyword trigger
-    if any(phrase in text_lower for phrase in ["brain dump", "braindump", "quick capture", "dump everything"]):
-        await brain_dump_command(update, context)
-        return
-
-    # Pending photo note confirmation
-    if context.user_data.get("pending_photo_note") and text_lower in ("yes", "yeah", "yep", "sure", "save it", "yes please", "do it", "save"):
-        note_text = context.user_data.pop("pending_photo_note", "")
-        # Extract text after NOTE_DETECTED:
-        import re as _re2
-        _note_match = _re2.search(r"NOTE_DETECTED:(.*?)(?:Would you|$)", note_text, _re2.DOTALL)
-        _extracted = _note_match.group(1).strip() if _note_match else note_text[:500]
-        reply = await handle_data_action({"action": "note_add", "text": f"[Photo note] {_extracted}"})
-        await update.message.reply_text(reply)
-        return
-
-    # Pending photo meal confirmation
-    if context.user_data.get("pending_photo_meal") and text_lower in ("yes", "yeah", "yep", "sure", "save it", "yes please", "do it", "save"):
-        meal_text = context.user_data.pop("pending_photo_meal", "")
-        import re as _re3
-        _meals = _re3.findall(r"MEAL_DETECTED:(.*?)(?:Would you|$)", meal_text, _re3.DOTALL)
-        _meal_raw = _meals[0] if _meals else ""
-        _meal_lines = [l.strip() for l in _meal_raw.split("\n") if l.strip() and not l.startswith("-")]
-        saved = []
-        for _m in _meal_lines[:5]:
-            await handle_data_action({"action": "meal_add", "meal": _m})
-            saved.append(_m)
-        await update.message.reply_text(f"Saved {len(saved)} meals to your list!")
-        return
-
-    # Pending calendar event confirmation (from photo)
-    if context.user_data.get("pending_calendar_event") and text_lower in ("yes", "yeah", "yep", "sure", "add it", "yes please", "do it"):
-        event_text = context.user_data.pop("pending_calendar_event", "")
-        service = get_calendar_service()
-        if not service:
-            await update.message.reply_text("Calendar not connected. Use /auth first.")
-            return
-        parse_prompt = (
-            "Extract calendar event details from this text and return ONLY a JSON object with keys: "
-            "title, start (YYYY-MM-DDTHH:MM:00), end (YYYY-MM-DDTHH:MM:00), location, description. "
-            "Use reasonable defaults if some fields are missing. "
-            f"Text: {event_text}"
-        )
-        try:
-            parse_resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": parse_prompt}],
-                max_tokens=200, temperature=0
-            )
-            import json as _json
-            raw = parse_resp.choices[0].message.content.strip()
-            raw = raw.replace("```json", "").replace("```", "").strip()
-            event_data = _json.loads(raw)
-            event = create_event(
-                title=event_data.get("title", "Event"),
-                start=event_data.get("start", ""),
-                end=event_data.get("end", ""),
-                description=event_data.get("description", "") + " " + event_data.get("location", "")
-            )
-            if event:
-                title = event_data.get("title", "Event")
-                title = event_data.get("title", "Event")
-                msg = "Added to your calendar: " + title + ". Note: added as a single event. For recurring events, open Google Calendar to set the repeat."
-                await update.message.reply_text(msg)
-            else:
-                await update.message.reply_text("Could not add the event. Please try using /auth to reconnect.")
-        except Exception as e:
-            logger.error(f"Calendar event from photo error: {e}")
-            await update.message.reply_text("Had trouble adding that event. Try describing it manually.")
-        return
-
-    # Expense quick-add: "$45 groceries" or "$45.50 gas"
-    _orig_msg = update.message.text or ''
-    _dollar_match = _re.match(r'^[$]([0-9]+(?:[.][0-9]{1,2})?) (.+)$', _orig_msg.strip())
-    if _dollar_match:
-        _amount = float(_dollar_match.group(1))
-        _category = _dollar_match.group(2).strip().title()
-        reply = await handle_data_action({"action": "expense_add", "amount": _amount, "category": _category, "note": ""})
-        await update.message.reply_text(reply)
-        return
-
-    # Direct gift idea bypass: "gift idea for [person]: [idea]"
-    import re as _re_g
-    _gift_match = _re_g.match(r'^gift idea for ([^:]+): (.+)$', user_message.strip(), _re_g.IGNORECASE)
-    if _gift_match:
-        _gp = _gift_match.group(1).strip()
-        _gi = _gift_match.group(2).strip()
-        # Check for occasion keywords
-        _occ = ""
-        for _kw, _ov in [("birthday","birthday"),("christmas","christmas"),("anniversary","anniversary"),("just because","just because")]:
-            if _kw in user_message.lower():
-                _occ = _ov
-                break
-        reply = await handle_data_action({"action": "gift_add", "person": _gp, "idea": _gi, "occasion": _occ, "date": ""})
-        await update.message.reply_text(reply)
-        return
-
-    # Direct shopping list bypass
-    _baby_keywords = ["diaper", "wipe", "formula", "baby", "luna", "onesie", "pacifier", "bottle", "bib"]
-    _household_keywords = ["soap", "detergent", "cleaner", "toilet paper", "paper towel", "trash bag",
-                           "sponge", "bleach", "laundry", "dish soap", "cleaning", "batteries", "light bulb", "candle"]
-    _wishlist_keywords = ["airpod", "iphone", "ipad", "laptop", "tv", "headphone", "watch", "console",
-                          "game", "gadget", "camera", "speaker", "keyboard"]
-    # Skip shopping bypass if message is clearly a todo add
-    _is_todo_add = any(phrase in text_lower for phrase in [
-        "to todo", "to my todo", "to the todo", "to my task", "to my list of todo",
-        "as a todo", "as a task", "to my tasks"
-    ])
-    _explicit_patterns = [] if _is_todo_add else [
-        (_re_g.match(r'^add (.+) to (?:my )?grocery(?: list)?$', text_lower.strip()), "grocery"),
-        (_re_g.match(r'^add (.+?) (?:for (?:luna|baby|the baby) )?to (?:my )?(?:baby|luna)(?: list)?$', text_lower.strip()), "baby"),
-        (_re_g.match(r'^add (.+) to (?:my )?household(?: list)?$', text_lower.strip()), "household"),
-        (_re_g.match(r'^add (.+) to (?:my )?wishlist$', text_lower.strip()), "wishlist"),
-        (_re_g.match(r'^add (.+) to (?:my )?shopping list$', text_lower.strip()), "grocery"),
-        (_re_g.match(r'^(?:pick up|get|buy) (.+)$', text_lower.strip()), None),
-        (_re_g.match(r'^add (.+)$', text_lower.strip()), None),
-    ]
-    for _sm, _sl in _explicit_patterns:
-        if _sm:
-            _si = _sm.group(1).strip()
-            # Remove trailing "to my list" etc
-            _si = _re_g.sub(r' (?:to my list|to the list|for me)$', '', _si).strip()
-            _si = _re_g.sub(r' for (?:luna|baby|the baby)$', '', _si, flags=_re_g.IGNORECASE).strip()
-            if not _si or len(_si) < 2:
-                continue
-            # Auto-assign list if not explicit
-            if _sl is None:
-                _si_lower = _si.lower()
-                if any(k in _si_lower for k in _baby_keywords):
-                    _sl = "baby"
-                elif any(k in _si_lower for k in _household_keywords):
-                    _sl = "household"
-                elif any(k in _si_lower for k in _wishlist_keywords):
-                    _sl = "wishlist"
-                else:
-                    _sl = "grocery"
-            reply = await handle_data_action({"action": "shop_add", "item": _si, "list": _sl})
-            await update.message.reply_text(reply)
-            return
-
-    # Direct todo delete detection - bypass GPT to avoid calendar misrouting
-    import re as _re
-    _stripped = text_lower.strip()
-    # Undo last delete
-    if _stripped in ("undo", "undo delete", "undo last delete", "restore todos", "restore last deleted"):
-        _undo_items = context.user_data.get("last_deleted_todos", [])
-        if not _undo_items:
-            await update.message.reply_text("Nothing to undo.")
-            return
-        _data = load_data()
-        for _item in _undo_items:
-            _data["todos"].append(_item)
-        save_data(_data)
-        context.user_data["last_deleted_todos"] = []
-        _names = ", ".join(i["text"] for i in _undo_items)
-        await update.message.reply_text(f"Restored: {_names}\n\nType /todos to see your updated list.")
-        return
-    # Extract all numbers from "delete todo(s) 1, 2, 3 and 4" patterns
-    if _re.match(r'^(?:delete|remove) todos?', _stripped):
-        _nums = [int(n) for n in _re.findall(r'\d+', _stripped)]
-        if _nums:
-            _data = load_data()
-            _active = [t for t in _data.get("todos", []) if not t.get("done")]
-            _to_delete = []
-            for _n in sorted(set(_nums)):
-                _i = _n - 1
-                if 0 <= _i < len(_active):
-                    _to_delete.append(_active[_i])
-            if not _to_delete:
-                await update.message.reply_text("Could not find those items. Type /todos to see current numbers.")
-                return
-            # Save for undo before deleting
-            context.user_data["last_deleted_todos"] = list(_to_delete)
-            _ids = {id(t) for t in _to_delete}
-            _data["todos"] = [t for t in _data["todos"] if id(t) not in _ids]
-            save_data(_data)
-            _names = ", ".join(t["text"] for t in _to_delete)
-            await update.message.reply_text(f"Deleted: {_names}\n\nSay \"undo\" within this session to restore.")
-            return
-
-    # Shopping multi-mark-done bypass
-    _shop_got = _re.match(r'^(got|bought|picked up|checked off) (.+)$', _stripped)
-    if _shop_got:
-        _items_text = _shop_got.group(2)
-        _nums = [int(n) for n in _re.findall(r'\d+', _items_text)]
-        if _nums:
-            _data = load_data()
-            _shop = _data.get("shopping", [])
-            _active_shop = [t for t in _shop if not t.get("done")]
-            _got_names = []
-            for _n in _nums:
-                _i = _n - 1
-                if 0 <= _i < len(_active_shop):
-                    _active_shop[_i]["done"] = True
-                    _got_names.append(_active_shop[_i]["text"])
-            if _got_names:
-                save_data(_data)
-                context.user_data["last_shop_done"] = _nums
-                await update.message.reply_text("Got it: " + ", ".join(_got_names) + "\n\nSay \"undo shopping\" to unmark.")
-                return
-
-    # Shopping undo
-    if _stripped in ("undo shopping", "unmark shopping", "undo shop"):
-        _data = load_data()
-        _last = context.user_data.get("last_shop_done", [])
-        if not _last:
-            await update.message.reply_text("Nothing to undo for shopping.")
-            return
-        _shop = _data.get("shopping", [])
-        _active_shop = [t for t in _shop if not t.get("done")]
-        _done_shop = [t for t in _shop if t.get("done")]
-        _restored = []
-        for _n in _last:
-            _i = _n - 1
-            if 0 <= _i < len(_done_shop):
-                _done_shop[_i]["done"] = False
-                _restored.append(_done_shop[_i]["text"])
-        if _restored:
-            save_data(_data)
-            context.user_data["last_shop_done"] = []
-            await update.message.reply_text("Unmarked: " + ", ".join(_restored))
-        else:
-            await update.message.reply_text("Nothing to undo.")
-        return
-
-    # /done shortcut: "done 3" marks todo 3 as complete
-    import re as _re
-    _done_match = _re.match(r'^done [0-9]+$', text_lower.strip())
-    if _done_match:
-        _done_idx = int(text_lower.strip().split()[-1])
-        _data = load_data()
-        _active = [t for t in _data.get("todos", []) if not t.get("done")]
-        if 0 <= _done_idx - 1 < len(_active):
-            _active[_done_idx - 1]["done"] = True
-            save_data(_data)
-            await update.message.reply_text(f"Done: {_active[_done_idx - 1]['text']}")
-        else:
-            await update.message.reply_text("Could not find that todo.")
-        return
-
-    # "add anyway" override for dedup warning
-    if text_lower.strip() in ("add anyway", "add it anyway", "yes add it", "add it"):
-        if context.user_data.get("pending_todo_add"):
-            _pend = context.user_data.pop("pending_todo_add")
-            _data = load_data()
-            _data["todos"].append({"text": _pend["text"], "done": False,
-                                   "added": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                                   "priority": _pend.get("priority", "normal")})
-            save_data(_data)
-            await update.message.reply_text(f"Added: {_pend['text']}")
-            return
-
-    # Direct priority todo detection - ensure priority is passed correctly
-    _high_patterns = ["high priority:", "urgent:", "high priority -", "urgent -"]
-    _low_patterns = ["low priority:", "low priority -"]
-    _detected_priority = None
-    _todo_text = text_lower.strip()
-    for pat in _high_patterns:
-        if _todo_text.startswith(pat):
-            _detected_priority = "high"
-            _todo_text = user_message[len(pat):].strip()
-            break
-    if not _detected_priority:
-        for pat in _low_patterns:
-            if _todo_text.startswith(pat):
-                _detected_priority = "low"
-                _todo_text = user_message[len(pat):].strip()
-                break
-    if _detected_priority and _todo_text:
-        reply = await handle_data_action({"action": "todo_add", "item": _todo_text, "priority": _detected_priority})
-        await update.message.reply_text(reply, parse_mode="HTML")
-        return
-
-    # Habit logging check - skip if message is about scheduling/planning (not completing)
-    scheduling_words = ["schedule", "remind me", "every monday", "every tuesday",
-                        "every wednesday", "every thursday", "every friday",
-                        "every saturday", "every sunday", "every day", "every week",
-                        "set a reminder", "add to calendar", "create a reminder",
-                        "plan to", "going to", "will do", "want to", "need to"]
-    is_scheduling = any(w in text_lower for w in scheduling_words)
-    data = load_data()
-    if not is_scheduling:
-        habit_response = check_habit_from_message(text_lower, data)
-        if habit_response:
-            await update.message.reply_text(habit_response)
-            audit_log(f"HABIT user={user_id}")
-            return
-
-    # Load conversation from persistent storage, merge with in-memory
-    if user_id not in conversation_history:
-        saved = load_conversation()
-        conversation_history[user_id] = saved.get(str(user_id), [])
-
-    conversation_history[user_id].append({"role": "user", "content": user_message[:2000]})
-    if len(conversation_history[user_id]) > 20:
-        conversation_history[user_id] = conversation_history[user_id][-20:]
-
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-
-    try:
-        now = datetime.datetime.now().strftime("%A, %B %-d, %Y, %-I:%M %p")
-        # Add contact context if any known contacts
-        contacts = load_contacts()
-        contact_ctx = ""
-        if contacts:
-            contact_ctx = "\n\nKnown contacts:\n"
-            for name, facts in list(contacts.items())[:10]:
-                facts_list = facts if isinstance(facts, list) else [facts]
-                contact_ctx += f"- {name}: {'; '.join(facts_list[:3])}\n"
-        system = SYSTEM_PROMPT + CONTACT_SYSTEM_ADDON + f"\n\nCurrent date/time: {now} (Mountain Time)" + contact_ctx
-        messages = [{"role": "system", "content": system}] + conversation_history[user_id]
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            max_tokens=900,
-            temperature=0.7
-        )
-
-        assistant_message = response.choices[0].message.content
-        reply_lines = []
-
-        for line in assistant_message.split("\n"):
-            if line.startswith("CALENDAR_ACTION:"):
-                json_str = line.replace("CALENDAR_ACTION:", "").strip()
-                try:
-                    action_data = json.loads(json_str)
-                    cal_reply = await handle_calendar_action(action_data, update)
-                    if cal_reply:
-                        reply_lines.append(cal_reply)
-                except Exception as e:
-                    logger.error(f"Calendar action error: {e}")
-            elif line.startswith("DATA_ACTION:"):
-                json_str = line.replace("DATA_ACTION:", "").strip()
-                try:
-                    action_data = json.loads(json_str)
-                    data_reply = await handle_data_action(action_data)
-                    if data_reply:
-                        reply_lines.append(data_reply)
-                        if action_data.get("action") in ("todo_list", "sleep_list", "mood_list", "habit_list"):
-                            context.user_data["_last_html_reply"] = True
-                except Exception as e:
-                    logger.error(f"Data action error: {e}")
-            elif line.startswith("CONTACT_ACTION:"):
-                json_str = line.replace("CONTACT_ACTION:", "").strip()
-                try:
-                    contact_data = json.loads(json_str)
-                    contacts = load_contacts()
-                    name = contact_data.get("name", "").title()
-                    fact = contact_data.get("fact", "").strip()
-                    if name and fact:
-                        if name not in contacts:
-                            contacts[name] = []
-                        if isinstance(contacts[name], str):
-                            contacts[name] = [contacts[name]]
-                        contacts[name].append(fact)
-                        save_contacts(contacts)
-                        reply_lines.append(f"Got it! Saved note about {name}: {fact}")
-                        audit_log(f"CONTACT_SAVED {name}")
-                except Exception as e:
-                    logger.error(f"Contact action error: {e}")
-            else:
-                if line.strip():
-                    reply_lines.append(line)
-
-        final_reply = "\n".join(reply_lines).strip()
-        if not final_reply:
-            final_reply = "Done!"
-
-        conversation_history[user_id].append({"role": "assistant", "content": final_reply})
-        # Persist conversation to disk
-        all_history = load_conversation()
-        all_history[str(user_id)] = conversation_history[user_id]
-        save_conversation(all_history)
-        audit_log(f"MSG user={user_id} len={len(user_message)}")
-        await send_long_message(update.message, final_reply)
-
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        audit_log(f"ERROR {str(e)[:100]}")
-        try:
-            await context.bot.send_message(
-                chat_id=ALLOWED_USER_ID,
-                text=f"Bot error alert: {str(e)[:200]}"
-            )
-        except Exception:
-            pass
-        await update.message.reply_text("Sorry, ran into an issue. Please try again.")
-
-
-# Phase 6 - Sports recap helpers
-
-MY_TEAMS = {
-    "nba": ["celtics", "jazz"],
-    "nfl": ["patriots"],
-    "mlb": ["red sox"],
-}
-
-ESPN_URLS = {
-    "nba": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
-    "nfl": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
-    "mlb": "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
-}
-
-LEAGUE_LABELS = {"nba": "NBA", "nfl": "NFL", "mlb": "MLB"}
-
-
-def fetch_espn_scores(league, date_str):
-    cache_key = f"espn_{league}_{date_str}"
-    cached = cache_get(cache_key, max_age_seconds=300)
-    if cached is not None:
-        return cached
-    try:
-        url = ESPN_URLS[league]
-        resp = requests.get(url, params={"dates": date_str}, timeout=10)
-        data = resp.json()
-        games = []
-        for event in data.get("events", []):
-            comp = event.get("competitions", [{}])[0]
-            competitors = comp.get("competitors", [])
-            if len(competitors) < 2:
-                continue
-            home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
-            away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
-            home_name = home.get("team", {}).get("displayName", "")
-            away_name = away.get("team", {}).get("displayName", "")
-            home_score = home.get("score", "")
-            away_score = away.get("score", "")
-            status = event.get("status", {}).get("type", {}).get("description", "")
-            winner = ""
-            if home.get("winner"):
-                winner = home_name
-            elif away.get("winner"):
-                winner = away_name
-            leaders = []
-            for leader_cat in comp.get("leaders", []):
-                for leader in leader_cat.get("leaders", [])[:1]:
-                    name = leader.get("athlete", {}).get("displayName", "")
-                    stat = leader.get("displayValue", "")
-                    cat = leader_cat.get("shortDisplayName", "")
-                    if name and stat:
-                        leaders.append(f"{name} {stat} {cat}")
-            games.append({
-                "home": home_name, "away": away_name,
-                "home_score": home_score, "away_score": away_score,
-                "status": status, "winner": winner,
-                "leaders": leaders[:2],
-            })
-        cache_set(cache_key, games)
-        return games
-    except Exception as e:
-        logger.error(f"ESPN fetch error {league}: {e}")
-        return []
-
-
-def format_sports_recap(date_label="yesterday", my_teams_only=False):
-    tz = pytz.timezone("America/Denver")
-    now = datetime.datetime.now(tz)
-    if date_label == "yesterday":
-        target = now - datetime.timedelta(days=1)
-    else:
-        target = now
-    date_str = target.strftime("%Y%m%d")
-    sections = []
-    for league in ["nba", "nfl", "mlb"]:
-        games = fetch_espn_scores(league, date_str)
-        if not games:
-            continue
-        my_team_names = MY_TEAMS[league]
-        my_games = []
-        other_games = []
-        for g in games:
-            is_my_team = any(
-                t in g["home"].lower() or t in g["away"].lower()
-                for t in my_team_names
-            )
-            if is_my_team:
-                my_games.append(g)
-            else:
-                other_games.append(g)
-        if my_teams_only and not my_games:
-            continue
-        games_to_show = my_games if my_teams_only else (my_games + other_games)
-        league_lines = [f"{LEAGUE_LABELS[league]}"]
-        for g in games_to_show:
-            score_line = f"  {g['away']} {g['away_score']} @ {g['home']} {g['home_score']}"
-            if g["winner"]:
-                score_line += f" - {g['winner']} win"
-            league_lines.append(score_line)
-            for leader in g["leaders"]:
-                league_lines.append(f"    {leader}")
-        if len(league_lines) > 1:
-            sections.append("\n".join(league_lines))
-    if not sections:
-        return None
-    # Sleep summary
-    sleep_log = user_data.get("sleep_log", [])
-    week_sleep = [e for e in sleep_log if e.get("date", "") >= week_start_str]
-    if week_sleep:
-        hours_list = [e["hours"] for e in week_sleep if "hours" in e]
-        if hours_list:
-            avg_sleep = sum(hours_list) / len(hours_list)
-            low_nights = sum(1 for h in hours_list if h < 6)
-            sleep_line = f"Avg: {avg_sleep:.1f}h/night over {len(hours_list)} night(s)"
-            if low_nights:
-                sleep_line += f" ({low_nights} night(s) under 6h)"
-            sections.append(f"😴 <b>Sleep</b>\n{sleep_line}")
-
-    # Mood summary
-    mood_log = user_data.get("mood_log", [])
-    week_moods = [e for e in mood_log if e.get("date", "") >= week_start_str]
-    if week_moods:
-        mood_counts = {}
-        for e in week_moods:
-            m = e.get("mood", "okay")
-            mood_counts[m] = mood_counts.get(m, 0) + 1
-        top_mood = max(mood_counts, key=mood_counts.get)
-        emoji_map = {"great": "🌟", "good": "😊", "okay": "😐", "tired": "😴", "stressed": "😤", "anxious": "😰", "low": "😔"}
-        em = emoji_map.get(top_mood, "")
-        sections.append(f"🧠 <b>Mood</b>\nMost common: {top_mood} {em} ({mood_counts[top_mood]}x)")
-
-    return "\n\n".join(sections)
-
-
-# Phase 6 - Quote and word of the day via GPT
-
-def get_stoic_quote():
-    """Fetch a random stoic quote from free API, fall back to GPT if unavailable."""
-    try:
-        resp = requests.get("https://stoic-quotes.azurewebsites.net/api/random", timeout=8)
-        data = resp.json()
-        quote = data.get("body", "").strip()
-        author = data.get("author", "").strip()
-        if quote and author:
-            return f'"{quote}"\n- {author}'
-    except Exception:
-        pass
-    # GPT fallback
-    try:
-        import random as _rq
-        _seed = datetime.datetime.now().strftime("%Y-%m-%d") + str(_rq.randint(100, 999))
-        resp2 = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": (
-                f"Seed:{_seed}. Give me one authentic stoic quote - NOT from Marcus Aurelius Meditations Book 1. "
-                "Choose from Seneca Letters, Epictetus Enchiridion, or lesser-known Marcus passages. "
-                "Return ONLY this format:\nQuote text here\n- Author Name"
-            )}],
-            max_tokens=120,
-            temperature=0.9
-        )
-        return resp2.choices[0].message.content.strip()
-    except Exception:
-        return None
-
-
-DAILY_WORDS = [
-    ("aberrant","adjective","departing from normal or expected","His aberrant behavior alarmed his colleagues."),
-    ("abscond","verb","to leave hurriedly to avoid consequences","The thief absconded with the jewels before dawn."),
-    ("acumen","noun","keen insight or shrewdness","Her business acumen helped the company thrive."),
-    ("adroit","adjective","clever and skillful","He was adroit at navigating difficult conversations."),
-    ("aesthetic","noun","appreciation of beauty","The gallery had a minimalist aesthetic."),
-    ("affable","adjective","friendly and easy to talk to","The affable host made everyone feel welcome."),
-    ("alacrity","noun","brisk and cheerful readiness","She accepted the challenge with alacrity."),
-    ("amalgam","noun","a mixture or blend","The song was an amalgam of jazz and classical."),
-    ("ambivalent","adjective","having mixed feelings","He felt ambivalent about the job offer."),
-    ("ameliorate","verb","to make something bad better","Rest will ameliorate your symptoms."),
-    ("anachronism","noun","something out of its time period","A typewriter in a modern office is an anachronism."),
-    ("anomaly","noun","something that deviates from the norm","The warm February was a weather anomaly."),
-    ("antipathy","noun","strong dislike","She felt a deep antipathy toward dishonesty."),
-    ("apathy","noun","lack of interest or enthusiasm","Voter apathy lowered turnout at the election."),
-    ("apprise","verb","to inform or notify","Please apprise me of any changes to the plan."),
-    ("arcane","adjective","understood by few, mysterious","The manual was full of arcane technical jargon."),
-    ("ardent","adjective","enthusiastic and passionate","She was an ardent supporter of the cause."),
-    ("arduous","adjective","involving great effort","The mountain hike was arduous but rewarding."),
-    ("articulate","adjective","able to express clearly","She was articulate and persuasive in her speech."),
-    ("ascertain","verb","to find out for certain","He called to ascertain the meeting time."),
-    ("assiduous","adjective","showing great care and effort","Her assiduous study habits paid off at exam time."),
-    ("astute","adjective","having sharp judgment","The astute investor spotted the trend early."),
-    ("attrition","noun","gradual reduction by wearing down","Staff attrition left the team understaffed."),
-    ("audacious","adjective","showing bold confidence","It was an audacious move that paid off."),
-    ("augment","verb","to make larger or stronger","Exercise can augment your mental clarity."),
-    ("auspicious","adjective","showing signs of future success","It was an auspicious start to the new year."),
-    ("authentic","adjective","genuine, not a copy","The restaurant served authentic Thai cuisine."),
-    ("avarice","noun","extreme greed for wealth","His avarice led to corrupt decisions."),
-    ("avid","adjective","having a keen interest in something","She was an avid reader of historical fiction."),
-    ("banal","adjective","so common as to be boring","The speech was filled with banal platitudes."),
-    ("beguile","verb","to charm or enchant","The storyteller beguiled the audience for hours."),
-    ("belabor","verb","to argue about in excessive detail","There is no need to belabor the point."),
-    ("benevolent","adjective","well-meaning and kindly","The benevolent donor funded the new library."),
-    ("boon","noun","a welcome benefit","The rain was a boon for the drought-stricken farm."),
-    ("brevity","noun","concise and exact use of words","Brevity is the soul of wit."),
-    ("buoyant","adjective","cheerful and optimistic","She remained buoyant despite setbacks."),
-    ("byzantine","adjective","excessively complicated","The tax code is notoriously byzantine."),
-    ("cacophony","noun","a harsh mixture of sounds","The construction site was a cacophony."),
-    ("candid","adjective","truthful and straightforward","She gave a candid assessment of the situation."),
-    ("catalyst","noun","something that causes change","The protest was a catalyst for new legislation."),
-    ("caustic","adjective","sharply critical or sarcastic","His caustic wit could sting if you were the target."),
-    ("circumspect","adjective","wary and cautious","Be circumspect when sharing personal information."),
-    ("clandestine","adjective","kept secret or done covertly","They held clandestine meetings after hours."),
-    ("cogent","adjective","clear and persuasive","She made a cogent argument for the proposal."),
-    ("complacent","adjective","self-satisfied and unaware of danger","Success made him complacent about competition."),
-    ("conundrum","noun","a difficult problem or question","Balancing work and family is a constant conundrum."),
-    ("copious","adjective","abundant in supply","She took copious notes during the lecture."),
-    ("corroborate","verb","to confirm or give support to","Witnesses corroborated the account."),
-    ("credulous","adjective","too ready to believe things","The credulous buyer paid far too much."),
-    ("culpable","adjective","responsible for a fault","He was found culpable for the data breach."),
-    ("cursory","adjective","hasty and therefore not thorough","A cursory glance revealed several errors."),
-    ("cynical","adjective","distrustful of human sincerity","Years of disappointment made her cynical."),
-    ("dauntless","adjective","fearless","The dauntless explorer pressed into unknown territory."),
-    ("deft","adjective","neatly skillful and quick","She was deft at handling awkward conversations."),
-    ("deliberate","adjective","done consciously and intentionally","His choice of words was deliberate."),
-    ("deluge","noun","a severe flood or overwhelming amount","The launch was followed by a deluge of orders."),
-    ("demagogue","noun","a leader who appeals to emotions over reason","The demagogue exploited public fears."),
-    ("demerit","noun","a fault or disadvantage","One demerit of the plan was its high cost."),
-    ("deplore","verb","to feel strong disapproval of","She deplored the lack of transparency."),
-    ("deride","verb","to express contempt for","Critics derided the film as shallow."),
-    ("dexterous","adjective","showing skill with hands or mind","The dexterous surgeon worked with great precision."),
-    ("dichotomy","noun","a division into two contrasting things","There is a dichotomy between theory and practice."),
-    ("diffident","adjective","modest or shy due to lack of confidence","He was diffident about sharing his ideas."),
-    ("diligent","adjective","having steady effort","Her diligent work ethic set her apart."),
-    ("discerning","adjective","having good judgment","A discerning reader catches subtle details."),
-    ("disparate","adjective","fundamentally different","The report combined disparate data sources."),
-    ("dissonance","noun","lack of agreement or harmony","There was cognitive dissonance in his reasoning."),
-    ("divisive","adjective","causing disagreement between groups","The policy was divisive among voters."),
-    ("dogmatic","adjective","inclined to lay down principles as absolute truth","His dogmatic stance left no room for debate."),
-    ("durable","adjective","able to withstand wear over time","Choose durable materials for outdoor furniture."),
-    ("ebullient","adjective","cheerful and full of energy","Her ebullient personality lit up the room."),
-    ("eclectic","adjective","deriving from a broad range of sources","Her music taste was wonderfully eclectic."),
-    ("edify","verb","to instruct or improve morally","Great literature has the power to edify readers."),
-    ("efficacious","adjective","successful in producing a desired result","The treatment proved efficacious in trials."),
-    ("effusive","adjective","expressing feelings in an unrestrained way","The effusive praise made him blush."),
-    ("egregious","adjective","outstandingly bad","It was an egregious violation of the rules."),
-    ("elicit","verb","to draw out a response","The comedian elicited laughter from the crowd."),
-    ("eloquent","adjective","fluent and persuasive in speaking","She gave an eloquent defense of the policy."),
-    ("emulate","verb","to match or surpass by imitation","He tried to emulate his mentor's success."),
-    ("endemic","adjective","regularly found among a particular group","Corruption was endemic in the institution."),
-    ("enigmatic","adjective","difficult to interpret","The Mona Lisa's smile is famously enigmatic."),
-    ("equanimity","noun","calmness and composure","She faced adversity with remarkable equanimity."),
-    ("equivocal","adjective","open to more than one interpretation","His equivocal answer left everyone uncertain."),
-    ("erudite","adjective","having great knowledge","The erudite professor wrote dozens of books."),
-    ("esoteric","adjective","intended for a small specialized audience","The lecture was far too esoteric for beginners."),
-    ("exacerbate","verb","to make worse","Poor sleep can exacerbate stress."),
-    ("exemplary","adjective","serving as a desirable model","Her exemplary conduct earned high praise."),
-    ("exhaustive","adjective","examining every detail","The audit was exhaustive and thorough."),
-    ("expedient","adjective","useful for achieving a particular end","It was expedient to delay the announcement."),
-    ("explicit","adjective","stated clearly and in detail","The contract included explicit payment terms."),
-    ("exuberant","adjective","filled with lively energy","The crowd gave an exuberant cheer."),
-    ("facetious","adjective","treating serious issues with inappropriate humor","His facetious remark fell flat at the meeting."),
-    ("fallacious","adjective","based on a mistaken belief","The argument was logically fallacious."),
-    ("fastidious","adjective","very attentive to accuracy and detail","She was fastidious about keeping records."),
-    ("fervent","adjective","having passionate intensity","He was a fervent advocate for education."),
-    ("fidelity","noun","faithfulness to a person or cause","The soldiers showed unwavering fidelity."),
-    ("flagrant","adjective","conspicuously wrong","It was a flagrant breach of trust."),
-    ("flippant","adjective","not showing appropriate seriousness","His flippant response angered the committee."),
-    ("fortuitous","adjective","happening by lucky chance","Their meeting was entirely fortuitous."),
-    ("frugal","adjective","economical in use of resources","Living frugally allowed them to retire early."),
-    ("garrulous","adjective","excessively talkative","The garrulous neighbor talked for an hour."),
-    ("germane","adjective","relevant and appropriate","Your point is highly germane to the discussion."),
-    ("grandiose","adjective","impressively large and ambitious","The grandiose project was scaled back quickly."),
-    ("gratuitous","adjective","uncalled for and lacking justification","The film had gratuitous violence."),
-    ("gregarious","adjective","fond of company and sociable","He was gregarious and made friends easily."),
-    ("guile","noun","cunning intelligence","She used guile to navigate office politics."),
-    ("hackneyed","adjective","overused and lacking originality","The speech was full of hackneyed phrases."),
-    ("harangue","verb","to lecture at length","The coach harangued the team after the loss."),
-    ("hegemony","noun","leadership or dominance of one group over others","The company sought hegemony in the market."),
-    ("hyperbole","noun","exaggerated statements not meant to be taken literally","Saying I have a million things to do is hyperbole."),
-    ("iconoclast","noun","a person who challenges cherished beliefs","The startup founder was an iconoclast."),
-    ("idiosyncratic","adjective","peculiar to the individual","Her idiosyncratic style made her recognizable."),
-    ("ignoble","adjective","not honorable or worthy","It was an ignoble end to a great career."),
-    ("immutable","adjective","unchanging over time","Some scientific laws appear immutable."),
-    ("impartial","adjective","treating all rivals equally","A mediator must be impartial."),
-    ("impeccable","adjective","in accordance with the highest standards","He had impeccable taste in design."),
-    ("imperious","adjective","assuming power without justification","Her imperious tone put people off."),
-    ("impetuous","adjective","acting without thought or care","An impetuous decision cost him the deal."),
-    ("incisive","adjective","intelligently analytical","Her incisive critique improved the proposal."),
-    ("incoherent","adjective","expressed in a confused way","The argument was rambling and incoherent."),
-    ("incongruent","adjective","not consistent with the surroundings","The modern building felt incongruent in the old town."),
-    ("indefatigable","adjective","persisting tirelessly","She was an indefatigable campaigner."),
-    ("indolent","adjective","wanting to avoid activity or exertion","The indolent student barely passed."),
-    ("ineffable","adjective","too great to be expressed in words","The beauty of the sunrise was ineffable."),
-    ("inexorable","adjective","impossible to stop or prevent","The inexorable march of technology continues."),
-    ("ingenious","adjective","clever and inventive","The ingenious solution saved hours of work."),
-    ("innate","adjective","existing from birth","She had an innate sense of rhythm."),
-    ("inscrutable","adjective","impossible to understand","His expression was completely inscrutable."),
-    ("insidious","adjective","proceeding in a subtle but harmful way","The insidious effects of stress build slowly."),
-    ("integrity","noun","the quality of being honest and having strong principles","His integrity was never in question."),
-    ("intrepid","adjective","fearless and adventurous","The intrepid journalist reported from the front line."),
-    ("intuitive","adjective","based on what one feels to be true","She had an intuitive grasp of the problem."),
-    ("irascible","adjective","having or showing a tendency to be easily angered","The irascible boss made the office tense."),
-    ("juxtaposition","noun","placing things side by side to highlight contrast","The juxtaposition of old and new was striking."),
-    ("laconic","adjective","using very few words","His laconic reply was just: done."),
-    ("languid","adjective","weak from illness or fatigue","She felt languid after a week of poor sleep."),
-    ("lassitude","noun","physical or mental weariness","A feeling of lassitude set in by Friday afternoon."),
-    ("laudable","adjective","deserving praise","It was a laudable effort under difficult conditions."),
-    ("lethargic","adjective","affected by lethargy, sluggish","Cold weather made him feel lethargic."),
-    ("levity","noun","humor in a serious situation","A touch of levity broke the tension."),
-    ("loquacious","adjective","tending to talk a great deal","The loquacious guest dominated the dinner conversation."),
-    ("lucid","adjective","expressed clearly","She gave a lucid explanation of the process."),
-    ("magnanimous","adjective","generous in forgiving","He was magnanimous in victory."),
-    ("malleable","adjective","easily influenced or shaped","Young minds are remarkably malleable."),
-    ("manifest","verb","to display or show clearly","His anxiety manifested as restlessness."),
-    ("maverick","noun","an independent-minded person","She was a maverick who challenged every convention."),
-    ("mendacious","adjective","not telling the truth","The mendacious report misled investors."),
-    ("mercurial","adjective","subject to sudden changes of mood","His mercurial temperament made him unpredictable."),
-    ("meticulous","adjective","showing great attention to detail","The meticulous accountant never made errors."),
-    ("mitigate","verb","to lessen the severity of something","Sunscreen mitigates the risk of sunburn."),
-    ("modicum","noun","a small quantity of something","He showed a modicum of humility."),
-    ("mollify","verb","to appease the anger of","A sincere apology mollified the upset customer."),
-    ("mundane","adjective","lacking interest or excitement","Even mundane tasks deserve full attention."),
-    ("nebulous","adjective","unclear or vague","The plan was still nebulous at this stage."),
-    ("nefarious","adjective","wicked or criminal","The nefarious scheme was uncovered by auditors."),
-    ("nuanced","adjective","acknowledging subtle distinctions","A nuanced perspective considers all angles."),
-    ("obdurate","adjective","stubbornly refusing to change","He remained obdurate despite the evidence."),
-    ("obfuscate","verb","to make unclear or confusing","Dense jargon can obfuscate the real message."),
-    ("obstinate","adjective","stubbornly refusing to change","He was obstinate in his refusal to apologize."),
-    ("obtuse","adjective","slow to understand","He was being deliberately obtuse about the rules."),
-    ("omniscient","adjective","knowing everything","The narrator of the novel was omniscient."),
-    ("opaque","adjective","not transparent, difficult to understand","The policy document was unnecessarily opaque."),
-    ("ostensible","adjective","appearing to be true but not necessarily so","The ostensible reason was budget cuts."),
-    ("ostentatious","adjective","designed to impress","His ostentatious display of wealth alienated colleagues."),
-    ("palpable","adjective","able to be touched or felt","The tension in the room was palpable."),
-    ("paradigm","noun","a typical example or pattern","The invention shifted the paradigm."),
-    ("paradox","noun","a situation that seems contradictory but is true","It is a paradox that standing still takes effort."),
-    ("parsimonious","adjective","unwilling to spend money","The parsimonious owner kept costs very low."),
-    ("pedantic","adjective","overly concerned with minor details","His pedantic corrections annoyed the team."),
-    ("penchant","noun","a strong liking for something","She had a penchant for bold color combinations."),
-    ("pensive","adjective","engaged in deep thought","He stared out the window in a pensive mood."),
-    ("perennial","adjective","lasting or occurring repeatedly","Traffic is a perennial problem in the city."),
-    ("perfidious","adjective","deceitful and untrustworthy","The perfidious ally switched sides."),
-    ("perfunctory","adjective","carried out with little effort","The review was perfunctory at best."),
-    ("perseverance","noun","continued effort in spite of difficulty","Perseverance is the key to mastery."),
-    ("perspicacious","adjective","having ready insight","A perspicacious analyst spotted the trend."),
-    ("pertinacious","adjective","holding firmly to an opinion","His pertinacious insistence finally paid off."),
-    ("plausible","adjective","seeming reasonable or probable","The explanation was plausible but unproven."),
-    ("poignant","adjective","evoking a keen sense of sadness","The film had a deeply poignant ending."),
-    ("pragmatic","adjective","dealing with things sensibly and practically","Take a pragmatic approach to problem solving."),
-    ("precipitate","verb","to cause something to happen suddenly","The news precipitated a sharp market drop."),
-    ("prestige","noun","widespread respect from achievement","The award brought prestige to the program."),
-    ("prevaricate","verb","to speak in an evasive way","He prevaricated when asked about the deadline."),
-    ("prolific","adjective","producing many results","She was a prolific writer with thirty novels."),
-    ("propitious","adjective","giving or indicating a good chance of success","It was a propitious moment to launch."),
-    ("prosaic","adjective","dull and lacking imagination","The meeting was prosaic and uneventful."),
-    ("prudent","adjective","acting with careful thought","It is prudent to save before spending."),
-    ("pugnacious","adjective","eager or quick to argue","His pugnacious style won him enemies."),
-    ("punctilious","adjective","showing great attention to correct behavior","She was punctilious about meeting deadlines."),
-    ("querulous","adjective","complaining in a petulant way","The querulous passenger complained about everything."),
-    ("quixotic","adjective","exceedingly idealistic and impractical","The quixotic scheme was doomed from the start."),
-    ("recalcitrant","adjective","having an obstinate uncooperative attitude","The recalcitrant employee refused all training."),
-    ("reclusive","adjective","avoiding the company of others","The reclusive author rarely gave interviews."),
-    ("redolent","adjective","strongly reminiscent of something","The melody was redolent of her childhood."),
-    ("remonstrate","verb","to make a forceful protest","She remonstrated with the manager about the error."),
-    ("repudiate","verb","to refuse to accept or be associated with","He repudiated the false claims immediately."),
-    ("resilient","adjective","able to recover quickly from difficulty","She was resilient in the face of adversity."),
-    ("resolute","adjective","admirably purposeful and determined","She remained resolute under pressure."),
-    ("reticent","adjective","not revealing one's thoughts readily","He was reticent about his personal life."),
-    ("sagacious","adjective","having good judgment","The sagacious advisor guided the team wisely."),
-    ("salient","adjective","most noticeable or important","The salient point was buried in footnotes."),
-    ("sanguine","adjective","optimistic especially in difficult situations","She was sanguine about the outcome."),
-    ("sardonic","adjective","grimly mocking","His sardonic humor put people on edge."),
-    ("scrupulous","adjective","diligent and careful","She was scrupulous about citing her sources."),
-    ("sedulous","adjective","showing dedication and diligence","He was sedulous in his preparation."),
-    ("serendipity","noun","fortunate happenstance","Finding that cafe was pure serendipity."),
-    ("shrewd","adjective","having sharp judgment in practical matters","A shrewd negotiator always reads the room."),
-    ("solicitous","adjective","showing interest and concern","The doctor was solicitous about her recovery."),
-    ("solvent","adjective","having assets in excess of liabilities","The company remained solvent through the downturn."),
-    ("specious","adjective","superficially plausible but wrong","The argument was specious on closer inspection."),
-    ("stoic","adjective","enduring pain without complaint","He faced the diagnosis with stoic calm."),
-    ("strident","adjective","loud and harsh in tone","Her strident criticism overshadowed valid points."),
-    ("stringent","adjective","strict and precise","The new regulations are stringent but necessary."),
-    ("succinct","adjective","briefly and clearly expressed","Keep your summary succinct and to the point."),
-    ("superfluous","adjective","unnecessary, especially through being more than enough","Remove all superfluous words from your writing."),
-    ("surreptitious","adjective","kept secret because it would not be approved","He took a surreptitious glance at his phone."),
-    ("sycophant","noun","a person who flatters to gain favor","The boss was surrounded by sycophants."),
-    ("tacit","adjective","understood without being stated","There was a tacit agreement to drop the subject."),
-    ("tangential","adjective","only slightly related to the matter","The comment was tangential to the main discussion."),
-    ("tenacious","adjective","not giving up easily","Her tenacious spirit saw the project to completion."),
-    ("terse","adjective","sparing in use of words","His terse reply ended the conversation."),
-    ("timorous","adjective","showing or suffering from nervousness","The timorous speaker barely raised her voice."),
-    ("torpid","adjective","mentally or physically inactive","The heat made everyone torpid by afternoon."),
-    ("tractable","adjective","easy to control or manage","The tractable team accepted feedback well."),
-    ("transient","adjective","lasting only a short time","Fame is transient but character endures."),
-    ("trenchant","adjective","vigorous and to the point","The trenchant review praised nothing."),
-    ("trepidation","noun","a feeling of fear about something that might happen","She approached the meeting with trepidation."),
-    ("truculent","adjective","eager to argue or fight","His truculent attitude made collaboration difficult."),
-    ("ubiquitous","adjective","present everywhere at the same time","Smartphones have become ubiquitous."),
-    ("umbrage","noun","offense or annoyance","He took umbrage at the offhand remark."),
-    ("unequivocal","adjective","leaving no doubt","Her unequivocal answer left no room for confusion."),
-    ("unfettered","adjective","not confined or restricted","She had unfettered access to all records."),
-    ("unilateral","adjective","performed by or affecting only one side","The decision was made unilaterally."),
-    ("vacuous","adjective","having or showing a lack of thought","The celebrity interview was completely vacuous."),
-    ("veracious","adjective","speaking or representing the truth","She had a reputation for being veracious."),
-    ("verbose","adjective","using more words than necessary","His verbose report could be cut in half."),
-    ("viable","adjective","capable of working successfully","Is this a viable long-term solution?"),
-    ("vicarious","adjective","experienced through another person","She lived vicariously through travel documentaries."),
-    ("vindictive","adjective","having a strong desire for revenge","His vindictive response shocked the team."),
-    ("visceral","adjective","relating to deep feelings rather than intellect","The film provoked a visceral reaction."),
-    ("vociferous","adjective","expressing feelings in a loud way","The vociferous crowd demanded action."),
-    ("volatile","adjective","liable to change rapidly and unpredictably","The volatile market unnerved investors."),
-    ("wary","adjective","feeling cautious about possible dangers","Be wary of offers that seem too good to be true."),
-    ("zealous","adjective","having great energy for a cause","She was zealous in her pursuit of fairness."),
-    ("zeitgeist","noun","the defining spirit of a particular period","The film perfectly captures the zeitgeist of the era."),
-]
-
-def get_word_of_the_day():
-    """Pick word by day-of-year from hardcoded list - never repeats within a year."""
-    try:
-        day_of_year = datetime.datetime.now().timetuple().tm_yday
-        word_data = DAILY_WORDS[(day_of_year - 1) % len(DAILY_WORDS)]
-        word, part, meaning, example = word_data
-        return (
-            f"WORD: {word}\n"
-            f"PART: {part}\n"
-            f"MEANING: {meaning}\n"
-            f"EXAMPLE: {example}"
-        )
-    except Exception:
-        return None
-
-
-def get_habit_streak(habit_log, habit_key):
-    """Calculate current streak for a habit."""
-    tz = pytz.timezone("America/Denver")
-    today = datetime.datetime.now(tz).date()
-    streak = 0
-    check_date = today
-    while True:
-        date_str = check_date.strftime("%Y-%m-%d")
-        if any(e.get("habit") == habit_key and e.get("date", "").startswith(date_str)
-               for e in habit_log):
-            streak += 1
-            check_date -= datetime.timedelta(days=1)
-        else:
-            break
-    return streak
-
-
-def get_briefing_habits(user_data):
-    habit_log = user_data.get("habit_log", [])
-    if not habit_log:
-        return None
-    tz = pytz.timezone("America/Denver")
-    today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
-    lines = ["🔥 <b>Habit Streaks</b>"]
-    any_streak = False
-    for habit in HABITS:
-        streak = get_habit_streak(habit_log, habit)
-        done_today = any(
-            e.get("habit") == habit and e.get("date", "").startswith(today_str)
-            for e in habit_log
-        )
-        if streak > 0:
-            any_streak = True
-            check = "✅" if done_today else "⬜"
-            label = HABIT_LABELS[habit]
-            lines.append(f"  {check} {label} - {streak} day streak")
-    if not any_streak:
-        return None
-    return "\n".join(lines)
-
-
-async def cmd_habits(update, context):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    data = load_data()
-    habit_log = data.get("habit_log", [])
-    tz = pytz.timezone("America/Denver")
-    today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
-    lines = ["🔥 <b>Your Habit Tracker</b>\n"]
-    for habit in HABITS:
-        streak = get_habit_streak(habit_log, habit)
-        done_today = any(
-            e.get("habit") == habit and e.get("date", "").startswith(today_str)
-            for e in habit_log
-        )
-        check = "✅" if done_today else "⬜"
-        label = HABIT_LABELS[habit]
-        streak_txt = f"{streak} day streak" if streak > 0 else "No streak yet"
-        lines.append(f"{check} {label} - {streak_txt}")
-    lines.append("\nSay things like 'did my workout' or 'meditation done' to log habits.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
-
-def check_habit_from_message(text_lower, user_data):
-    """Check if a message logs a habit. Returns response string or None."""
-    data_changed = False
-    responses = []
-    tz = pytz.timezone("America/Denver")
-    now_str = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
-
-    for habit, keywords in HABIT_KEYWORDS.items():
-        if any(kw in text_lower for kw in keywords):
-            habit_log = user_data.get("habit_log", [])
-            today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
-            already = any(
-                e.get("habit") == habit and e.get("date", "").startswith(today_str)
-                for e in habit_log
-            )
-            if not already:
-                habit_log.append({"habit": habit, "date": now_str})
-                user_data["habit_log"] = habit_log
-                save_data(user_data)
-                data_changed = True
-                streak = get_habit_streak(habit_log, habit)
-                label = HABIT_LABELS[habit]
-                responses.append(f"✅ {label} logged! {streak} day streak 🔥")
-            else:
-                label = HABIT_LABELS[habit]
-                responses.append(f"✅ {label} already logged today!")
-
-    return "\n".join(responses) if responses else None
-
-
-# Phase 7 - Contact Memory
-
-def get_contact_note(name, contacts):
-    name_lower = name.lower()
-    for key in contacts:
-        if key.lower() == name_lower or name_lower in key.lower():
-            return contacts[key]
-    return None
-
-
-def extract_contact_update(text, contacts):
-    """Check if message is saving a contact fact. Returns (name, fact) or None."""
-    import re
-    patterns = [
-        r"remember that ([a-zA-Z]+) (.+)",
-        r"note about ([a-zA-Z]+)[:\-] (.+)",
-        r"([a-zA-Z]+)[ ]?['s]+ (birthday|phone|email|address|prefers|likes|hates|works at|lives in).+",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text.lower())
-        if match:
-            name = match.group(1).title()
-            fact = text[match.start(2):].strip() if len(match.groups()) > 1 else text
-            return name, fact
-    return None
-
-
-async def cmd_contacts(update, context):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    contacts = load_contacts()
-    if not contacts:
-        await update.message.reply_text("No contact notes saved yet.\nSay things like: remember that John prefers texts over calls")
-        return
-    lines = ["👥 <b>Contact Notes</b>\n"]
-    for name, facts in contacts.items():
-        lines.append(f"<b>{name}</b>")
-        if isinstance(facts, list):
-            for f in facts:
-                lines.append(f"  • {f}")
-        else:
-            lines.append(f"  • {facts}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
-
-# Phase 7 - Weekly Summary
-
-async def build_weekly_summary(user_data, cal_service=None):
-    tz = pytz.timezone("America/Denver")
-    now = datetime.datetime.now(tz)
-    week_start = now - datetime.timedelta(days=7)
-    week_start_str = week_start.strftime("%Y-%m-%d")
-
-    sections = ["📊 <b>Your Week in Review</b>\n"]
-
-    # Habits this week
-    habit_log = user_data.get("habit_log", [])
-    week_habits = [e for e in habit_log if e.get("date", "") >= week_start_str]
-    if week_habits:
-        habit_counts = {}
-        for e in week_habits:
-            h = e.get("habit", "")
-            habit_counts[h] = habit_counts.get(h, 0) + 1
-        habit_lines = ["💪 <b>Habits this week</b>"]
-        for habit in HABITS:
-            count = habit_counts.get(habit, 0)
-            if count > 0:
-                label = HABIT_LABELS[habit]
-                bar = "🟩" * count + "⬜" * (7 - count)
-                habit_lines.append(f"  {label}: {bar} {count}/7")
-        sections.append("\n".join(habit_lines))
-
-    # Workouts this week
-    workouts = [w for w in user_data.get("workouts", [])
-                if w.get("date", "") >= week_start_str]
-    if workouts:
-        sections.append(f"🏋️ <b>Workouts</b>: {len(workouts)} this week")
-
-    # Expenses this week
-    expenses = [e for e in user_data.get("expenses", [])
-                if e.get("date", "") >= week_start_str]
-    if expenses:
-        total = sum(float(e.get("amount", 0)) for e in expenses)
-        sections.append(f"💰 <b>Spending</b>: ${total:.2f} across {len(expenses)} transactions")
-
-    # Calendar events this week
-    if cal_service:
-        try:
-            week_events = list_events(days=7)
-            if week_events:
-                sections.append(f"📅 <b>Upcoming this week</b>: {len(week_events)} events")
-        except Exception:
-            pass
-
-    # GPT narrative summary
-    try:
-        summary_prompt = (
-            f"Write a brief, warm, encouraging weekly recap for Ty. "
-            f"This week: {len(workouts)} workouts, "
-            f"{len(week_habits)} habit completions, "
-            f"${sum(float(e.get('amount',0)) for e in expenses):.2f} spent. "
-            f"Keep it to 2-3 sentences, positive and motivating."
-        )
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": summary_prompt}],
-            max_tokens=150,
-            temperature=0.8
-        )
-        narrative = resp.choices[0].message.content.strip()
-        sections.append(f"\n{narrative}")
-    except Exception:
-        pass
-
-    # Sleep this week
-    sleep_log = data.get("sleep_log", [])
-    week_sleep = [e for e in sleep_log if e.get("date", "") >= week_start_str]
-    if week_sleep:
-        hours_list = [e["hours"] for e in week_sleep if "hours" in e]
-        if hours_list:
-            avg_sleep = sum(hours_list) / len(hours_list)
-            low_nights = sum(1 for h in hours_list if h < 6)
-            sleep_line = f"Avg {avg_sleep:.1f}h/night over {len(hours_list)} nights logged"
-            if low_nights:
-                sleep_line += f" ({low_nights} night(s) under 6h)"
-            sections.append(f"\U0001f4a4 <b>Sleep</b>\n{sleep_line}")
-
-    # Mood this week
-    mood_log = data.get("mood_log", [])
-    week_moods = [e for e in mood_log if e.get("date", "") >= week_start_str]
-    if week_moods:
-        mood_counts = {}
-        for e in week_moods:
-            m = e.get("mood", "okay")
-            mood_counts[m] = mood_counts.get(m, 0) + 1
-        mood_emoji = {"great": "\U0001f31f", "good": "\U0001f60a", "okay": "\U0001f610",
-                      "tired": "\U0001f634", "stressed": "\U0001f624", "anxious": "\U0001f630", "low": "\U0001f614"}
-        top_mood = max(mood_counts, key=mood_counts.get)
-        em = mood_emoji.get(top_mood, "")
-        mood_summary = ", ".join(f"{m} x{c}" for m, c in sorted(mood_counts.items(), key=lambda x: -x[1]))
-        sections.append(f"{em} <b>Mood</b>\n{mood_summary}")
-
-    # Todos status
-    todos = data.get("todos", [])
-    active_todos = [t for t in todos if not t.get("done")]
-    high_todos = [t for t in active_todos if t.get("priority") == "high"]
-    if active_todos:
-        todo_line = f"{len(active_todos)} active"
-        if high_todos:
-            todo_line += f", {len(high_todos)} high priority"
-        sections.append(f"\u2705 <b>To-Dos</b>\n{todo_line} items outstanding")
-
-    # Upcoming reminders
-    reminders = [r for r in data.get("reminders", []) if not r.get("sent")]
-    if reminders:
-        sections.append(f"\u23f0 <b>Reminders</b>\n{len(reminders)} upcoming")
-
-    return "\n\n".join(sections)
-
-
-async def summary_command(update, context):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    await update.message.reply_text("Building your weekly summary...")
-    data = load_data()
-    cal_service = None
-    try:
-        cal_service = get_calendar_service()
-    except Exception:
-        pass
-    msg = await build_weekly_summary(data, cal_service)
-    await update.message.reply_text(msg, parse_mode="HTML")
-
-
-async def send_weekly_summary(context):
-    """Scheduled Sunday evening weekly summary."""
-    data = load_data()
-    cal_service = None
-    try:
-        cal_service = get_calendar_service()
-    except Exception:
-        pass
-    msg = await build_weekly_summary(data, cal_service)
-    await context.bot.send_message(
-        chat_id=ALLOWED_USER_ID,
-        text=msg,
-        parse_mode="HTML"
-    )
-
-
-# Phase 7 - Travel Weather Detection
-
-async def check_travel_weather(context):
-    """Evening job: scan tomorrows calendar for travel, send weather forecast."""
-    try:
-        service = get_calendar_service()
-        if not service:
-            return
-        tz = pytz.timezone("America/Denver")
-        tomorrow = datetime.datetime.now(tz) + datetime.timedelta(days=1)
-        start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = tomorrow.replace(hour=23, minute=59, second=59, microsecond=0)
-        all_events = []
-        calendars = service.calendarList().list().execute().get("items", [])
-        for cal in calendars:
-            try:
-                result = service.events().list(
-                    calendarId=cal["id"],
-                    timeMin=start.isoformat(),
-                    timeMax=end.isoformat(),
-                    singleEvents=True,
-                    orderBy="startTime"
-                ).execute()
-                all_events.extend(result.get("items", []))
-            except Exception:
-                pass
-
-        travel_keywords = ["flight", "fly", "airport", "hotel", "travel", "trip",
-                           "conference", "convention", "visit", "drive to"]
-        slc_keywords = ["salt lake", "slc", "home", "ut ", "utah"]
-
-        for event in all_events:
-            title = event.get("summary", "").lower()
-            location = event.get("location", "").lower()
-            combined = title + " " + location
-            is_travel = any(kw in combined for kw in travel_keywords)
-            is_local = any(kw in combined for kw in slc_keywords)
-
-            if is_travel and not is_local:
-                dest = event.get("location") or event.get("summary", "your destination")
-                msg = (
-                    f"✈️ <b>Travel heads up!</b>\n"
-                    f"You have <b>{event.get('summary', 'an event')}</b> tomorrow.\n"
-                    f"Location: {dest}\n\n"
-                    f"Remember to check the weather at your destination and pack accordingly!"
-                )
-                await context.bot.send_message(
-                    chat_id=ALLOWED_USER_ID,
-                    text=msg,
-                    parse_mode="HTML"
-                )
-                break
-    except Exception as e:
-        logger.error(f"Travel weather check error: {e}")
-
-
-# Phase 7 - Contact memory detection in handle_message (injected via system prompt addition)
-
-CONTACT_SYSTEM_ADDON = """
-== CONTACT MEMORY ==
-When the user mentions remembering something about a person (e.g. "remember that John prefers texts", "note about Sarah: birthday is April 3"), respond with:
-CONTACT_ACTION: {"name": "...", "fact": "..."}
-
-When the user asks about a person they have mentioned before, include any known facts about them in your response if relevant.
+"""
+alfred/bot.py
+=============
+Entry point for Alfred. Initialises the Telegram bot, registers all
+command and message handlers, schedules all background jobs, and starts
+the polling loop.
+
+HOW IT WORKS
+------------
+1. On startup:
+   - Load alfred_memory.json and refresh the intent classifier prompt
+   - Ensure all Google Tasks lists exist (todos, notes, shopping, gifts)
+   - Start background jobs (briefing, reminders, habits, event prep, etc.)
+
+2. Every incoming message:
+   a. Rate-limit check
+   b. If setup wizard is active  -> route to features/setup.py
+   c. Handle media (voice/photo) -> transcribe/analyse first
+   d. Classify intent via core/intent.py (Layer 1 keyword, Layer 2 GPT)
+   e. Dispatch to the appropriate feature handler
+   f. After /ask responses: run memory auto-suggest (non-blocking)
+
+COMMAND REGISTRY
+----------------
+  /start          - welcome message (or quick capture if start=capture)
+  /briefing       - trigger morning briefing now
+  /todos          - list todos
+  /notes          - list notes
+  /shopping       - show shopping lists
+  /reminders      - list reminders
+  /habits         - show habit progress
+  /memory         - memory management (see features/memory.py)
+  /ask            - persistent conversational thread
+  /calendar       - show today's calendar
+  /gifts          - show gift list
+  /setup          - in-Telegram onboarding wizard
+  /auth           - start Google OAuth flow
+  /code           - complete Google OAuth with code
+  /checkauth      - verify Google auth status
+  /disconnect     - revoke Google auth
+  /help           - show command list
 """
 
+import asyncio
+import logging
+import traceback
+from datetime import time as dtime
+
+import pytz
+from telegram import Update, BotCommand
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes,
+    JobQueue,
+)
+from telegram.constants import ParseMode
+
+from core.config import (
+    TELEGRAM_TOKEN,
+    ALLOWED_USER_ID,
+    BOT_NAME,
+    TIMEZONE,
+    BRIEFING_HOUR, BRIEFING_MINUTE,
+    HEALTH_CHECK_HOUR, HEALTH_CHECK_MINUTE,
+    HABIT_NUDGE_HOUR, HABIT_NUDGE_MINUTE,
+    TRAVEL_WEATHER_HOUR, TRAVEL_WEATHER_MINUTE,
+    WEEKLY_SUMMARY_HOUR, WEEKLY_SUMMARY_MINUTE, WEEKLY_SUMMARY_WEEKDAY,
+    EVENT_PREP_HOUR, EVENT_PREP_MINUTE,
+    REMINDER_CHECK_INTERVAL,
+    RATE_LIMIT_COUNT, RATE_LIMIT_WINDOW,
+)
+from core.data import load_memory, get_active_categories
+from core.intent import classify, refresh_intent_prompt
+from core.google_auth import (
+    cmd_auth, cmd_code, cmd_checkauth, cmd_disconnect,
+    job_google_health_check,
+)
+from features.memory import cmd_memory, handle_memory_callback, suggest_memory_fact
+from features.setup  import cmd_setup, handle_setup_callback, handle_setup_message, is_setup_active
+from features.mood          import cmd_mood, handle_mood_intent, handle_mood_callback
+from features.links         import cmd_readlater, handle_link_intent, handle_link_callback
+from features.export_data   import cmd_export, handle_export_intent
+
+logger = logging.getLogger(__name__)
 
 
-# Phase 8 - Callback query handler (inline keyboard button presses)
+# =============================================================================
+# RATE LIMITER
+# =============================================================================
 
-async def handle_callback(update, context):
-    query = update.callback_query
-    await query.answer()  # Must answer within 10s or Telegram drops the callback
-    data_str = query.data
+import time as _time_module
+_rate_window_start: float = 0.0
+_rate_message_count: int  = 0
 
-    if data_str.startswith("reminder_done:"):
-        reminder_id = data_str.split(":", 1)[1]
-        data = load_data()
-        for r in data.get("reminders", []):
-            if r.get("id") == reminder_id:
-                r["sent"] = True
-                break
-        save_data(data)
-        await query.edit_message_text("Reminder marked done!")
 
-    elif data_str.startswith("reminder_snooze_1h:"):
-        reminder_id = data_str.split(":", 1)[1]
-        data = load_data()
-        tz = pytz.timezone("America/Denver")
-        for r in data.get("reminders", []):
-            if r.get("id") == reminder_id:
-                r["sent"] = False
-                try:
-                    new_time = datetime.datetime.fromisoformat(r["time"]) + datetime.timedelta(hours=1)
-                    r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
-                except Exception:
-                    new_time = datetime.datetime.now(tz) + datetime.timedelta(hours=1)
-                    r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
-                break
-        save_data(data)
-        await query.edit_message_text("Reminder snoozed for 1 hour!")
+def _check_rate_limit() -> bool:
+    """Return True if the message should be allowed, False if rate-limited."""
+    global _rate_window_start, _rate_message_count
+    now = _time_module.monotonic()
+    if now - _rate_window_start > RATE_LIMIT_WINDOW:
+        _rate_window_start  = now
+        _rate_message_count = 0
+    _rate_message_count += 1
+    return _rate_message_count <= RATE_LIMIT_COUNT
 
-    elif data_str.startswith("reminder_snooze_1d:"):
-        reminder_id = data_str.split(":", 1)[1]
-        data = load_data()
-        for r in data.get("reminders", []):
-            if r.get("id") == reminder_id:
-                r["sent"] = False
-                try:
-                    new_time = datetime.datetime.fromisoformat(r["time"]) + datetime.timedelta(days=1)
-                    r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
-                except Exception:
-                    tz = pytz.timezone("America/Denver")
-                    new_time = datetime.datetime.now(tz) + datetime.timedelta(days=1)
-                    r["time"] = new_time.strftime("%Y-%m-%dT%H:%M:00")
-                break
-        save_data(data)
-        await query.edit_message_text("Reminder snoozed until tomorrow!")
 
-    elif data_str == "cmd_todos":
-        try:
-            reply = await handle_data_action({"action": "todo_list"})
-            await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
-        except Exception as e:
-            logger.error(f"cmd_todos callback error: {e}")
+# =============================================================================
+# AUTH GUARD
+# =============================================================================
 
-    elif data_str == "cmd_notes":
-        try:
-            reply = await handle_data_action({"action": "note_list"})
-            await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
-        except Exception as e:
-            logger.error(f"cmd_notes callback error: {e}")
+def _is_allowed(update: Update) -> bool:
+    """Return True only if the message is from the configured user."""
+    user = update.effective_user
+    return user is not None and user.id == ALLOWED_USER_ID
 
-    elif data_str == "cmd_habits":
-        try:
-            data = load_data()
-            habit_log = data.get("habit_log", [])
-            tz = pytz.timezone("America/Denver")
-            today_str = datetime.datetime.now(tz).strftime("%Y-%m-%d")
-            lines = ["<b>Your Habit Tracker</b>\n"]
-            for habit in HABITS:
-                streak = get_habit_streak(habit_log, habit)
-                done_today = any(
-                    e.get("habit") == habit and e.get("date", "").startswith(today_str)
-                    for e in habit_log
+
+# =============================================================================
+# INTENT -> FEATURE DISPATCH
+# =============================================================================
+
+async def _dispatch(intent_result, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Route a classified intent to the appropriate feature handler.
+
+    All feature modules are imported lazily here so circular imports are avoided
+    and unbuilt features fail gracefully with a "coming soon" reply rather than
+    crashing the bot.
+    """
+    from core.intent import (
+        TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
+        SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
+        NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND,
+        CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
+        HABIT_LOG, HABIT_VIEW,
+        REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
+        GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE,
+        MEMORY_ADD, MEMORY_VIEW, MEMORY_REMOVE,
+        CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE,
+        MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
+        MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS,
+        WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN, WORKOUT_REBUILD,
+        WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY,
+        JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH, JOURNAL_MONTH, JOURNAL_WINS,
+        REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD,
+        MOOD_LOG, MOOD_VIEW,
+        LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
+        EXPORT_DATA,
+        BRIEFING, WEATHER, WEEKLY_SUMMARY,
+        ASK, UNKNOWN,
+    )
+
+    intent = intent_result.intent
+    ents   = intent_result.entities
+
+    try:
+        # -- TODOS ------------------------------------------------------------
+        if intent in (TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE):
+            from features.todos import handle_todo_intent
+            await handle_todo_intent(intent, ents, update, context)
+
+        # -- SHOPPING ---------------------------------------------------------
+        elif intent in (SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR):
+            from features.shopping import handle_shopping_intent
+            await handle_shopping_intent(intent, ents, update, context)
+
+        # -- NOTES ------------------------------------------------------------
+        elif intent in (NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND):
+            from features.notes import handle_note_intent
+            await handle_note_intent(intent, ents, update, context)
+
+        # -- CALENDAR ---------------------------------------------------------
+        elif intent in (CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE):
+            from features.calendar import handle_calendar_intent
+            await handle_calendar_intent(intent, ents, update, context)
+
+        # -- HABITS -----------------------------------------------------------
+        elif intent in (HABIT_LOG, HABIT_VIEW):
+            from features.habits import handle_habit_intent
+            await handle_habit_intent(intent, ents, update, context)
+
+        # -- REMINDERS --------------------------------------------------------
+        elif intent in (REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE):
+            from features.reminders import handle_reminder_intent
+            await handle_reminder_intent(intent, ents, update, context)
+
+        # -- GIFTS ------------------------------------------------------------
+        elif intent in (GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE):
+            from features.gifts import handle_gift_intent
+            await handle_gift_intent(intent, ents, update, context)
+
+        # -- MEMORY (inline, no /memory command needed) -----------------------
+        elif intent == MEMORY_ADD:
+            cat  = ents.get("category", "")
+            fact = ents.get("fact", "")
+            if cat and fact:
+                from core.data import add_memory_fact
+                ok, err = add_memory_fact(cat, fact)
+                if ok:
+                    await update.message.reply_text(
+                        f"Remembered under *{cat}*: _{fact}_",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                else:
+                    await update.message.reply_text(f"Couldn't save that: {err}")
+            else:
+                await update.message.reply_text(
+                    "Use `/memory add [category] [fact]` to save a memory.",
+                    parse_mode=ParseMode.MARKDOWN,
                 )
-                check = "done" if done_today else "o"
-                label = HABIT_LABELS[habit]
-                streak_txt = f"{streak} day streak" if streak > 0 else "No streak yet"
-                lines.append(f"{check} {label} - {streak_txt}")
-            await context.bot.send_message(chat_id=query.message.chat_id, text="\n".join(lines), parse_mode="HTML")
-        except Exception as e:
-            logger.error(f"cmd_habits callback error: {e}")
 
-    elif data_str == "cmd_summary":
+        elif intent == MEMORY_VIEW:
+            context.args = [ents.get("category", "")] if ents.get("category") else []
+            await cmd_memory(update, context)
+
+        elif intent == MEMORY_REMOVE:
+            await update.message.reply_text(
+                "To remove a specific fact, use `/memory remove [category] [number]`.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+
+        # -- CONTACTS ---------------------------------------------------------
+        elif intent in (CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE):
+            from features.contacts import handle_contact_intent
+            await handle_contact_intent(intent, ents, update, context)
+
+        # -- BRIEFING ---------------------------------------------------------
+        elif intent == BRIEFING:
+            from features.briefing import send_briefing
+            await send_briefing(context, update.effective_chat.id)
+
+        # -- WEATHER ----------------------------------------------------------
+        elif intent == WEATHER:
+            from features.briefing import send_weather
+            location = ents.get("location")
+            await send_weather(context, update.effective_chat.id, location=location)
+
+        # -- WEEKLY SUMMARY ---------------------------------------------------
+        elif intent == WEEKLY_SUMMARY:
+            from features.summary import send_weekly_summary
+            await send_weekly_summary(context, update.effective_chat.id)
+
+        # -- MEALS -----------------------------------------------------------
+        elif intent in (MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
+                        MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS):
+            from features.meals import handle_meal_intent
+            await handle_meal_intent(intent, ents, update, context)
+
+        # -- WORKOUT ----------------------------------------------------------
+        elif intent in (WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN,
+                        WORKOUT_REBUILD, WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY):
+            from features.workout import handle_workout_intent
+            await handle_workout_intent(intent, ents, update, context)
+
+        # -- JOURNAL ----------------------------------------------------------
+        elif intent in (JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH,
+                        JOURNAL_MONTH, JOURNAL_WINS):
+            from features.journal import handle_journal_intent
+            await handle_journal_intent(intent, ents, update, context)
+
+        # -- REPLY / EMAIL ASSIST --------------------------------------------
+        elif intent in (REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD):
+            from features.reply_assist import handle_reply_intent
+            await handle_reply_intent(intent, ents, update, context)
+
+        # -- ASK / UNKNOWN ----------------------------------------------------
+        elif intent in (ASK, UNKNOWN):
+            from features.ask import handle_ask
+            response_text = await handle_ask(
+                update.message.text or "",
+                update,
+                context,
+            )
+            # Non-blocking memory auto-suggest after /ask responses
+            if response_text:
+                asyncio.create_task(
+                    suggest_memory_fact(
+                        user_text=update.message.text or "",
+                        assistant_text=response_text,
+                        update=update,
+                        context=context,
+                    )
+                )
+
+        # -- MOOD -----------------------------------------------------------------
+        elif intent in (MOOD_LOG, MOOD_VIEW):
+            await handle_mood_intent(intent, ents, update, context)
+
+        # -- LINKS (READ-LATER) ---------------------------------------------------
+        elif intent in (LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE):
+            await handle_link_intent(intent, ents, update, context)
+
+        # -- EXPORT ---------------------------------------------------------------
+        elif intent == EXPORT_DATA:
+            await handle_export_intent(intent, ents, update, context)
+
+        else:
+            await update.message.reply_text(
+                "I'm not sure how to handle that. Try `/help` to see what I can do.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+
+    except ImportError as e:
+        # Feature module not yet built -- fail gracefully
+        logger.warning(f"dispatch: feature not yet built for intent '{intent}': {e}")
+        await update.message.reply_text(
+            "That feature is coming soon. Try `/help` to see what's available.",
+        )
+    except Exception as e:
+        logger.error(
+            f"dispatch: unhandled error for intent '{intent}': {e}\n"
+            f"{traceback.format_exc()}"
+        )
+        await update.message.reply_text(
+            "Something went wrong. Try again, or use a specific command.",
+        )
+
+
+# =============================================================================
+# MESSAGE HANDLER (free-text and media)
+# =============================================================================
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Central handler for all non-command messages.
+
+    Order of processing:
+      1. Auth guard
+      2. Rate limit
+      3. Setup wizard intercept (if active)
+      4. Voice message -> Whisper transcription
+      5. Photo -> GPT-4o vision analysis
+      6. Intent classification -> feature dispatch
+    """
+    if not _is_allowed(update):
+        return
+
+    if not _check_rate_limit():
+        await update.message.reply_text(
+            "You're sending messages very quickly -- slow down a little."
+        )
+        return
+
+    # Setup wizard intercept
+    if is_setup_active():
+        await handle_setup_message(update, context)
+        return
+
+    # Voice messages — check if journal session wants voice first
+    if update.message.voice or update.message.audio:
+        from features.journal import is_journal_session_active, handle_voice_journal
+        import os
+        import tempfile
+
+        file_obj = update.message.voice or update.message.audio
+        tg_file  = await context.bot.get_file(file_obj.file_id)
+        suffix = ".ogg" if update.message.voice else ".mp3"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            await tg_file.download_to_drive(tmp.name)
+            tmp_path = tmp.name
+
         try:
-            data = load_data()
-            cal_service = None
+            # Journal session takes priority
+            if is_journal_session_active():
+                await handle_voice_journal(tmp_path, update, context)
+                return
+
+            # General voice: transcribe and route as text
+            text = await _transcribe_voice_file(tmp_path)
+            if not text:
+                await update.message.reply_text("Sorry, I couldn't understand that audio.")
+                return
+
+            # Acknowledge transcription
+            await update.message.reply_text(f"🎙️ _{text}_", parse_mode="Markdown")
+
+            # Now treat `text` as the user's message and continue to intent classification
+            # Fall through with text set
+        finally:
             try:
-                cal_service = get_calendar_service()
+                os.unlink(tmp_path)
+            except:
+                pass
+
+    # Photo messages — detect type and route appropriately
+    elif update.message.photo:
+        from features.reply_assist import handle_photo_for_reply
+        import os
+        import tempfile
+
+        photo   = update.message.photo[-1]
+        caption = (update.message.caption or "").strip()
+        tg_file = await context.bot.get_file(photo.file_id)
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            await tg_file.download_to_drive(tmp.name)
+            tmp_path = tmp.name
+
+        try:
+            photo_type = await _detect_photo_type(tmp_path)
+
+            if photo_type == "receipt":
+                from features.shopping import handle_receipt_photo
+                await handle_receipt_photo(tmp_path, update, context)
+            elif photo_type == "screenshot":
+                await handle_photo_for_reply(tmp_path, update, context, is_email=False)
+            else:
+                # General photo — existing analysis
+                description = await _analyse_photo_file(tmp_path)
+                if description:
+                    await update.message.reply_text(description)
+        finally:
+            try:
+                os.unlink(tmp_path)
             except Exception:
                 pass
-            msg = await build_weekly_summary(data, cal_service)
-            await context.bot.send_message(chat_id=query.message.chat_id, text=msg, parse_mode="HTML")
-        except Exception as e:
-            logger.error(f"cmd_summary callback error: {e}")
+        return
 
-    elif data_str == "cmd_expenses":
-        try:
-            reply = await handle_data_action({"action": "expense_list"})
-            await context.bot.send_message(chat_id=query.message.chat_id, text=reply)
-        except Exception as e:
-            logger.error(f"cmd_expenses callback error: {e}")
+    # Text messages
+    else:
+        text = (update.message.text or "").strip()
+        if not text:
+            return
 
-    elif data_str == "cmd_briefing":
-        try:
-            data = load_data()
-            cal_service = None
-            try:
-                cal_service = get_calendar_service()
-            except Exception:
-                pass
-            sections = await build_briefing_sections(data, cal_service)
-            for section in sections:
-                await context.bot.send_message(chat_id=query.message.chat_id, text=section, parse_mode="HTML")
-        except Exception as e:
-            logger.error(f"cmd_briefing callback error: {e}")
+        # Journal session intercepts
+        from features.journal import (
+            is_journal_session_active,
+            handle_journal_session_reply,
+            handle_journal_freeform_reply,
+            handle_voice_confirm,
+        )
+        if is_journal_session_active():
+            consumed = await handle_journal_session_reply(text, update, context)
+            if consumed:
+                return
+        consumed = await handle_journal_freeform_reply(text, update, context)
+        if consumed:
+            return
+        consumed = await handle_voice_confirm(text, update, context)
+        if consumed:
+            return
+
+        # Reply refinement intercept
+        from features.reply_assist import looks_like_refinement, handle_refinement
+        if looks_like_refinement(text):
+            await handle_refinement(text, update, context)
+            return
+
+    intent_result = await classify(text)
+    await _dispatch(intent_result, update, context)
 
 
-# Phase 8 - Brain dump
+# =============================================================================
+# VOICE TRANSCRIPTION
+# =============================================================================
 
-async def brain_dump_command(update, context):
-    if update.effective_user.id != ALLOWED_USER_ID:
+async def _transcribe_voice_file(file_path: str) -> str | None:
+    """Transcribe a voice file with Whisper. Returns text or None on failure."""
+    from openai import AsyncOpenAI
+    from core.config import OPENAI_API_KEY
+
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    try:
+        with open(file_path, "rb") as f:
+            resp = await client.audio.transcriptions.create(model="whisper-1", file=f)
+        return resp.text.strip() or None
+    except Exception as e:
+        logger.warning(f"Whisper transcription failed: {e}")
+        return None
+
+
+async def _transcribe_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """
+    Download a voice/audio message and transcribe it with OpenAI Whisper.
+    Returns the transcribed text, or empty string on failure.
+    """
+    import os
+    import tempfile
+    from openai import AsyncOpenAI
+    from core.config import OPENAI_API_KEY, GPT_VOICE_MODEL
+
+    try:
+        file_obj = update.message.voice or update.message.audio
+        tg_file  = await context.bot.get_file(file_obj.file_id)
+
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            await tg_file.download_to_drive(tmp.name)
+            tmp_path = tmp.name
+
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        with open(tmp_path, "rb") as audio_file:
+            transcript = await client.audio.transcriptions.create(
+                model=GPT_VOICE_MODEL,
+                file=audio_file,
+            )
+
+        os.unlink(tmp_path)
+        return transcript.text.strip()
+
+    except Exception as e:
+        logger.error(f"voice transcription error: {e}")
+        return ""
+
+
+# =============================================================================
+# PHOTO TYPE DETECTION
+# =============================================================================
+
+async def _detect_photo_type(file_path: str) -> str:
+    """Use GPT-4o vision to classify photo as 'receipt', 'screenshot', or 'general'."""
+    import base64
+    from openai import AsyncOpenAI
+    from core.config import OPENAI_API_KEY
+
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    try:
+        with open(file_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Classify this image as exactly one of: 'receipt' (store/restaurant receipt showing purchased items and prices), 'screenshot' (screenshot of text messages, emails, social media, apps), or 'general' (anything else like photos of people, places, food, objects). Reply with ONLY the single word."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"}}
+                ]
+            }],
+            max_tokens=10,
+        )
+        classification = resp.choices[0].message.content.strip().lower()
+        if classification in {"receipt", "screenshot", "general"}:
+            return classification
+    except Exception as e:
+        logger.warning(f"Photo type detection failed: {e}")
+    return "general"
+
+
+# =============================================================================
+# PHOTO ANALYSIS
+# =============================================================================
+
+async def _analyse_photo_file(file_path: str) -> str:
+    """
+    Analyse a photo file using GPT-4o vision.
+    Returns a text description, or empty string on failure.
+    """
+    import base64
+    from openai import AsyncOpenAI
+    from core.config import OPENAI_API_KEY, GPT_VISION_MODEL
+
+    try:
+        with open(file_path, "rb") as img_file:
+            b64 = base64.b64encode(img_file.read()).decode("utf-8")
+
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        resp = await client.chat.completions.create(
+            model=GPT_VISION_MODEL,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is in this image? Be concise."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                ],
+            }],
+            max_tokens=500,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"photo analysis error: {e}")
+        return ""
+
+
+async def _analyse_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """
+    Analyse a photo using GPT-4o vision.
+
+    Builds a prompt that includes any caption the user sent alongside the photo,
+    then returns a text description suitable for intent classification.
+    Returns empty string on failure.
+    """
+    import os
+    import base64
+    import tempfile
+    from openai import AsyncOpenAI
+    from core.config import OPENAI_API_KEY, GPT_VISION_MODEL
+
+    try:
+        photo   = update.message.photo[-1]   # highest resolution
+        caption = (update.message.caption or "").strip()
+        tg_file = await context.bot.get_file(photo.file_id)
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            await tg_file.download_to_drive(tmp.name)
+            tmp_path = tmp.name
+
+        with open(tmp_path, "rb") as img_file:
+            b64 = base64.b64encode(img_file.read()).decode("utf-8")
+        os.unlink(tmp_path)
+
+        user_prompt = caption if caption else "What is in this image? Be concise."
+
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        resp   = await client.chat.completions.create(
+            model=GPT_VISION_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text",      "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    ],
+                }
+            ],
+            max_tokens=500,
+        )
+        return resp.choices[0].message.content.strip()
+
+    except Exception as e:
+        logger.error(f"photo analysis error: {e}")
+        return ""
+
+
+# =============================================================================
+# COMMAND HANDLERS
+# =============================================================================
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Welcome message, or quick capture mode if /start capture."""
+    if not _is_allowed(update):
+        return
+    args = context.args or []
+    if args and args[0].lower() == "capture":
+        await update.message.reply_text(
+            f"*Quick Capture* -- what's on your mind?\n\n"
+            "Just type it and I'll figure out what to do with it.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
         return
     await update.message.reply_text(
-        "Brain dump mode. Just type or speak everything on your mind - "
-        "I will sort it into todos, reminders, and notes automatically. Go!"
-    )
-    context.user_data["brain_dump_mode"] = True
-
-
-async def process_brain_dump(update, context):
-    """Process a brain dump message - sort with GPT and save raw to notes."""
-    text = update.message.text
-    user_data = load_data()
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-
-    # Save raw version to notes
-    user_data["notes"].append({"text": f"[Brain dump] {text}", "added": now_str})
-
-    # Ask GPT to sort it
-    sort_prompt = (
-        "The user did a brain dump. Extract and categorize everything into: "
-        "TODOS (format: TODO: task text), "
-        "REMINDERS (format: REMINDER: text | YYYY-MM-DDTHH:MM:00), "
-        "NOTES (format: NOTE: text). "
-        "If no clear time is given for reminders, make them todos instead. "
-        f"Current date/time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}. "
-        f"Brain dump text: {text} "
-        "List each item on its own line with the prefix. Nothing else."
+        f"Hi! I'm *{BOT_NAME}*, your personal assistant.\n\n"
+        "A few things I can do:\n"
+        "- Add todos, reminders, notes, and shopping items\n"
+        "- Show your calendar and send event prep briefings\n"
+        "- Track your habits and summarise your week\n"
+        "- Remember things about you long-term\n"
+        "- Answer questions and search the web\n\n"
+        "Run `/setup` to get started, or just tell me what's on your mind.",
+        parse_mode=ParseMode.MARKDOWN,
     )
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": sort_prompt}],
-            max_tokens=500,
-            temperature=0.3
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Full command reference."""
+    if not _is_allowed(update):
+        return
+    await update.message.reply_text(
+        f"*{BOT_NAME} -- Commands*\n\n"
+        "*Daily*\n"
+        "  /briefing -- morning briefing\n"
+        "  /calendar -- today's events\n"
+        "  /habits   -- habit tracker\n\n"
+        "*Tasks and Lists*\n"
+        "  /todos     -- manage your todo list\n"
+        "  /reminders -- set and view reminders\n"
+        "  /shopping  -- shopping lists\n"
+        "  /notes     -- save and view notes\n"
+        "  /gifts     -- gift ideas tracker\n\n"
+        "*Memory and Assistant*\n"
+        "  /memory -- view and edit what I remember about you\n"
+        "  /ask    -- ask me anything (persistent thread)\n\n"
+        "*Setup*\n"
+        "  /setup      -- onboarding wizard\n"
+        "  /auth       -- connect Google account\n"
+        "  /checkauth  -- verify Google connection\n"
+        "  /disconnect -- revoke Google access\n\n"
+        "Or just type naturally -- I'll figure out what you need.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.briefing import send_briefing
+    await send_briefing(context, update.effective_chat.id)
+
+
+async def cmd_todos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.todos import cmd_todos as _f
+    await _f(update, context)
+
+
+async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.notes import cmd_notes as _f
+    await _f(update, context)
+
+
+async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.shopping import cmd_shopping as _f
+    await _f(update, context)
+
+
+async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.reminders import cmd_reminders as _f
+    await _f(update, context)
+
+
+async def cmd_habits(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.habits import cmd_habits as _f
+    await _f(update, context)
+
+
+async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.calendar import cmd_calendar as _f
+    await _f(update, context)
+
+
+async def cmd_gifts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.gifts import cmd_gifts as _f
+    await _f(update, context)
+
+
+async def cmd_meals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.meals import cmd_meals as _f
+    await _f(update, context)
+
+
+async def cmd_workout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.workout import cmd_workout as _f
+    await _f(update, context)
+
+
+async def cmd_journal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.journal import cmd_journal as _f
+    await _f(update, context)
+
+
+async def cmd_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.contacts import cmd_contacts as _f
+    await _f(update, context)
+
+
+async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Persistent /ask conversational thread."""
+    if not _is_allowed(update):
+        return
+    from features.ask import handle_ask
+    text = (update.message.text or "").strip()
+    if text.lower().startswith("/ask"):
+        text = text[4:].strip()
+    if not text:
+        await update.message.reply_text(
+            "What would you like to know? Type your question after `/ask`.",
+            parse_mode=ParseMode.MARKDOWN,
         )
-        sorted_text = response.choices[0].message.content.strip()
-
-        todos_added = []
-        reminders_added = []
-        notes_added = []
-
-        for line in sorted_text.splitlines():
-            line = line.strip()
-            if line.startswith("TODO:"):
-                item = line[5:].strip()
-                import uuid as _uuid
-                user_data["todos"].append({"text": item, "done": False, "added": now_str})
-                todos_added.append(item)
-            elif line.startswith("REMINDER:"):
-                parts = line[9:].strip().split("|")
-                if len(parts) == 2:
-                    reminder_text = parts[0].strip()
-                    reminder_time = parts[1].strip()
-                    user_data["reminders"].append({
-                        "text": reminder_text,
-                        "time": reminder_time,
-                        "sent": False,
-                        "added": now_str,
-                        "id": str(_uuid.uuid4())[:8]
-                    })
-                    reminders_added.append(reminder_text)
-                else:
-                    item = parts[0].strip()
-                    user_data["todos"].append({"text": item, "done": False, "added": now_str})
-                    todos_added.append(item)
-            elif line.startswith("NOTE:"):
-                note_text = line[5:].strip()
-                notes_added.append(note_text)
-
-        save_data(user_data)
-
-        summary_parts = []
-        if todos_added:
-            summary_parts.append(f"<b>{len(todos_added)} todo(s)</b>: " + ", ".join(todos_added[:3]) + ("..." if len(todos_added) > 3 else ""))
-        if reminders_added:
-            summary_parts.append(f"<b>{len(reminders_added)} reminder(s)</b>: " + ", ".join(reminders_added[:2]))
-        if notes_added:
-            summary_parts.append(f"<b>{len(notes_added)} note idea(s)</b> captured")
-
-        summary = ("Brain dump sorted! " + " | ".join(summary_parts) if summary_parts else "Brain dump saved to notes!")
-        summary += " (Raw dump also saved to your notes)"
-
-        await update.message.reply_text(summary)
-
-    except Exception as e:
-        logger.error(f"Brain dump error: {e}")
-        save_data(user_data)
-        await update.message.reply_text("Saved your brain dump to notes! Could not auto-sort this time.")
-
-    context.user_data["brain_dump_mode"] = False
-
-
-# Phase 8 - /ask web search via GPT-4o with browsing
-
-async def ask_command(update, context):
-    if update.effective_user.id != ALLOWED_USER_ID:
         return
-    if not context.args:
-        await update.message.reply_text("Usage: /ask [question]. Example: /ask who won last nights Celtics game")
-        return
-    question = " ".join(context.args).strip()
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    await update.message.reply_text("Searching...")
-    serper_key = os.environ.get("SERPER_API_KEY", "")
-    search_results = ""
-    if serper_key:
-        try:
-            resp = requests.post(
-                "https://google.serper.dev/search",
-                headers={"X-API-KEY": serper_key, "Content-Type": "application/json"},
-                json={"q": question, "num": 5},
-                timeout=10
+    response_text = await handle_ask(text, update, context)
+    if response_text:
+        asyncio.create_task(
+            suggest_memory_fact(
+                user_text=text,
+                assistant_text=response_text,
+                update=update,
+                context=context,
             )
-            data = resp.json()
-            snippets = []
-            if "answerBox" in data:
-                ab = data["answerBox"]
-                snippets.append(ab.get("answer") or ab.get("snippet") or "")
-            for r in data.get("organic", [])[:4]:
-                snippets.append(r.get("title", "") + ": " + r.get("snippet", ""))
-            search_results = " | ".join(s for s in snippets if s)
-        except Exception as e:
-            logger.error(f"Serper search error: {e}")
-    today = datetime.datetime.now().strftime("%B %d, %Y")
-    if search_results:
-        prompt = (
-            f"Using these search results, answer the question concisely. "
-            f"Today is {today}. "
-            f"Search results: {search_results[:1500]} "
-            f"Question: {question}"
         )
+
+
+# =============================================================================
+# CALLBACK QUERY HANDLER (all inline button presses)
+# =============================================================================
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Route all inline keyboard callbacks by prefix:
+      mem_*   -> features/memory.py
+      setup_* -> features/setup.py
+    """
+    query = update.callback_query
+    data  = (query.data or "")
+
+    if data.startswith("mem_"):
+        await handle_memory_callback(update, context)
+    elif data.startswith("setup_"):
+        await handle_setup_callback(update, context)
     else:
-        prompt = (
-            f"Answer this question as accurately as possible. "
-            f"If the answer depends on recent events after your training, say so. "
-            f"Today is {today}. "
-            f"Question: {question}"
-        )
+        await query.answer()
+        logger.warning(f"Unhandled callback: {data!r}")
+
+
+# =============================================================================
+# BACKGROUND JOBS
+# =============================================================================
+
+async def _job_briefing(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
-            temperature=0.3,
-        )
-        answer = response.choices[0].message.content or "Could not find an answer for that."
-        src = " (via live search)" if search_results else " (from training data)"
-        reply = "<b>" + question + "</b>" + src + "\n\n" + answer
-        await send_long_message(update.message, reply, parse_mode="HTML")
-        audit_log(f"ASK q={question[:50]}")
+        from features.briefing import send_briefing
+        await send_briefing(context, ALLOWED_USER_ID)
     except Exception as e:
-        logger.error(f"Ask command error: {e}")
-        audit_log(f"ASK_ERROR {str(e)[:100]}")
-        await update.message.reply_text(f"Search error: {str(e)[:120]}")
+        logger.error(f"job_briefing error: {e}")
 
 
-# Phase 8 - Google Tasks two-way sync
-
-def get_tasks_service():
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        from google.oauth2.credentials import Credentials as GCreds
-        creds = GCreds.from_authorized_user_file(TOKEN_FILE, SCOPES)
-    if creds and creds.expired and creds.refresh_token:
-        from google.auth.transport.requests import Request as GRequest
-        creds.refresh(GRequest())
-        with open(TOKEN_FILE, "w") as f:
-            f.write(creds.to_json())
-    if not creds or not creds.valid:
-        return None
-    return build("tasks", "v1", credentials=creds)
-
-
-def sync_todos_to_tasks(user_data):
-    """Push bot todos to Google Tasks."""
+async def _job_habit_nudge(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        service = get_tasks_service()
-        if not service:
-            return False
-        tasklists = service.tasklists().list().execute()
-        bot_list_id = None
-        for tl in tasklists.get("items", []):
-            if tl.get("title") == "Wasonassistant":
-                bot_list_id = tl["id"]
-                break
-        if not bot_list_id:
-            new_list = service.tasklists().insert(body={"title": "Wasonassistant"}).execute()
-            bot_list_id = new_list["id"]
-        existing = service.tasks().list(tasklist=bot_list_id, showCompleted=False).execute()
-        existing_titles = {t.get("title", "") for t in existing.get("items", [])}
-        pushed = 0
-        for todo in user_data.get("todos", []):
-            if not todo.get("done") and todo.get("text") not in existing_titles:
-                service.tasks().insert(
-                    tasklist=bot_list_id,
-                    body={"title": todo["text"], "status": "needsAction"}
-                ).execute()
-                pushed += 1
-        return pushed
+        from features.habits import send_habit_nudge
+        await send_habit_nudge(context, ALLOWED_USER_ID)
     except Exception as e:
-        logger.error(f"Tasks sync push error: {e}")
-        return False
+        logger.error(f"job_habit_nudge error: {e}")
 
 
-def sync_tasks_to_todos(user_data):
-    """Pull Google Tasks into bot todos (avoid duplicates)."""
+async def _job_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        service = get_tasks_service()
-        if not service:
-            return 0
-        tasklists = service.tasklists().list().execute()
-        pulled = 0
-        existing_texts = {t.get("text", "").lower() for t in user_data.get("todos", [])}
-        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        for tl in tasklists.get("items", []):
-            if tl.get("title") == "Wasonassistant":
-                continue
-            tasks = service.tasks().list(
-                tasklist=tl["id"], showCompleted=False
-            ).execute()
-            for task in tasks.get("items", []):
-                title = task.get("title", "").strip()
-                if title and title.lower() not in existing_texts:
-                    import uuid as _uuid
-                    user_data["todos"].append({
-                        "text": title,
-                        "done": False,
-                        "added": now_str,
-                        "source": "google_tasks"
-                    })
-                    existing_texts.add(title.lower())
-                    pulled += 1
-        if pulled:
-            save_data(user_data)
-        return pulled
+        from features.reminders import check_and_fire_reminders
+        await check_and_fire_reminders(context, ALLOWED_USER_ID)
     except Exception as e:
-        logger.error(f"Tasks sync pull error: {e}")
-        return 0
+        logger.error(f"job_reminders error: {e}")
 
 
-async def cmd_synctasks(update, context):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
-    service = get_calendar_service()
-    if not service:
-        await update.message.reply_text("Google Tasks is not connected. Use /auth to connect Google first.")
-        return
-    await update.message.reply_text("Syncing with Google Tasks...")
+async def _job_event_prep(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        user_data = load_data()
-        pulled = sync_tasks_to_todos(user_data)
-        pushed = sync_todos_to_tasks(user_data)
+        from features.event_prep import send_event_prep
+        await send_event_prep(context, ALLOWED_USER_ID)
     except Exception as e:
-        await update.message.reply_text(f"Sync failed: {str(e)[:120]}\nTry /auth to reconnect Google.")
-        return
-    parts = []
-    if pulled:
-        parts.append(f"{pulled} task(s) pulled from Google Tasks")
-    if pushed:
-        parts.append(f"{pushed} todo(s) pushed to Google Tasks")
-    if not parts:
-        parts.append("Everything already in sync")
-    await update.message.reply_text("Sync complete! " + " | ".join(parts))
+        logger.error(f"job_event_prep error: {e}")
 
 
-# Phase 8 - Auto tasks sync job
-
-async def auto_sync_tasks(context):
-    """Silently sync Google Tasks every morning."""
+async def _job_travel_weather(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        user_data = load_data()
-        pulled = sync_tasks_to_todos(user_data)
-        if pulled:
-            await context.bot.send_message(
-                chat_id=ALLOWED_USER_ID,
-                text=f"Synced {pulled} new task(s) from Google Tasks into your todos."
+        from features.briefing import send_travel_weather
+        await send_travel_weather(context, ALLOWED_USER_ID)
+    except Exception as e:
+        logger.error(f"job_travel_weather error: {e}")
+
+
+async def _job_weekly_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Runs daily at WEEKLY_SUMMARY_HOUR; handler skips wrong weekdays."""
+    import datetime
+    try:
+        now = datetime.datetime.now(pytz.timezone(TIMEZONE))
+        if now.weekday() != WEEKLY_SUMMARY_WEEKDAY:
+            return
+        from features.summary import send_weekly_summary
+        await send_weekly_summary(context, ALLOWED_USER_ID)
+    except Exception as e:
+        logger.error(f"job_weekly_summary error: {e}")
+
+
+async def _job_journal_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        from core.data import load_data, get_journal_settings
+        from features.journal import send_journal_reminder
+        data     = load_data()
+        js       = get_journal_settings(data)
+        # First reminder fires at configured times — this job runs at reminder_times[0]
+        await send_journal_reminder(context, ALLOWED_USER_ID, is_followup=False)
+    except Exception as e:
+        logger.error(f"job_journal_reminder error: {e}")
+
+
+async def _job_journal_followup(context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        from features.journal import send_journal_reminder
+        await send_journal_reminder(context, ALLOWED_USER_ID, is_followup=True)
+    except Exception as e:
+        logger.error(f"job_journal_followup error: {e}")
+
+
+async def _job_meal_adherence_check(context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        from features.meals import send_meal_adherence_check
+        await send_meal_adherence_check(context, ALLOWED_USER_ID)
+    except Exception as e:
+        logger.error(f"job_meal_adherence error: {e}")
+
+
+async def _job_advance_recurring(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """12:01 AM job to roll recurring todos/reminders to their next date."""
+    try:
+        from core.data import load_data, save_data, advance_recurring_items
+        data    = load_data()
+        changed = advance_recurring_items(data)
+        if changed:
+            save_data(data)
+            logger.info(f"Advanced {changed} recurring item(s).")
+    except Exception as e:
+        logger.error(f"job_advance_recurring error: {e}")
+
+
+def _schedule_jobs(job_queue: JobQueue) -> None:
+    """Register all background jobs."""
+    tz = pytz.timezone(TIMEZONE)
+
+    job_queue.run_daily(
+        _job_briefing,
+        time=dtime(BRIEFING_HOUR, BRIEFING_MINUTE, tzinfo=tz),
+        name="daily_briefing",
+    )
+    job_queue.run_daily(
+        job_google_health_check,
+        time=dtime(HEALTH_CHECK_HOUR, HEALTH_CHECK_MINUTE, tzinfo=tz),
+        name="google_health_check",
+    )
+    job_queue.run_daily(
+        _job_habit_nudge,
+        time=dtime(HABIT_NUDGE_HOUR, HABIT_NUDGE_MINUTE, tzinfo=tz),
+        name="habit_nudge",
+    )
+    job_queue.run_daily(
+        _job_event_prep,
+        time=dtime(EVENT_PREP_HOUR, EVENT_PREP_MINUTE, tzinfo=tz),
+        name="event_prep",
+    )
+    job_queue.run_daily(
+        _job_travel_weather,
+        time=dtime(TRAVEL_WEATHER_HOUR, TRAVEL_WEATHER_MINUTE, tzinfo=tz),
+        name="travel_weather",
+    )
+    job_queue.run_daily(
+        _job_weekly_summary,
+        time=dtime(WEEKLY_SUMMARY_HOUR, WEEKLY_SUMMARY_MINUTE, tzinfo=tz),
+        name="weekly_summary",
+    )
+    job_queue.run_repeating(
+        _job_reminders,
+        interval=REMINDER_CHECK_INTERVAL,
+        first=10,
+        name="reminder_check",
+    )
+    job_queue.run_daily(
+        _job_advance_recurring,
+        time=dtime(0, 1, tzinfo=tz),   # 12:01 AM avoids DST midnight ambiguity
+        name="advance_recurring",
+    )
+    # Journal reminders — read configured times from userdata at runtime
+    # Default: 9pm reminder, 9:30pm follow-up
+    try:
+        from core.data import load_data, get_journal_settings
+        data = load_data()
+        js   = get_journal_settings(data)
+        times = js.get("reminder_times", ["21:00"])
+        gap   = js.get("reminder_gap_min", 30)
+        count = js.get("reminder_count", 1)
+        for i, t_str in enumerate(times[:count]):
+            h, m = (int(x) for x in t_str.split(":"))
+            job_queue.run_daily(
+                _job_journal_reminder if i == 0 else _job_journal_followup,
+                time=dtime(h, m, tzinfo=tz),
+                name=f"journal_reminder_{i}",
             )
-    except Exception as e:
-        logger.error(f"Auto tasks sync error: {e}")
+            if count > 1 and gap and i == 0:
+                import datetime as _dt
+                fu_m = m + gap
+                fu_h = h + fu_m // 60
+                fu_m = fu_m % 60
+                job_queue.run_daily(
+                    _job_journal_followup,
+                    time=dtime(fu_h % 24, fu_m, tzinfo=tz),
+                    name="journal_followup",
+                )
+    except Exception as _e:
+        # Fall back to 9pm + 9:30pm defaults
+        job_queue.run_daily(_job_journal_reminder, time=dtime(21, 0, tzinfo=tz), name="journal_reminder_0")
+        job_queue.run_daily(_job_journal_followup, time=dtime(21, 30, tzinfo=tz), name="journal_followup")
 
-
-# Phase 8 - Response caching for weather and sports
-
-_cache = {}
-
-def cache_get(key, max_age_seconds=300):
-    if key in _cache:
-        value, timestamp = _cache[key]
-        if datetime.datetime.now().timestamp() - timestamp < max_age_seconds:
-            return value
-    return None
-
-def cache_set(key, value):
-    _cache[key] = (value, datetime.datetime.now().timestamp())
-
-
-# Main
-
-async def check_calendar_auth(context):
-    """Daily job at 6:50am - warn if calendar token is expired or missing."""
+    # Meal adherence check — default 8pm
     try:
-        service = get_calendar_service()
-        if not service:
-            await context.bot.send_message(
-                chat_id=ALLOWED_USER_ID,
-                text="Warning: Google Calendar is not connected. Use /auth to reconnect before your briefing."
+        from core.data import load_data, get_journal_settings
+        data = load_data()
+        adh_time = data.get("settings", {}).get("journal", {}).get("adherence_reminder", "20:00")
+        ah, am = (int(x) for x in adh_time.split(":"))
+        job_queue.run_daily(_job_meal_adherence_check, time=dtime(ah, am, tzinfo=tz), name="meal_adherence")
+    except Exception:
+        job_queue.run_daily(_job_meal_adherence_check, time=dtime(20, 0, tzinfo=tz), name="meal_adherence")
+
+    logger.info("All background jobs scheduled.")
+
+
+# =============================================================================
+# ERROR HANDLER
+# =============================================================================
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log all unhandled exceptions and notify the user if possible."""
+    logger.error(f"Unhandled exception: {context.error}", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "Something went wrong on my end. I've logged the error."
             )
-    except Exception as e:
-        await context.bot.send_message(
-            chat_id=ALLOWED_USER_ID,
-            text=f"Warning: Calendar auth check failed: {str(e)[:80]}\nUse /auth to reconnect."
-        )
+        except Exception:
+            pass
 
 
-async def cmd_checkauth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check if Google Calendar is currently connected."""
-    if update.effective_user.id != ALLOWED_USER_ID:
-        return
+# =============================================================================
+# STARTUP HOOK
+# =============================================================================
+
+async def _on_startup(app: Application) -> None:
+    """
+    Runs once after the bot starts polling, before the first message.
+
+    - Refreshes the intent classifier with live memory categories
+    - Ensures all Google Tasks lists exist
+    - Sets the Telegram bot command menu
+    """
+    logger.info(f"{BOT_NAME} starting up...")
+
+    # Refresh intent classifier with live memory categories
     try:
-        service = get_calendar_service()
-        if service:
-            # Try a quick API call to verify it actually works
-            service.calendarList().list(maxResults=1).execute()
-            await update.message.reply_text("Google Calendar is connected and working.")
-        else:
-            await update.message.reply_text("Google Calendar is NOT connected. Use /auth to reconnect.")
+        mem        = load_memory()
+        categories = get_active_categories(mem)
+        refresh_intent_prompt(categories)
+        logger.info(f"Intent prompt refreshed ({len(categories)} categories).")
     except Exception as e:
-        await update.message.reply_text(f"Google Calendar connection failed: {str(e)[:100]}\nUse /auth to reconnect.")
+        logger.warning(f"Startup: could not refresh intent prompt: {e}")
+
+    # Warm up Google Tasks lists (creates missing lists)
+    try:
+        from core.google_auth import get_tasks_service, is_authorized
+        if is_authorized():
+            from adapters.google_tasks import ensure_all_lists
+            service = get_tasks_service()
+            if service:
+                ensure_all_lists(service)
+                logger.info("Google Tasks lists verified.")
+    except Exception as e:
+        logger.warning(f"Startup: Google Tasks warm-up failed: {e}")
+
+    # Set Telegram bot command menu
+    try:
+        commands = [
+            BotCommand("start",      "Get started"),
+            BotCommand("briefing",   "Morning briefing"),
+            BotCommand("calendar",   "Today's events"),
+            BotCommand("todos",      "Todo list"),
+            BotCommand("reminders",  "Reminders"),
+            BotCommand("shopping",   "Shopping lists"),
+            BotCommand("notes",      "Notes"),
+            BotCommand("habits",     "Habit tracker"),
+            BotCommand("gifts",      "Gift ideas"),
+            BotCommand("meals",      "Meal planning & recipes"),
+            BotCommand("workout",    "Workout tracking"),
+            BotCommand("journal",    "Evening journal"),
+            BotCommand("contacts",   "Personal contact notes"),
+            BotCommand("mood",       "Log or view your mood"),
+            BotCommand("readlater",  "View or search saved links"),
+            BotCommand("export",     "Export all your data to Excel"),
+            BotCommand("memory",     "What I remember about you"),
+            BotCommand("ask",        "Ask me anything"),
+            BotCommand("setup",      "Setup wizard"),
+            BotCommand("checkauth",  "Check Google connection"),
+            BotCommand("help",       "All commands"),
+        ]
+        await app.bot.set_my_commands(commands)
+        logger.info("Bot command menu set.")
+    except Exception as e:
+        logger.warning(f"Startup: could not set bot commands: {e}")
+
+    logger.info(f"{BOT_NAME} is ready.")
 
 
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+# =============================================================================
+# MAIN
+# =============================================================================
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("auth", auth))
-    app.add_handler(CommandHandler("code", code))
-    app.add_handler(CommandHandler("today", today))
-    app.add_handler(CommandHandler("week", week))
-    app.add_handler(CommandHandler("weekend", weekend))
-    app.add_handler(CommandHandler("restofday", rest_of_day))
-    app.add_handler(CommandHandler("scores", scores_command))
-    app.add_handler(CommandHandler("briefing", briefing_command))
-    app.add_handler(CommandHandler("todos", cmd_todos))
-    app.add_handler(CommandHandler("shopping", cmd_shopping))
-    app.add_handler(CommandHandler("notes", cmd_notes))
-    app.add_handler(CommandHandler("expenses", cmd_expenses))
-    app.add_handler(CommandHandler("workouts", cmd_workouts))
-    app.add_handler(CommandHandler("gifts", cmd_gifts))
-    app.add_handler(CommandHandler("reminders", cmd_reminders))
-    app.add_handler(CommandHandler("sleep", cmd_sleep))
-    app.add_handler(CommandHandler("mood", cmd_mood))
-    app.add_handler(CommandHandler("habits", cmd_habits))
-    app.add_handler(CommandHandler("contacts", cmd_contacts))
-    app.add_handler(CommandHandler("summary", summary_command))
-    app.add_handler(CommandHandler("ask", ask_command))
-    app.add_handler(CommandHandler("braindump", brain_dump_command))
-    app.add_handler(CommandHandler("synctasks", cmd_synctasks))
-    app.add_handler(CommandHandler("clear", clear))
-    app.add_handler(CommandHandler("checkauth", cmd_checkauth))
+def main() -> None:
+    """Build the Application, register all handlers, and start polling."""
+    logging.basicConfig(
+        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        level=logging.INFO,
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+    app = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .post_init(_on_startup)
+        .build()
+    )
+
+    # Command handlers
+    app.add_handler(CommandHandler("start",      cmd_start))
+    app.add_handler(CommandHandler("help",       cmd_help))
+    app.add_handler(CommandHandler("briefing",   cmd_briefing))
+    app.add_handler(CommandHandler("todos",      cmd_todos))
+    app.add_handler(CommandHandler("notes",      cmd_notes))
+    app.add_handler(CommandHandler("shopping",   cmd_shopping))
+    app.add_handler(CommandHandler("reminders",  cmd_reminders))
+    app.add_handler(CommandHandler("habits",     cmd_habits))
+    app.add_handler(CommandHandler("calendar",   cmd_calendar))
+    app.add_handler(CommandHandler("gifts",      cmd_gifts))
+    app.add_handler(CommandHandler("meals",      cmd_meals))
+    app.add_handler(CommandHandler("workout",    cmd_workout))
+    app.add_handler(CommandHandler("journal",    cmd_journal))
+    app.add_handler(CommandHandler("contacts",   cmd_contacts))
+    app.add_handler(CommandHandler("ask",        cmd_ask))
+    app.add_handler(CommandHandler("memory",     cmd_memory))
+    app.add_handler(CommandHandler("setup",      cmd_setup))
+    app.add_handler(CommandHandler("auth",       cmd_auth))
+    app.add_handler(CommandHandler("code",       cmd_code))
+    app.add_handler(CommandHandler("checkauth",  cmd_checkauth))
+    app.add_handler(CommandHandler("disconnect", cmd_disconnect))
+    app.add_handler(CommandHandler("mood",      cmd_mood))
+    app.add_handler(CommandHandler("readlater", cmd_readlater))
+    app.add_handler(CommandHandler("rl",        cmd_readlater))
+    app.add_handler(CommandHandler("export",    cmd_export))
+
+    # Inline keyboard callbacks (single handler, prefix-routed)
+    app.add_handler(CallbackQueryHandler(handle_mood_callback,   pattern="^mood_"))
+    app.add_handler(CallbackQueryHandler(handle_link_callback,   pattern="^link_"))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    mtn = pytz.timezone("America/Denver")
+    # Free-text and media messages
+    app.add_handler(MessageHandler(
+        filters.TEXT | filters.VOICE | filters.AUDIO | filters.PHOTO,
+        handle_message,
+    ))
 
-    # Check reminders every 60 seconds
-    app.job_queue.run_repeating(check_reminders, interval=60, first=10)
+    # Global error handler
+    app.add_error_handler(error_handler)
 
-    # Scheduled morning briefing at 7:00 AM Mountain Time
-    briefing_time = datetime.time(hour=7, minute=0, tzinfo=mtn)
-    app.job_queue.run_daily(send_scheduled_briefing, time=briefing_time, name="morning_briefing")
+    # Background jobs
+    _schedule_jobs(app.job_queue)
 
-    # Weekly summary + digest: Sunday at 7:00 PM Mountain Time
-    weekly_time = datetime.time(hour=19, minute=0, tzinfo=mtn)
-    app.job_queue.run_daily(send_weekly_summary, time=weekly_time, days=(6,), name="weekly_summary")
-
-    # Travel weather check: every evening at 7:00 PM Mountain Time
-    travel_time = datetime.time(hour=19, minute=0, tzinfo=mtn)
-    app.job_queue.run_daily(check_travel_weather, time=travel_time, name="travel_weather")
-
-    # Google Tasks sync: every morning at 7:05 AM (just after briefing)
-    tasks_sync_time = datetime.time(hour=7, minute=5, tzinfo=mtn)
-    app.job_queue.run_daily(auto_sync_tasks, time=tasks_sync_time, name="tasks_sync")
-
-    # Calendar health check: every day at 6:50 AM (10 min before briefing)
-    cal_check_time = datetime.time(hour=6, minute=50, tzinfo=mtn)
-    app.job_queue.run_daily(check_calendar_auth, time=cal_check_time, name="cal_health_check")
-
-    logger.info("Bot is running (Phase 8)...")
-    app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query", "voice", "photo"])
+    logger.info("Starting polling...")
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,  # ignore backlog from while offline
+    )
 
 
 if __name__ == "__main__":
