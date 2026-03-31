@@ -519,15 +519,8 @@ async def send_briefing(context, chat_id: int) -> None:
         data = load_data()
         bs   = get_briefing_settings(data)
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"send_briefing: failed to load data: {e}\n{tb}")
-        snippet = tb[-800:].replace("<", "&lt;").replace(">", "&gt;")
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"⚠️ Briefing data load failed.\n\n<code>{snippet}</code>",
-            parse_mode="HTML",
-        )
+        logger.error(f"send_briefing: failed to load data: {e}", exc_info=True)
+        await context.bot.send_message(chat_id=chat_id, text="⚠️ Briefing unavailable — data load failed.")
         return
 
     enabled = bs.get("enabled", list(_SECTION_BUILDERS.keys()))
