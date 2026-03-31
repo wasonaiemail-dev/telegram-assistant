@@ -218,10 +218,21 @@ def _empty_data():
 
 
 def _next_id(item_list):
-    """Generate a simple integer ID one higher than the current max."""
+    """Generate a simple integer ID one higher than the current max.
+
+    Skips non-numeric IDs (e.g. UUIDs like '07b2f52d') so they never
+    cause a ValueError in int().
+    """
     if not item_list:
         return 1
-    existing = [int(i.get("id") or 0) for i in item_list if isinstance(i, dict)]
+    existing = []
+    for i in item_list:
+        if isinstance(i, dict):
+            raw = i.get("id", 0)
+            try:
+                existing.append(int(raw))
+            except (ValueError, TypeError):
+                pass  # UUID or non-numeric ID — skip
     return max(existing, default=0) + 1
 
 
