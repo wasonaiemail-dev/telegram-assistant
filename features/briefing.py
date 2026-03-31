@@ -1,3 +1,4 @@
+
 """
 alfred/features/briefing.py
 ============================
@@ -160,7 +161,7 @@ async def _fetch_quote() -> str:
                         text   = data.get("text", "").strip()
                         author = data.get("author", "").strip()
                         if text:
-                            return f'"{text}" — {author}' if author else f'"{text}"'
+                            return f'\"{ text}\" — {author}' if author else f'\"{ text}\"'
 
             elif qt in ("bible",):
                 # Use bible-api.com for a random verse
@@ -170,7 +171,7 @@ async def _fetch_quote() -> str:
                         text = data.get("text", "").strip().replace("\n", " ")
                         ref  = data.get("reference", "").strip()
                         if text:
-                            return f'"{text[:200]}" — {ref}' if ref else f'"{text[:200]}"'
+                            return f'\"{ text[:200]}\" — {ref}' if ref else f'\"{ text[:200]}\"'
 
             else:  # motivational / philosophical / random
                 async with session.get(ZENQUOTES_URL) as r:
@@ -181,7 +182,7 @@ async def _fetch_quote() -> str:
                             text   = q.get("q", "").strip()
                             author = q.get("a", "").strip()
                             if text:
-                                return f'"{text}" — {author}' if author else f'"{text}"'
+                                return f'\"{ text}\" — {author}' if author else f'\"{ text}\"'
 
     except Exception as e:
         logger.warning(f"_fetch_quote API error ({qt}): {e}")
@@ -401,14 +402,14 @@ async def _section_tasks(dt: datetime.datetime) -> str:
     if overdue:
         lines.append(f"  ⚠️ {len(overdue)} overdue:")
         for t in overdue[:5]:
-            lines.append(f"    • {t.get('title', '(untitled)')}")
+            lines.append(f"    • {t.get('title', '(untitled)')}") 
         if len(overdue) > 5:
             lines.append(f"    …and {len(overdue) - 5} more")
 
     if due_today:
         lines.append(f"  Due today ({len(due_today)}):")
         for t in due_today[:5]:
-            lines.append(f"    • {t.get('title', '(untitled)')}")
+            lines.append(f"    • {t.get('title', '(untitled)')}") 
         if len(due_today) > 5:
             lines.append(f"    …and {len(due_today) - 5} more")
 
@@ -440,7 +441,7 @@ async def _section_reminders(dt: datetime.datetime) -> str:
             return ""
         lines = ["⏰ *Reminders Due Today*"]
         for r in due[:5]:
-            lines.append(f"  • {r.get('text', '(no text)')}")
+            lines.append(f"  • {r.get('text', '(no text)')}") 
         return "\n".join(lines)
     except Exception as e:
         logger.debug(f"_section_reminders: {e}")
@@ -513,9 +514,14 @@ async def send_briefing(context, chat_id: int) -> None:
     briefing_settings in userdata.json (configured via /setup briefing).
     Falls back to a sensible default order if not configured.
     """
-    from core.data import load_data, get_briefing_settings
-    data = load_data()
-    bs   = get_briefing_settings(data)
+    try:
+        from core.data import load_data, get_briefing_settings
+        data = load_data()
+        bs   = get_briefing_settings(data)
+    except Exception as e:
+        logger.error(f"send_briefing: failed to load data: {e}")
+        await context.bot.send_message(chat_id=chat_id, text="⚠️ Briefing unavailable — data load failed.")
+        return
 
     enabled = bs.get("enabled", list(_SECTION_BUILDERS.keys()))
     order   = [s for s in bs.get("order", list(_SECTION_BUILDERS.keys())) if s in enabled]
@@ -666,11 +672,21 @@ async def _send_long(bot, chat_id: int, text: str, parse_mode: str = "Markdown")
     """
     Send text to chat_id, splitting at 4096 chars if necessary.
     Splits on double-newlines to avoid breaking Markdown mid-block.
+    Falls back to plain text if Telegram rejects the Markdown formatting.
     """
     MAX = 4000  # stay under Telegram's 4096 limit with buffer
 
+    async def _send_chunk(chunk: str) -> None:
+        """Send one chunk, falling back to plain text if Markdown is rejected."""
+        try:
+            await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode)
+        except Exception:
+            # Strip Markdown symbols and retry as plain text
+            plain = chunk.replace("*", "").replace("_", "").replace("`", "")
+            await bot.send_message(chat_id=chat_id, text=plain, parse_mode=None)
+
     if len(text) <= MAX:
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
+        await _send_chunk(text)
         return
 
     # Split on paragraph boundaries
@@ -679,10 +695,10 @@ async def _send_long(bot, chat_id: int, text: str, parse_mode: str = "Markdown")
     for part in parts:
         if len(chunk) + len(part) + 2 > MAX:
             if chunk:
-                await bot.send_message(chat_id=chat_id, text=chunk.strip(), parse_mode=parse_mode)
+                await _send_chunk(chunk.strip())
             chunk = part
         else:
             chunk = (chunk + "\n\n" + part).strip() if chunk else part
 
     if chunk:
-        await bot.send_message(chat_id=chat_id, text=chunk.strip(), parse_mode=parse_mode)
+        await _send_chunk(chunk.strip())
