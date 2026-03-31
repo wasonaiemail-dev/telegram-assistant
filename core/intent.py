@@ -362,13 +362,14 @@ def _build_keyword_rules() -> list:
     rules.append((p, _shop_list_all))
 
     # ── TODOS — ADD ───────────────────────────────────────────────────────────
-    # "add X to my todo list" / "add X to tasks"
-    p = _r(r"^add\s+(.+?)\s+to\s+(?:my\s+)?(?:todo|task)s?(?:\s+list)?$")
+    # "add todo X" / "add task X" / "add X to my todo list"
+    p = _r(r"^(?:add\s+(?:todo|task)\s+(.+)|add\s+(.+?)\s+to\s+(?:my\s+)?(?:todo|task)s?(?:\s+list)?)$")
 
     def _todo_add(m, t):
+        text = (m.group(1) or m.group(2) or "").strip()
         return IntentResult(
             intent=TODO_ADD,
-            entities={"text": m.group(1).strip()},
+            entities={"text": text},
             confidence="keyword",
             raw=t,
         )
