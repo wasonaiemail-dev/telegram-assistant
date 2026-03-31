@@ -1,3 +1,4 @@
+
 # Alfred — Personal Assistant Bot
 
 > A private Telegram bot that manages your life. Todos, calendar, reminders, notes, shopping lists, habits, morning briefings, and a persistent AI assistant — all in one chat thread.
@@ -26,6 +27,13 @@ Send Alfred a message and it handles the rest. Every feature is available by com
 | 📊 **Weekly Summary** | AI-written narrative of your week every Monday morning |
 | 🗓 **Event Prep** | Auto-generated prep notes before significant calendar events |
 | ☀️ **Travel Weather** | Automatic weather alert when a trip is detected in your calendar |
+| 🍽 **Meal Planning** | Plan meals, log adherence, get nutrition goal tracking |
+| 💪 **Workout Tracking** | Log workouts, view history, export to Excel |
+| 📔 **Journal** | Private daily journal with voice support and GPT reflections |
+| 😊 **Mood Tracker** | 1–10 daily mood rating, trend analysis, GPT insights |
+| 🔗 **Read Later** | Save links with AI summaries and tags, snooze, search, weekly digest |
+| 💬 **Reply Assist** | Paste a message and Alfred drafts your response |
+| 📤 **Data Export** | Export everything (journal, mood, notes, habits, memory, links) to Excel |
 
 ---
 
@@ -43,14 +51,22 @@ Send Alfred a message and it handles the rest. Every feature is available by com
 /ask <question> — Start or continue an AI conversation
 /gifts          — View and manage gift ideas
 /contacts       — View and manage personal contact notes
-/setup          — Re-run the initial setup wizard
+/meals          — View and manage meal plan
+/workout        — Log a workout or view history
+/journal        — Start or continue today's journal entry
+/mood           — Log today's mood (1–10)
+/readlater      — Save a link or view your reading list
+/export         — Export all data to an Excel file
+/setup          — Re-run the initial setup wizard / configure preferences
 /help           — List all commands
 ```
 
-You can also just **type naturally** — Alfred classifies your intent automatically:
+You can also just **type or talk naturally** — Alfred classifies your intent automatically. Voice messages work for everything:
 > *"Remind me to call mum on Sunday at 5pm"*
 > *"Add oat milk and eggs to the grocery list"*
 > *"What's on my calendar next week?"*
+> *"I'm feeling about a 7 today, had a rough morning but good workout"*
+> 📷 Send a receipt photo to auto-remove items from your shopping lists
 
 ---
 
@@ -122,12 +138,19 @@ alfred/
 │   ├── memory.py           # Memory capture and injection
 │   ├── notes.py            # Quick notes
 │   ├── reminders.py        # Timed and recurring reminders
-│   ├── setup.py            # First-run setup wizard
-│   ├── shopping.py         # Multi-list shopping manager
+│   ├── reply_assist.py     # Draft replies to incoming messages
+│   ├── setup.py            # First-run setup wizard + preferences
+│   ├── shopping.py         # Multi-list shopping + receipt photo processing
 │   ├── summary.py          # Weekly AI narrative
-│   └── todos.py            # Todo list management
+│   ├── todos.py            # Todo list management
+│   ├── journal.py          # Daily journal with voice + GPT reflection
+│   ├── mood.py             # Mood logging and trend analysis
+│   ├── meals.py            # Meal planning and nutrition tracking
+│   ├── workout.py          # Workout logging and history
+│   ├── links.py            # Read-later link saver with AI summaries
+│   └── export_data.py      # Full data export to Excel
 ├── setup/
-│   ├── SETUP_COMPANION.md  # Technical setup guide (paste into Claude/GPT)
+│   ├── SETUP_COMPANION.md  # AI-guided setup wizard (paste into Claude/GPT)
 │   └── Alfred_Buyer_Guide.pdf  # Illustrated visual setup guide
 ├── .env.example            # All environment variables with descriptions
 ├── railway.json            # Railway deployment config
