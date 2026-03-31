@@ -194,7 +194,7 @@ async def handle_todo_intent(
 
     # ── TODO_ADD ─────────────────────────────────────────────────────────────
     if intent == TODO_ADD:
-        task_text = entities.get("task", "").strip()
+        task_text = (entities.get("task") or entities.get("text") or "").strip()
         if not task_text:
             await update.message.reply_text(
                 "What should I add? Try: \"add todo finish the report\""
