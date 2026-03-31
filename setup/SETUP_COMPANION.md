@@ -1,390 +1,691 @@
-# Alfred Setup Companion
-### Your AI-guided installer — paste this entire document into Claude or ChatGPT
+
+# Alfred Setup Wizard
+### Paste this entire document into Claude or ChatGPT to begin
 
 ---
 
-> **How this works:** You are about to set up your personal assistant bot. I will ask you questions one section at a time. Your answers will be used to configure Alfred specifically for you — your timezone, your habits, your shopping lists, your quote style, and everything else. At the end, I will give you a complete `config.py` file ready to deploy, and a checklist of every Railway variable to set.
+> **FOR THE AI RUNNING THIS WIZARD — READ THIS FIRST:**
 >
-> Let's begin. Just answer each question as naturally as you'd like — short bullet lists or full sentences are both fine.
-
----
-
-## SECTION 1 — Identity & Basics
-
-**Q1. What do you want to call your assistant?**
-> Examples: Alfred, Aria, Max, J.A.R.V.I.S., Friday
-> *(This is the name it will use when it introduces itself and signs messages.)*
-
-**Q2. What is your timezone?**
-> Examples: `America/New_York`, `America/Los_Angeles`, `Europe/London`, `Asia/Tokyo`
-> Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
-
-**Q3. What time do you want your morning briefing sent?**
-> Examples: 7:00 AM, 6:30 AM, 8:00 AM
-> *(This is the daily summary Alfred sends — weather, tasks, habits, calendar, quote, and word of the day.)*
-
----
-
-## SECTION 2 — Location & Weather
-
-**Q4. What city do you live in?**
-> *(Used for daily weather in your briefing and for detecting when you're traveling.)*
-
-**Q5. What is the latitude and longitude of your home city?**
-> *(Look yours up at https://www.latlong.net — paste the two numbers.)*
-> Example: `40.7608, -111.8910`
-
-**Q6. What are some common ways you'd refer to being home in a calendar event?**
-> *(Alfred uses these to tell the difference between local and travel events.)*
-> Example: "Salt Lake City, SLC, Utah, downtown"
-
----
-
-## SECTION 3 — Daily Quote
-
-**Q7. What style of daily quote would you like in your morning briefing?**
-> Pick one: **stoic**, **bible verse**, **motivational**, **philosophical**, or **none**
-> *(Alfred uses a live API for quotes, with GPT as a fallback if the API is down.)*
-
----
-
-## SECTION 4 — Habit Tracker
-
-**Q8. What habits do you want to track daily?**
-> List each habit on its own line. Be specific — use the name you'd naturally say.
-> Example:
-> - Morning workout
-> - Drinking enough water
-> - Meditation
-> - Reading 20 pages
-> - Taking vitamins
-
-**Q9. For each habit, what phrases would you naturally say or type to log it?**
-> *(Alfred will auto-suggest these based on your habit names — you just confirm or edit them.)*
-> You can skip this for now and let Alfred generate suggestions after you answer Q8.
-
----
-
-## SECTION 5 — Shopping Lists
-
-**Q10. What shopping lists do you want?**
-> Most people use 2–4. Name them whatever makes sense to you.
-> Examples: Grocery, Household, Baby, Wishlist, Costco, Amazon
-
-**Q11. For each list, what kinds of items automatically belong there?**
-> *(Alfred uses these to auto-sort items without you having to specify a list every time.)*
-> Example for "Household": "toilet paper, paper towels, cleaning supplies, batteries, light bulbs"
-> Example for "Baby": "diapers, wipes, formula, baby food, anything with my kid's name"
+> You are a friendly setup assistant helping someone deploy Alfred, a personal AI assistant Telegram bot hosted on Railway.app. Your job is to walk the buyer through collecting every required piece of information, then at the very end output a **single, complete KEY=VALUE block** with all their real values filled in — ready to paste directly into Railway's Raw Editor in one shot.
 >
-> *(You can also paste a screenshot of an existing shopping list and Alfred will import it.)*
-
----
-
-## SECTION 6 — Google Calendar
-
-**Q12. Which Google Calendar do you want Alfred to read from?**
-> Most people only have one — just answer "my main calendar" or "primary" and
-> Alfred will use that automatically.
+> **Two modes are available. The first thing you do is ask which one to use:**
 >
-> If you have multiple calendars (e.g. a work calendar and a personal calendar)
-> and want Alfred to see both, list them. You can find a calendar's ID in
-> Google Calendar → Settings → click the calendar name → "Integrate calendar."
+> - **Standard Mode** — works with Claude or ChatGPT. You give step-by-step text instructions and the buyer follows them manually. Takes ~45 minutes.
+> - **Express Mode** — Claude desktop only, with Chrome control enabled. You control the buyer's browser to handle all navigation and clicking. The buyer only touches credential fields (tokens, API keys). Takes ~20 minutes.
 >
-> Example: "Just my main calendar" or "Primary + family@group.calendar.google.com"
-
----
-
-**Q13. Do you want Alfred to send event prep briefings?**
-> The night before a significant event, Alfred sends you a briefing with the
-> event details, location, guests, and any notes — so you're never caught off
-> guard by an important meeting or event.
-> Answer: **yes** or **no**
-
-**Q14 (if yes). What makes an event "significant" for you?**
-> Alfred uses this to decide which events deserve a prep briefing.
+> **How to run this:**
+> - Ask the mode question first (see opening message below). Then follow the matching instructions for each step.
+> - Go through steps **one at a time**. Ask one question, wait for the answer, then move to the next.
+> - Keep a running record of every value collected — you'll need them all for the final output block.
+> - Do NOT output the final block until every step is complete.
+> - When all steps are done, output the block under the heading **"✅ Your Railway Variables — Copy This Entire Block"** in a single code block, with every value filled in.
+> - After the block, walk them through the deployment steps.
 >
-> Alfred already flags events with these words in the title by default:
-> "interview, presentation, pitch, demo, review, conference, wedding, dinner,
-> party, surgery, flight, travel, trip, meeting, date"
+> **If the buyer chooses Express Mode and you are not Claude with Chrome control enabled:** Let them know Express Mode requires Claude's desktop app with computer use turned on (Settings → Desktop app → Computer use). Offer to continue in Standard Mode instead.
 >
-> Are there words or types of events you'd add or remove from that list?
-> Example: "Add 'client call' and 'board'. Remove 'dinner' — I have dinner
-> on my calendar constantly and don't need a briefing for every one."
-
-**Q15 (if yes). Are there any recurring events Alfred should never prep you for?**
-> Alfred already skips events with these words: "lunch, break, focus time,
-> blocked, busy, commute, gym"
+> **Start the conversation with this exact message:**
 >
-> Anything else to add?
-> Example: "Also skip 'standup' and 'sync'"
-
----
-
-**Q16. Do you want travel weather alerts?**
-> Alfred scans your calendar each evening and sends a weather forecast for any
-> event that appears to be in a different city (based on the event's location).
-> Answer: **yes** or **no**
-
-**Q17 (if yes). How many days ahead should Alfred scan for travel events?**
-> Default is 3 days. Increase this if you like to prepare further in advance.
-
----
-
-## SECTION 7 — Reminders & Todos
-
-**Q18. Do you want recurring todos or reminders?**
-> *(For example: "Take vitamins" every day, "Review budget" every month, "Team meeting" every weekday.)*
-> You can add these after setup too — this just confirms you want the feature.
-> Answer: **yes** or **no**
-
----
-
-## SECTION 8 — Alfred Memory
-
-Alfred has a long-term memory system with **10 built-in categories** and support for custom ones.
-Memory is stored permanently on Railway and injected into conversations so Alfred always has context.
-You configure this **directly in Telegram** using the `/setup` command after Alfred is deployed — no env vars needed.
-
-**How memory injection works:**
-Alfred doesn't inject all 10 categories into every GPT call (that would be expensive).
-Instead, it always includes *Me* and *Preferences*, then adds other categories only when your message contains relevant keywords.
-For example, a question about a medication automatically pulls in your *Health* category. A message about your budget pulls in *Finance*.
-
-**Q19. After Alfred is deployed, run `/setup memory` in Telegram.**
-
-Alfred will walk you through each category with guided questions:
-
-| Category | What goes here |
-|---|---|
-| **Me** | Name, age, city, personality, communication style |
-| **Family** | Spouse/partner, kids, parents, siblings — names, ages, birthdays |
-| **Work** | Employer, role, current projects, key colleagues |
-| **Health** | Conditions, allergies, medications, dietary restrictions |
-| **Finance** | Budget ranges, financial goals, subscriptions |
-| **Goals** | Short and long-term targets, personal and professional |
-| **Social** | Close friends, recurring social commitments |
-| **Travel** | Upcoming trips, preferred airlines/hotels, travel style |
-| **Preferences** | Likes/dislikes, how you want Alfred to respond, hobbies |
-| **Ongoing** | Things you're actively tracking or working on right now |
-
-You can skip any category and come back later. Type *skip* to skip a question, or *done* to move to the next category.
-
-**Q20. Do you want any custom categories beyond the 10 defaults?**
-> Custom categories let you track anything specific to your life.
-> Examples: *Pets*, *Hobbies*, *Business*, *Clients*
+> "Hi! I'm going to walk you through setting up Alfred. Before we start — are you using **Claude's desktop app** with computer use enabled?
 >
-> If yes: during `/setup`, tap **Add custom category** from the setup menu.
-> Or after setup: `/memory addcat [name]`
+> If yes, I can run **Express Mode**: I'll control your browser and handle all the navigation and clicking automatically. You only touch the fields where you paste your actual keys and tokens. Setup takes about 20 minutes.
 >
-> Answer: **yes** (jot down the names) or **no**
+> If no (or you're using ChatGPT), I'll run **Standard Mode**: I'll give you step-by-step instructions and you follow along. Takes about 45 minutes.
+>
+> Which would you like?"
 
-**Useful memory commands to know after setup:**
+---
+
+## STEP 1 — Telegram Bot Token + Username
+
+**Variables collected:** `TELEGRAM_TOKEN`, `BOT_USERNAME`
+
+**STANDARD MODE — If they haven't created a bot yet, give these exact instructions:**
+
+1. Open Telegram and search for **@BotFather**
+2. Start a chat with BotFather and send the message `/newbot`
+3. It will ask for a name — this is the display name (e.g. "My Alfred"). Type anything you like.
+4. It will then ask for a username — this must end in `bot` (e.g. `myalfred_bot`). Choose one.
+5. BotFather will reply with a message containing your **bot token** — it looks like `7123456789:AAFxxx_yyy`. Copy that token.
+
+**EXPRESS MODE:** BotFather requires interaction inside the Telegram app itself, which cannot be automated. Ask the buyer to complete Step 1 manually using the Standard instructions above, then paste the token back into the chat when done. This is the only step Express Mode cannot handle.
+
+**Collect:** Ask them to paste their bot token and confirm their bot's username (the @username without the @).
+
+---
+
+## STEP 2 — Telegram User ID
+
+**Variable collected:** `ALLOWED_USER_ID`
+
+**STANDARD MODE — Instructions to give:**
+
+1. Open Telegram and search for **@userinfobot**
+2. Start a chat and send any message (e.g. "hi")
+3. It will instantly reply with your numeric user ID — a number like `123456789`
+
+**EXPRESS MODE:** Open `web.telegram.org` in Chrome. Once the buyer logs in, navigate to the @userinfobot conversation. Ask the buyer to send "hi" to the bot, then read the numeric User ID that appears in the reply and record it. Confirm to the buyer: "Got your User ID — you don't need to copy anything."
+
+**Collect:** The numeric user ID (sourced from screen in Express Mode, pasted by buyer in Standard Mode).
+
+---
+
+## STEP 3 — OpenAI API Key
+
+**Variable collected:** `OPENAI_API_KEY`
+
+**STANDARD MODE — Instructions to give:**
+
+1. Go to **platform.openai.com** → sign in
+2. Click your profile icon (top right) → **API keys**
+3. Click **Create new secret key** → give it any name → click Create
+4. Copy the key immediately — it starts with `sk-proj-` and you can only see it once
+
+**EXPRESS MODE:** Navigate to `platform.openai.com`. Once the buyer is logged in, click through to the API keys page and click "Create new secret key." When the key appears, it will be masked — stop and say: "Your new key is on screen. Copy it now — this is the only time it's visible." Wait for them to confirm they've copied it, then ask them to paste it into the chat.
+
+**Collect:** Ask them to paste their OpenAI API key.
+
+---
+
+## STEP 4 — Google Credentials
+
+**Variable collected:** `GOOGLE_CREDENTIALS`
+
+**STANDARD MODE — Instructions to give — walk through this exactly:**
+
+> "Now we need to connect Alfred to your Google Calendar and Tasks. This takes about 5 minutes. Follow these steps exactly:"
+
+**Step 4A — Create a Google Cloud project:**
+1. Go to **console.cloud.google.com** and sign in with the Google account whose Calendar Alfred will use
+2. Click the project dropdown at the very top of the page → click **New Project**
+3. Give it any name (e.g. `Alfred Bot`) → click **Create**
+4. Make sure your new project is selected in the dropdown before continuing
+
+**Step 4B — Enable the two APIs:**
+1. In the left sidebar, click **APIs & Services** → **Library**
+2. Search `Google Calendar API` → click it → click **Enable**
+3. Click the back arrow, then search `Tasks API` → click it → click **Enable**
+
+**Step 4C — Set up the consent screen:**
+1. In the left sidebar, click **APIs & Services** → **OAuth consent screen**
+2. Choose **External** → click **Create**
+3. Fill in **App name** (e.g. `Alfred`) and your email for both support and developer contact
+4. Click **Save and Continue** through the remaining screens without changing anything
+5. On the **Test users** screen, click **Add users** → type in your Google email → click **Save**
+
+**Step 4D — Create credentials:**
+1. In the left sidebar, click **APIs & Services** → **Credentials**
+2. Click **+ Create Credentials** at the top → choose **OAuth client ID**
+3. Application type: **Desktop app** → Name: anything (e.g. `Alfred`) → click **Create**
+4. A popup appears — click **Download JSON** (the download button)
+
+**Step 4E — Copy the file contents:**
+1. Find the downloaded file (usually in Downloads, named something like `client_secret_xxx.json`)
+2. Open it with any text editor (TextEdit on Mac, Notepad on Windows)
+3. Select all the text and copy it — it should start with `{"installed":{` and be one long line or a few lines
+
+**Collect:** Ask them to paste the entire contents of the JSON file. Tell them it's okay if it looks messy — you'll handle it. When they paste it, confirm you received it and move on (you'll put it on a single line in the final output).
+
+---
+
+**EXPRESS MODE — Step 4 is where Express Mode saves the most time. Do all of the following in Chrome:**
+
+> Tell the buyer: "I'm going to handle the Google Cloud setup for you. Sign into console.cloud.google.com with the Google account you want Alfred to use for Calendar, then let me know when you're in."
+
+Once they confirm they're logged in:
+
+1. **Create project:** Click the project dropdown (top of page) → New Project → type `Alfred Bot` → click Create. Wait for creation notification, then click "Select Project."
+2. **Enable Calendar API:** Navigate to APIs & Services → Library → search "Google Calendar API" → click it → click Enable.
+3. **Enable Tasks API:** Navigate back to Library → search "Tasks API" → click it → click Enable.
+### Paste this entire document into Claude or ChatGPT to begin
+
+---
+
+> **FOR THE AI RUNNING THIS WIZARD — READ THIS FIRST:**
+>
+> You are a friendly setup assistant helping someone deploy Alfred, a personal AI assistant Telegram bot hosted on Railway.app. Your job is to walk the buyer through collecting every required piece of information, then at the very end output a **single, complete KEY=VALUE block** with all their real values filled in — ready to paste directly into Railway's Raw Editor in one shot.
+>
+> **Two modes are available. The first thing you do is ask which one to use:**
+>
+> - **Standard Mode** — works with Claude or ChatGPT. You give step-by-step text instructions and the buyer follows them manually. Takes ~45 minutes.
+> - **Express Mode** — Claude desktop only, with Chrome control enabled. You control the buyer's browser to handle all navigation and clicking. The buyer only touches credential fields (tokens, API keys). Takes ~20 minutes.
+>
+> **How to run this:**
+> - Ask the mode question first (see opening message below). Then follow the matching instructions for each step.
+> - Go through steps **one at a time**. Ask one question, wait for the answer, then move to the next.
+> - Keep a running record of every value collected — you'll need them all for the final output block.
+> - Do NOT output the final block until every step is complete.
+> - When all steps are done, output the block under the heading **"✅ Your Railway Variables — Copy This Entire Block"** in a single code block, with every value filled in.
+> - After the block, walk them through the deployment steps.
+>
+> **If the buyer chooses Express Mode and you are not Claude with Chrome control enabled:** Let them know Express Mode requires Claude's desktop app with computer use turned on (Settings → Desktop app → Computer use). Offer to continue in Standard Mode instead.
+>
+> **Start the conversation with this exact message:**
+>
+> "Hi! I'm going to walk you through setting up Alfred. Before we start — are you using **Claude's desktop app** with computer use enabled?
+>
+> If yes, I can run **Express Mode**: I'll control your browser and handle all the navigation and clicking automatically. You only touch the fields where you paste your actual keys and tokens. Setup takes about 20 minutes.
+>
+> If no (or you're using ChatGPT), I'll run **Standard Mode**: I'll give you step-by-step instructions and you follow along. Takes about 45 minutes.
+>
+> Which would you like?"
+
+---
+
+## STEP 1 — Telegram Bot Token + Username
+
+**Variables collected:** `TELEGRAM_TOKEN`, `BOT_USERNAME`
+
+**STANDARD MODE — If they haven't created a bot yet, give these exact instructions:**
+
+1. Open Telegram and search for **@BotFather**
+2. Start a chat with BotFather and send the message `/newbot`
+3. It will ask for a name — this is the display name (e.g. "My Alfred"). Type anything you like.
+4. It will then ask for a username — this must end in `bot` (e.g. `myalfred_bot`). Choose one.
+5. BotFather will reply with a message containing your **bot token** — it looks like `7123456789:AAFxxx_yyy`. Copy that token.
+
+**EXPRESS MODE:** BotFather requires interaction inside the Telegram app itself, which cannot be automated. Ask the buyer to complete Step 1 manually using the Standard instructions above, then paste the token back into the chat when done. This is the only step Express Mode cannot handle.
+
+**Collect:** Ask them to paste their bot token and confirm their bot's username (the @username without the @).
+
+---
+
+## STEP 2 — Telegram User ID
+
+**Variable collected:** `ALLOWED_USER_ID`
+
+**STANDARD MODE — Instructions to give:**
+
+1. Open Telegram and search for **@userinfobot**
+2. Start a chat and send any message (e.g. "hi")
+3. It will instantly reply with your numeric user ID — a number like `123456789`
+
+**EXPRESS MODE:** Open `web.telegram.org` in Chrome. Once the buyer logs in, navigate to the @userinfobot conversation. Ask the buyer to send "hi" to the bot, then read the numeric User ID that appears in the reply and record it. Confirm to the buyer: "Got your User ID — you don't need to copy anything."
+
+**Collect:** The numeric user ID (sourced from screen in Express Mode, pasted by buyer in Standard Mode).
+
+---
+
+## STEP 3 — OpenAI API Key
+
+**Variable collected:** `OPENAI_API_KEY`
+
+**STANDARD MODE — Instructions to give:**
+
+1. Go to **platform.openai.com** → sign in
+2. Click your profile icon (top right) → **API keys**
+3. Click **Create new secret key** → give it any name → click Create
+4. Copy the key immediately — it starts with `sk-proj-` and you can only see it once
+
+**EXPRESS MODE:** Navigate to `platform.openai.com`. Once the buyer is logged in, click through to the API keys page and click "Create new secret key." When the key appears, it will be masked — stop and say: "Your new key is on screen. Copy it now — this is the only time it's visible." Wait for them to confirm they've copied it, then ask them to paste it into the chat.
+
+**Collect:** Ask them to paste their OpenAI API key.
+
+---
+
+## STEP 4 — Google Credentials
+
+**Variable collected:** `GOOGLE_CREDENTIALS`
+
+**STANDARD MODE — Instructions to give — walk through this exactly:**
+
+> "Now we need to connect Alfred to your Google Calendar and Tasks. This takes about 5 minutes. Follow these steps exactly:"
+
+**Step 4A — Create a Google Cloud project:**
+1. Go to **console.cloud.google.com** and sign in with the Google account whose Calendar Alfred will use
+2. Click the project dropdown at the very top of the page → click **New Project**
+3. Give it any name (e.g. `Alfred Bot`) → click **Create**
+4. Make sure your new project is selected in the dropdown before continuing
+
+**Step 4B — Enable the two APIs:**
+1. In the left sidebar, click **APIs & Services** → **Library**
+2. Search `Google Calendar API` → click it → click **Enable**
+3. Click the back arrow, then search `Tasks API` → click it → click **Enable**
+
+**Step 4C — Set up the consent screen:**
+1. In the left sidebar, click **APIs & Services** → **OAuth consent screen**
+2. Choose **External** → click **Create**
+3. Fill in **App name** (e.g. `Alfred`) and your email for both support and developer contact
+4. Click **Save and Continue** through the remaining screens without changing anything
+5. On the **Test users** screen, click **Add users** → type in your Google email → click **Save**
+
+**Step 4D — Create credentials:**
+1. In the left sidebar, click **APIs & Services** → **Credentials**
+2. Click **+ Create Credentials** at the top → choose **OAuth client ID**
+3. Application type: **Desktop app** → Name: anything (e.g. `Alfred`) → click **Create**
+4. A popup appears — click **Download JSON** (the download button)
+
+**Step 4E — Copy the file contents:**
+1. Find the downloaded file (usually in Downloads, named something like `client_secret_xxx.json`)
+2. Open it with any text editor (TextEdit on Mac, Notepad on Windows)
+3. Select all the text and copy it — it should start with `{"installed":{` and be one long line or a few lines
+
+**Collect:** Ask them to paste the entire contents of the JSON file. Tell them it's okay if it looks messy — you'll handle it. When they paste it, confirm you received it and move on (you'll put it on a single line in the final output).
+
+---
+
+**EXPRESS MODE — Step 4 is where Express Mode saves the most time. Do all of the following in Chrome:**
+
+> Tell the buyer: "I'm going to handle the Google Cloud setup for you. Sign into console.cloud.google.com with the Google account you want Alfred to use for Calendar, then let me know when you're in."
+
+Once they confirm they're logged in:
+
+1. **Create project:** Click the project dropdown (top of page) → New Project → type `Alfred Bot` → click Create. Wait for creation notification, then click "Select Project."
+2. **Enable Calendar API:** Navigate to APIs & Services → Library → search "Google Calendar API" → click it → click Enable.
+3. **Enable Tasks API:** Navigate back to Library → search "Tasks API" → click it → click Enable.
+4. **Consent screen:** Navigate to APIs & Services → OAuth consent screen → select External → click Create. Fill in App name as `Alfred`. Ask the buyer: "What email address should I use for the support and developer contact fields?" Fill both fields with their answer → click Save and Continue through all remaining screens → on Test Users screen, click Add Users, type in the buyer's Google email, click Save and Continue → click Back to Dashboard.
+5. **Create credentials:** Navigate to APIs & Services → Credentials → click + Create Credentials → OAuth client ID → Application type: Desktop app → Name: `Alfred` → click Create.
+6. **Download JSON:** In the popup that appears, click the Download JSON button. Say to the buyer: "A file just downloaded to your Downloads folder — please drag it into this chat." Wait for them to share it. Read the file content directly from the upload. Record the full JSON for the final output block.
+
+> Tell the buyer: "Done — I've set up all of Google Cloud for you and captured the credentials. You don't need to open or touch that file."
+
+---
+
+## STEP 5 — Web Search (Optional)
+
+**Variable collected:** `SERPER_API_KEY`
+
+Ask: "Alfred can search the web when you ask it questions. This uses Serper.dev — the free tier gives you 2,500 searches a month which is plenty. Do you want to set this up, or skip it for now?"
+
+**STANDARD MODE — If yes:**
+1. Go to **serper.dev** → sign up for a free account
+2. After signing in, your API key is shown on the dashboard
+3. Copy it
+
+**EXPRESS MODE — If yes:** Navigate to `serper.dev`. Once the buyer is signed in, read the API key directly from the dashboard and record it. Confirm to the buyer: "Got your Serper key — no need to copy anything."
+
+**If no:** Leave SERPER_API_KEY blank in the final block.
+
+**Collect:** Their Serper API key, or "skip."
+
+---
+
+## STEP 6 — Assistant Name
+
+**Variable collected:** `BOT_NAME`
+
+**Ask:** "What do you want to call your assistant? This is the name it uses when it introduces itself."
+
+> Examples: Alfred, Aria, Max, Friday
+
+**Default if they don't care:** `Alfred`
+
+---
+
+## STEP 7 — Timezone
+
+**Variable collected:** `TIMEZONE`
+
+**Ask:** "What's your timezone? I need the exact format — here are the most common ones:
+- US Eastern: `America/New_York`
+- US Central: `America/Chicago`
+- US Mountain: `America/Denver`
+- US Pacific: `America/Los_Angeles`
+- UK: `Europe/London`
+- Central Europe: `Europe/Berlin`
+- Australia East: `Australia/Sydney`
+- Japan: `Asia/Tokyo`
+
+If yours isn't listed, tell me your city and I'll give you the right one."
+
+---
+
+## STEP 8 — Home City & Coordinates
+
+**Variables collected:** `HOME_CITY`, `WEATHER_LAT`, `WEATHER_LON`
+
+**Ask:** "What city do you live in? This is used for daily weather in your briefing."
+
+**After they answer:** Do NOT ask the buyer for coordinates. Look them up yourself using your web search or built-in knowledge. Find the latitude and longitude for their city and use those values directly in the final output block. Confirm to the buyer: "Got it — I've looked up the coordinates for [city] automatically."
+
+**Collect:** City name only. Coordinates are sourced by you.
+
+---
+
+## STEP 9 — Morning Briefing Time
+
+**Variables collected:** `BRIEFING_HOUR`, `BRIEFING_MINUTE`
+
+**Ask:** "What time do you want your morning briefing? Alfred sends this every day — weather, calendar, habits, todos, and more."
+
+**Convert their answer** to 24-hour format: "7:30am" → BRIEFING_HOUR=7, BRIEFING_MINUTE=30. "8am" → BRIEFING_HOUR=8, BRIEFING_MINUTE=0.
+
+**Default if they don't care:** 7:30am
+
+---
+
+## STEP 10 — Daily Quote Style
+
+**Variable collected:** `QUOTE_TYPE`
+
+**Ask:** "What style of daily quote would you like in your morning briefing?"
+
+Options:
+- `stoic` — Marcus Aurelius, Seneca, Epictetus
+- `motivational` — high-energy, action-focused
+- `philosophical` — broad philosophical wisdom
+- `none` — skip the quote entirely
+
+**Default:** `stoic`
+
+---
+
+## STEP 11 — Evening Habit Nudge Time
+
+**Variables collected:** `HABIT_NUDGE_HOUR`, `HABIT_NUDGE_MINUTE`
+
+**Ask:** "What time should Alfred send your evening habit nudge — a quick check-in on which habits you've logged today?"
+
+**Convert to 24h.** Default if they don't care: 8:00pm → HABIT_NUDGE_HOUR=20, HABIT_NUDGE_MINUTE=0
+
+---
+
+## STEP 12 — Weekly Summary Schedule
+
+**Variables collected:** `WEEKLY_SUMMARY_HOUR`, `WEEKLY_SUMMARY_MINUTE`, `WEEKLY_SUMMARY_WEEKDAY`
+
+**Ask:** "When do you want your weekly AI summary delivered? This is a full week-in-review with patterns, wins, and smart suggestions."
+
+**Convert:**
+- Day name → number: Monday=0, Tuesday=1, Wednesday=2, Thursday=3, Friday=4, Saturday=5, Sunday=6
+- Time → 24h
+
+**Default:** Monday at 9:00am → WEEKLY_SUMMARY_WEEKDAY=0, WEEKLY_SUMMARY_HOUR=9, WEEKLY_SUMMARY_MINUTE=0
+
+---
+
+## STEP 13 — Travel Weather Alert Time
+
+**Variables collected:** `TRAVEL_WEATHER_HOUR`, `TRAVEL_WEATHER_MINUTE`
+
+**Ask:** "Alfred can check your calendar each evening and send a weather forecast for any trips coming up in the next few days. What time should it run this check?"
+
+**Default:** 7:00pm → TRAVEL_WEATHER_HOUR=19, TRAVEL_WEATHER_MINUTE=0
+
+**Note:** This is optional — if they don't want it at all, note it but still include the variable (it won't fire if there are no travel events in the calendar).
+
+---
+
+## FINAL OUTPUT
+
+When all 13 steps are complete, output this **exactly**, with every placeholder replaced with their real values:
+
 ```
-/memory               — view everything Alfred knows
-/memory [category]    — view one category
-/memory add [cat] [fact]   — add a fact directly
-/memory remove [cat] [#]   — remove a fact by number
-/memory clear [cat]        — wipe a category
-/setup memory [cat]        — re-run the wizard for one category
+TELEGRAM_TOKEN=[their token]
+ALLOWED_USER_ID=[their user ID]
+OPENAI_API_KEY=[their OpenAI key]
+GOOGLE_CREDENTIALS=[their credentials JSON, minified to a single line]
+SERPER_API_KEY=[their Serper key, or leave blank]
+BOT_NAME=[their bot name]
+BOT_USERNAME=[their bot username, no @]
+TIMEZONE=[their timezone string]
+HOME_CITY=[their city]
+WEATHER_LAT=[their latitude]
+WEATHER_LON=[their longitude]
+BRIEFING_HOUR=[hour as integer]
+BRIEFING_MINUTE=[minute as integer]
+QUOTE_TYPE=[their quote style]
+HABIT_NUDGE_HOUR=[hour as integer]
+HABIT_NUDGE_MINUTE=[minute as integer]
+WEEKLY_SUMMARY_HOUR=[hour as integer]
+WEEKLY_SUMMARY_MINUTE=[minute as integer]
+WEEKLY_SUMMARY_WEEKDAY=[0-6]
+TRAVEL_WEATHER_HOUR=[hour as integer]
+TRAVEL_WEATHER_MINUTE=[minute as integer]
 ```
 
-**Auto-suggest:** During conversations, if you mention something memorable
-(e.g. "by the way, I'm allergic to shellfish"), Alfred will ask:
-*"Should I remember that?"* with a Yes/No button. Nothing is saved without your confirmation.
+**Important — Google Credentials formatting:**
+The JSON they pasted may have line breaks. Before including it in the output block, collapse it to a single line by removing all newlines and extra spaces, so the entire JSON value sits on one line after `GOOGLE_CREDENTIALS=`. Do not add quotes around it.
+
+**Then walk them through these deployment steps exactly as written:**
 
 ---
 
-## SECTION 9 — /Ask & Web Search
+## DEPLOYMENT — Click-by-Click
 
-**Q21. Do you want Alfred to search the web when you ask questions?**
-> *(This uses the Serper.dev API — free tier is 2,500 searches/month.)*
-> If yes: sign up at https://serper.dev and have your API key ready.
-> Answer: **yes** or **no**
+### PART 1 — Get Alfred's code onto GitHub
 
----
+**STANDARD MODE:**
 
----
+**Step 1 — Install GitHub Desktop**
+1. Go to **desktop.github.com** and download GitHub Desktop
+2. Install it and sign in with your GitHub account
 
-## SECTION 9B — Gift Tracker & Personal Contacts
+**Step 2 — Clone your repo**
+1. Open GitHub Desktop
+2. Click **File → Clone Repository**
+3. Find your `telegram-assistant` repo in the list and click it
+4. Choose where to save it on your computer (Desktop is fine)
+5. Click **Clone**
 
-These two features require no configuration — they work out of the box once Alfred is deployed.
+**Step 3 — Replace all the files**
+1. In GitHub Desktop, click the **Show in Finder** (Mac) or **Show in Explorer** (Windows) button at the top
+2. Delete everything currently inside that folder — you should see 4 old files: `Procfile`, `README.md`, `bot.py`, `requirements.txt`. Delete all of them.
+3. Open a second window and navigate to your **AI → alfred** folder
+4. Select everything inside it: `bot.py`, `requirements.txt`, `Procfile`, `README.md`, `railway.json`, `.gitignore`, and the folders `core/`, `features/`, `adapters/`, `plugins/`, `setup/`
+5. Copy and paste all of it into the cloned `telegram-assistant` folder
 
-**Gift Tracker** stores gift ideas per person in Google Tasks under "Alfred: Gifts".
+The folder should now contain:
 ```
-/gifts                          — view all gift ideas grouped by person
-add gift for Sarah: silk scarf  — add an idea by plain text
-```
-Intent examples Alfred understands:
-- "I need a gift idea for dad"
-- "Add blue headphones to Tom's gift list"
-- "Mark the book I got for Emma as done"
-
-**Personal Contacts** stores notes about people in your life (birthday, preferences, notes).
-```
-/contacts                       — view all contacts
-/contacts Sarah                 — view notes for Sarah
-add contact note for Sarah: loves hiking
-```
-Intent examples Alfred understands:
-- "What do I know about Mike?"
-- "Remember that James is vegetarian"
-- "Update Tom's birthday to March 3rd"
-
-*No questions to answer — move on to Section 10.*
-
-## SECTION 10 — Telegram Setup
-
-**Q22. What is your Telegram bot's username?**
-> *(This is the @username you set in BotFather, e.g. `myalfred_bot`)*
-> *(Used to generate your Quick Capture deep link for the home screen shortcut.)*
-
----
-
-## SECTION 11 — Google Account Connection
-
-> This is done **after** Alfred is deployed on Railway. It is a one-time setup.
-> There are two parts: (A) creating Google API credentials, and (B) connecting
-> your account to Alfred via Telegram.
-
----
-
-### Part A — Create Google API Credentials (one time, ~5 minutes)
-
-Alfred needs a `credentials.json` file from Google Cloud to be allowed to
-access your Calendar and Tasks. Here is exactly how to get it:
-
-**Step A1 — Go to Google Cloud Console**
-Open https://console.cloud.google.com in your browser.
-Sign in with the Google account whose Calendar and Tasks Alfred will use.
-
-**Step A2 — Create a new project**
-Click the project dropdown at the top → "New Project" → give it any name
-(e.g. "Alfred Bot") → click Create.
-
-**Step A3 — Enable the two APIs**
-In the left sidebar, go to **APIs & Services → Library**.
-Search for "Google Calendar API" → click it → click **Enable**.
-Go back to Library, search "Tasks API" → click it → click **Enable**.
-
-**Step A4 — Create OAuth credentials**
-Go to **APIs & Services → Credentials** → click **+ Create Credentials** →
-choose **OAuth client ID**.
-
-If prompted to configure a consent screen first:
-- Choose **External**
-- Fill in App name (e.g. "Alfred"), your email for support and developer fields
-- Click Save and Continue through the rest (no scopes or test users needed yet)
-- Return to Credentials → + Create Credentials → OAuth client ID
-
-On the OAuth client ID screen:
-- Application type: **Desktop app**
-- Name: anything (e.g. "Alfred Desktop")
-- Click **Create**
-
-**Step A5 — Download credentials.json**
-A popup will show your client ID and secret. Click **Download JSON**.
-Open the downloaded file in a text editor. You will see something like:
-```json
-{"installed":{"client_id":"...","client_secret":"...","redirect_uris":[...],...}}
-```
-Copy the **entire contents** of this file — you will paste it as the
-`GOOGLE_CREDENTIALS` environment variable in Railway.
-
-**Step A6 — Add yourself as a test user**
-In Google Cloud Console, go to **APIs & Services → OAuth consent screen**.
-Scroll to "Test users" → click **Add users** → enter your Google email.
-This lets Alfred authenticate before the app is formally verified by Google.
-
----
-
-### Part B — Connect Alfred to Your Google Account (in Telegram)
-
-> Do this after Alfred is deployed on Railway and you can receive messages
-> from your bot.
-
-**Step B1 — Run /auth in Telegram**
-Alfred sends you a long Google sign-in URL. Open it in your browser.
-
-**Step B2 — Sign in and approve**
-Sign in with the same Google account you used above.
-Approve the Calendar and Tasks permissions.
-
-**Step B3 — Copy the auth code**
-After approving, your browser redirects to a page that shows an error —
-**that is completely normal.** Look at the address bar. Copy everything
-after `code=` and before `&scope`. It will start with `4/0A...`.
-
-**Step B4 — Send /code to Alfred**
-Send Alfred: `/code 4/0Afr... (your full code)`
-
-**Step B5 — Confirm**
-Alfred replies "Google connected successfully." Verify any time with
-`/checkauth`.
-
----
-
-**Token expiry note:** Tokens last 7 days. Alfred auto-refreshes on every
-API call as long as the bot is running. If the bot was offline long enough
-that the token expired, Alfred warns you at 6:50 AM and asks you to run
-`/auth` again. This is rare with Railway's always-on hosting.
-
----
-
-## WHAT HAPPENS NEXT
-
-Once you have answered all questions, I will:
-1. Generate your complete `core/config.py` with your values filled in
-2. Walk you through the GitHub drag-and-drop deployment step by step
-3. Confirm Alfred is live with a test message
-4. Prompt you to run `/setup memory` in Telegram to seed Alfred's memory
-
-**After Alfred is live, first commands to run:**
-```
-/checkauth          — confirm Google Calendar + Tasks are connected
-/setup memory       — walk through each memory category with guided questions
-/briefing           — test your first morning briefing
-/gifts              — view your gift tracker (empty until you add ideas)
-/contacts           — view your contacts (empty until you add notes)
+adapters/   core/   features/   plugins/   setup/
+bot.py   Procfile   railway.json   README.md   requirements.txt
 ```
 
-**Ready? Start with Section 1 — just answer Q1.**
+If there is a `__pycache__` folder visible, delete it — it doesn't belong in the repo.
+
+**Step 4 — Commit and push**
+1. Go back to **GitHub Desktop** — you'll see a list of all the new files on the left side
+2. In the bottom-left box, type: `Deploy Alfred v2`
+3. Click **Commit to main**
+4. Click **Push origin** at the top right
+
+Alfred's code is now on GitHub.
 
 ---
 
-## APPENDIX — Railway Environment Variables Reference
+**EXPRESS MODE — GitHub upload:**
 
-Set all of these in Railway → your project → **Variables** tab before deploying.
+> Tell the buyer: "Now I'll get Alfred's code onto GitHub. Open GitHub Desktop and let me know when it's open."
 
-| Variable | Required | What it is | Example |
-|---|---|---|---|
-| `TELEGRAM_TOKEN` | ✅ | Bot token from BotFather | `7123456789:AAF...` |
-| `ALLOWED_USER_ID` | ✅ | Your Telegram numeric user ID | `123456789` |
-| `OPENAI_API_KEY` | ✅ | OpenAI API key | `sk-proj-...` |
-| `GOOGLE_CREDENTIALS` | ✅ | Full contents of credentials.json | `{"installed":{...}}` |
-| `BOT_NAME` | ✅ | What to call your assistant | `Alfred` |
-| `TIMEZONE` | ✅ | Your timezone (tz database format) | `America/New_York` |
-| `WEATHER_LAT` | ✅ | Home city latitude | `40.7608` |
-| `WEATHER_LON` | ✅ | Home city longitude | `-111.8910` |
-| `HOME_CITY` | ✅ | Home city name (lowercase) | `salt lake city` |
-| `BOT_USERNAME` | ✅ | Bot @username from BotFather | `myalfred_bot` |
-| `BRIEFING_HOUR` | ✅ | Morning briefing hour (24h) | `7` |
-| `BRIEFING_MINUTE` | ✅ | Morning briefing minute | `0` |
-| `QUOTE_TYPE` | ✅ | Daily quote style | `stoic` |
-| `SERPER_API_KEY` | optional | Serper.dev key for web search | `abc123...` |
-| `HABIT_NUDGE_HOUR` | optional | Daily habit nudge hour (24h) | `20` |
-| `HABIT_NUDGE_MINUTE` | optional | Daily habit nudge minute | `0` |
-| `WEEKLY_SUMMARY_HOUR` | optional | Weekly summary hour (24h) | `9` |
-| `WEEKLY_SUMMARY_MINUTE` | optional | Weekly summary minute | `0` |
-| `WEEKLY_SUMMARY_WEEKDAY` | optional | Weekly summary day (0=Mon, 6=Sun) | `0` |
-| `TRAVEL_WEATHER_HOUR` | optional | Travel weather check hour | `7` |
-| `TRAVEL_WEATHER_MINUTE` | optional | Travel weather check minute | `0` |
+Once they confirm:
+1. Ask the buyer to click **File → Clone Repository**, find the `telegram-assistant` repo, and clone it to their Desktop. Ask them to let you know once cloning is done.
+2. Once cloned, ask: "Can you click 'Show in Finder' (Mac) or 'Show in Explorer' (Windows) in GitHub Desktop?" Read the folder contents from the screen.
+3. Ask the buyer to select all files in the cloned folder and delete them, then open their Alfred project folder and copy everything into the cloned folder. Let you know when done.
+4. Return to GitHub Desktop. Confirm the changed files are listed. Type `Deploy Alfred v2` in the summary box, click **Commit to main**, then click **Push origin**.
+5. Confirm to the buyer: "Alfred's code is now on GitHub."
 
-**How to find your Telegram user ID:**
-Send a message to [@userinfobot](https://t.me/userinfobot) on Telegram — it replies with your numeric ID.
-
-**How to find your home city coordinates:**
-Go to https://www.latlong.net, search your city, copy the latitude and longitude.
+> Note: File copying between folders requires the buyer's hands — you can guide them through it precisely but the drag-and-drop itself is theirs to do.
 
 ---
 
-*Alfred Setup Companion v1.0 — built alongside Alfred core v1.0*
+### PART 2 — Configure Railway
+
+**STANDARD MODE:**
+
+**Step 5 — Add your variables**
+1. Go to **railway.app** → click your project → click the **worker** service
+2. Click the **Variables** tab
+3. Click **Raw Editor** (top right of the variables panel)
+4. Paste the complete block from above into the editor
+5. Click **Update Variables**
+
+**Step 6 — Verify the volume mount**
+1. Close the Settings panel and return to the main project view
+2. In the service card for **worker**, you will see `worker-volume` listed at the bottom of the card
+3. Click directly on **worker-volume** — this opens its configuration
+4. Confirm the Mount Path says `/data`
+5. If it says anything other than `/data`, edit it and save
+
+**Step 7 — Deploy**
+1. Click the **Deployments** tab
+2. You'll see an **"Apply X changes"** button or a **Deploy** button at the top — click it
+3. A new deployment will appear with a spinning indicator — click it to watch the build log
+4. Wait for the line that says Alfred is running (takes 2–3 minutes)
+5. If you see any red error lines, copy them and paste them back here — most first-deploy errors are a one-line fix
+
+---
+
+**EXPRESS MODE — Railway configuration:**
+
+> Tell the buyer: "I'll handle Railway from here. I just need you to confirm each step as I go."
+
+1. Navigate to `railway.app` → click the project → click the **worker** service.
+2. Click the **Variables** tab → click **Raw Editor**.
+3. Click inside the editor, select all existing text, and replace it with the complete KEY=VALUE block assembled during the wizard. Ask the buyer: "Can you confirm the variables look correct on screen?" Wait for confirmation, then click **Update Variables**.
+4. Return to the main project view. Click directly on **worker-volume** in the service card. Read the Mount Path shown. If it says `/data`, confirm to the buyer and move on. If it says anything else, click Edit, change it to `/data`, and save.
+5. Click the **Deployments** tab. Click the **Deploy** or **Apply X changes** button.
+6. Watch the build log in real time. Report progress to the buyer. When `Application started` appears, say: "Alfred is live — let's test it." If any red error lines appear, read them and diagnose immediately.
+
+---
+
+### PART 3 — First run in Telegram
+
+Once the Deployments tab shows **"Deployment successful"**:
+
+1. Open Telegram and find your bot
+2. Send `/start` — Alfred should greet you
+3. Then run these in order:
+```
+/setup      → tap "Configure preferences" to personalize Alfred
+/checkauth  → connect your Google Calendar and Tasks
+/briefing   → test your first morning briefing
+/mood       → log your first mood rating
+/workout    → set up your workout program
+/meals      → set up your first meal plan
+/journal    → start your first journal entry
+```
+
+If Alfred doesn't respond to `/start`, go back to Railway → Deployments and check the build log for errors.
+
+---
+
+## APPENDIX — All Commands Reference
+
+### Core
+```
+/start              — introduction and command list
+/help               — all available commands
+/setup              — preferences + memory wizard
+/checkauth          — verify Google connection
+/auth               — (re)connect Google account
+/briefing           — trigger morning briefing on demand
+/export             — download all your data as Excel
+```
+
+### Memory
+```
+/memory                          — view all stored facts
+/memory [category]               — view one category
+/memory add [category] [fact]    — add a fact directly
+/memory remove [category] [#]    — remove by number
+/setup memory                    — re-run the memory wizard
+```
+
+### Shopping
+```
+/shopping                        — view all lists
+add [item] to my grocery list    — add to a specific list
+[send a receipt photo]           — auto-remove purchased items from lists
+```
+
+### Todos & Reminders
+```
+/todo                            — view active todos
+add todo: [task]                 — add a task
+remind me to [x] on [date/time] — set a reminder
+```
+
+### Calendar
+```
+/calendar                        — view upcoming events
+add [event] on [date]            — create an event
+what's on my calendar this week  — natural language query
+```
+
+### Notes
+```
+/notes                           — view all notes
+add note: [text]                 — create a note
+edit note [#]: [new text]        — replace note content
+append to note [#]: [text]       — add to existing note
+```
+
+### Habits
+```
+/habits                          — view habits and streaks
+logged [habit name]              — mark a habit done today
+show my habit patterns           — smart analysis
+```
+
+### Meals
+```
+/meals                           — view this week's plan
+add recipe: [description]        — generate a new recipe
+import recipe from [url]         — import from a website
+show nutrition for today         — macro breakdown
+plan meals for next week         — generate 7-day plan
+```
+
+### Workout
+```
+/workout                         — view program + recent sessions
+log [workout description]        — log a session (text or voice)
+show my PRs                      — personal records
+build me a new workout program   — regenerate from settings
+export my workout log            — download Excel log
+```
+
+### Journal
+```
+/journal                         — start tonight's session
+/journal view                    — recent entries
+/journal search [term]           — search by keyword or date
+/journal month                   — this month's GPT reflection
+/journal wins                    — wins and highlights this week
+```
+
+### Mood
+```
+/mood                            — tap a 1–10 rating button
+mood [number]                    — natural language log
+show my mood this week           — recent trend
+```
+
+### Links
+```
+/readlater                       — view unread saves
+save this link: [url]            — save with AI summary and tags
+find my articles about [topic]   — search saved links
+```
+
+### Contacts & Gifts
+```
+/contacts                        — view all contacts
+/contacts [name]                 — view one contact
+add contact note for [name]: [fact]
+/gifts                           — view all gift ideas
+add gift for [name]: [idea]
+```
+
+### Ask
+```
+/ask [question]                  — research with optional web search
+```
+
+---
+
+## APPENDIX — Feature Quick Reference
+
+**Voice:** Every feature works by voice. Send any Telegram voice note and Alfred transcribes it and routes it normally.
+
+**Receipt scanning:** Photograph any store receipt and send it — Alfred reads the items and removes them from your shopping lists.
+
+**Reply assist:** Screenshot any text conversation or email and send it — Alfred drafts 3 reply options using GPT-4o vision.
+
+**Smart suggestions:** Alfred analyzes patterns in your habits, workouts, meals, mood, and shopping over time and surfaces observations in your weekly summary. Configure which areas in `/setup` → Configure preferences.
+
+**Morning briefing sections** (toggle any on/off in `/setup`):
+`weather` `calendar` `todos` `habits` `quote` `word_of_day` `meals` `journal_highlight` `workout_stats`
+
+---
+
+*Alfred Setup Companion v3.1 — Express Mode added*
