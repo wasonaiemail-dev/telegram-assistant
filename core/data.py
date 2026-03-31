@@ -221,7 +221,7 @@ def _next_id(item_list):
     """Generate a simple integer ID one higher than the current max."""
     if not item_list:
         return 1
-    existing = [i.get("id", 0) for i in item_list if isinstance(i, dict)]
+    existing = [int(i.get("id") or 0) for i in item_list if isinstance(i, dict)]
     return max(existing, default=0) + 1
 
 
