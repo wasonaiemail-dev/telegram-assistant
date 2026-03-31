@@ -95,7 +95,7 @@ def _parse_due(due_str: str | None) -> str | None:
     """
     if not due_str:
         return None
-    due_str = due_str.strip()
+    due_str = str(due_str).strip()
 
     # Already correct format
     if len(due_str) == 16 and "T" in due_str:  # YYYY-MM-DDTHH:MM
@@ -120,6 +120,7 @@ def _reminder_due_datetime(reminder: dict) -> datetime.datetime | None:
     due = reminder.get("due") or reminder.get("recur_next")
     if not due:
         return None
+    due = str(due)
     try:
         if "T" in due:
             dt = datetime.datetime.fromisoformat(due)
@@ -151,7 +152,7 @@ def get_due_today() -> list[dict]:
         if not due:
             continue
         try:
-            d = datetime.date.fromisoformat(due[:10])
+            d = datetime.date.fromisoformat(str(due)[:10])
             if d == today:
                 result.append(r)
         except ValueError:
