@@ -135,6 +135,7 @@ async def get_player_stats(
     athlete_id: str,
     sport: str,
     league: str,
+    player_name: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     Get detailed player statistics from ESPN.
@@ -156,8 +157,8 @@ async def get_player_stats(
         return None
 
     try:
-        # Try endpoint 1: site/v2 athlete statistics
-        url1 = f"{ESPN_SITE}/sports/{sport}/{league}/athletes/{athlete_id}/statistics"
+        # Primary endpoint: common/v3 web stats (confirmed working)
+        url1 = f"{ESPN_WEB}/sports/{sport}/{league}/athletes/{athlete_id}/stats?region=us&lang=en&contentorigin=espn"
         logger.info(f"Fetching player stats from: {url1}")
         data = await _fetch_json(url1)
 
@@ -165,10 +166,13 @@ async def get_player_stats(
             logger.info(f"Got stats data, top-level keys: {list(data.keys())}")
             result = _parse_player_stats(data, athlete_id)
             if result:
+                # Ensure we have a name (API may not return one)
+                if not result.get("name") and player_name:
+                    result["name"] = player_name
                 return result
-            logger.warning(f"Failed to parse stats from endpoint 1")
+            logger.warning(f"Failed to parse stats from web endpoint")
 
-        # Fallback to endpoint 2: site/v2 athlete overview (includes some stats)
+        # Fallback: site/v2 athlete overview
         url2 = f"{ESPN_SITE}/sports/{sport}/{league}/athletes/{athlete_id}"
         logger.info(f"Trying fallback: {url2}")
         data = await _fetch_json(url2)
@@ -177,20 +181,10 @@ async def get_player_stats(
             logger.info(f"Got fallback data, top-level keys: {list(data.keys())}")
             result = _parse_player_stats(data, athlete_id)
             if result:
+                if not result.get("name") and player_name:
+                    result["name"] = player_name
                 return result
-            logger.warning(f"Failed to parse stats from endpoint 2")
-
-        # Fallback to endpoint 3: common/v3 web stats
-        url3 = f"{ESPN_WEB}/sports/{sport}/{league}/athletes/{athlete_id}/stats?region=us&lang=en&contentorigin=espn"
-        logger.info(f"Trying web endpoint: {url3}")
-        data = await _fetch_json(url3)
-
-        if data:
-            logger.info(f"Got web data, top-level keys: {list(data.keys())}")
-            result = _parse_player_stats(data, athlete_id)
-            if result:
-                return result
-            logger.warning(f"Failed to parse stats from endpoint 3")
+            logger.warning(f"Failed to parse stats from v2 endpoint")
 
         return None
 
@@ -210,57 +204,78 @@ def _parse_player_stats(data: Dict[str, Any], athlete_id: str) -> Optional[Dict[
        - stats are individual objects with name/value
     """
     try:
-        # Get athlete info
+        # ── Get athlete info ──────────────────────────────────────────────
         athlete = data.get("athlete", {})
+
         if not athlete:
-            # Some responses put athlete data at root
             athletes_list = data.get("athletes", [])
             if athletes_list:
                 athlete = athletes_list[0]
-            else:
-                athlete = data  # maybe data IS the athlete
 
         result = {
             "id": athlete_id,
-            "name": athlete.get("displayName", ""),
+            "name": "",
             "position": "",
-            "jersey": athlete.get("jersey", ""),
-            "headshot": athlete.get("headshot", ""),
+            "jersey": "",
+            "headshot": "",
+            "team": "",
             "stats": {},
         }
 
-        # Extract position safely
-        pos = athlete.get("position", "")
-        if isinstance(pos, dict):
-            result["position"] = pos.get("name", "") or pos.get("displayName", "")
-        elif isinstance(pos, str):
-            result["position"] = pos
+        # If athlete dict exists, extract info from it
+        if athlete:
+            result["name"] = athlete.get("displayName", "")
+            result["jersey"] = athlete.get("jersey", "")
+            result["headshot"] = athlete.get("headshot", "")
 
-        # Extract team info
-        team = athlete.get("team", {})
-        if isinstance(team, dict) and team:
-            result["team"] = team.get("displayName", "")
-            result["team_id"] = team.get("id", "")
+            pos = athlete.get("position", "")
+            if isinstance(pos, dict):
+                result["position"] = pos.get("name", "") or pos.get("displayName", "")
+            elif isinstance(pos, str):
+                result["position"] = pos
+
+            team = athlete.get("team", {})
+            if isinstance(team, dict) and team:
+                result["team"] = team.get("displayName", "")
+                result["team_id"] = team.get("id", "")
+
+        # ── Fallback: extract athlete info from "teams" (v3/stats format) ─
+        # The v3/stats endpoint has no "athlete" key; info is in "teams"
+        if not result["name"]:
+            teams_list = data.get("teams", [])
+            if teams_list and isinstance(teams_list, list):
+                team_data = teams_list[0]
+                if isinstance(team_data, dict):
+                    # Team data might have athlete info
+                    result["team"] = team_data.get("displayName", "") or team_data.get("name", "")
+                    result["team_id"] = str(team_data.get("id", ""))
+                    # Try to get athlete from team
+                    team_athlete = team_data.get("athlete", {})
+                    if team_athlete:
+                        result["name"] = team_athlete.get("displayName", "")
+                        result["position"] = team_athlete.get("position", "")
+                        result["jersey"] = team_athlete.get("jersey", "")
+
+        # ── Last resort: search for name in the data ─────────────────────
+        if not result["name"]:
+            # Try displayName at root level
+            result["name"] = data.get("displayName", "")
+
+        logger.info(f"Athlete info: name={result['name']}, team={result.get('team', '')}")
 
         # ── Parse statistics ──────────────────────────────────────────────
-        # Strategy: check multiple locations for stats data
+        # Check multiple locations for categories/statistics data
+        categories = (
+            data.get("categories", [])
+            or data.get("statistics", [])
+            or athlete.get("statistics", []) if athlete else []
+            or athlete.get("categories", []) if athlete else []
+        )
 
-        # Location 1: root-level "categories" (common/v3/stats format)
-        categories = data.get("categories", [])
-
-        # Location 2: athlete-level "statistics" (site/v2 format)
         if not categories:
-            categories = athlete.get("statistics", [])
+            categories = []
 
-        # Location 3: athlete-level "categories"
-        if not categories:
-            categories = athlete.get("categories", [])
-
-        # Location 4: root-level "statistics"
-        if not categories:
-            categories = data.get("statistics", [])
-
-        logger.info(f"Found {len(categories)} stat categories for {result.get('name', 'unknown')}")
+        logger.info(f"Found {len(categories)} stat categories")
 
         for stat_category in categories:
             try:
@@ -274,22 +289,29 @@ def _parse_player_stats(data: Dict[str, Any], athlete_id: str) -> Optional[Dict[
                     continue
 
                 stats = []
-                raw_stats = stat_category.get("stats", [])
+
+                # v3/stats format uses "statistics" key with parallel "labels"
+                # v2 format uses "stats" key with individual objects
+                raw_stats = (
+                    stat_category.get("statistics", [])
+                    or stat_category.get("stats", [])
+                    or stat_category.get("totals", [])
+                )
 
                 if not raw_stats:
                     continue
 
-                # Check format: is it a list of objects with name/value,
-                # or parallel arrays (labels + stats)?
                 labels = stat_category.get("labels", [])
+                display_names = stat_category.get("displayNames", [])
 
                 if labels and raw_stats and not isinstance(raw_stats[0], dict):
-                    # Parallel arrays format: labels=["PTS","REB"], stats=["26.4","12.3"]
+                    # Parallel arrays format: labels=["PTS","REB"], statistics=[26.4, 12.3]
                     for i, label in enumerate(labels):
                         if i < len(raw_stats):
+                            display = display_names[i] if i < len(display_names) else label
                             stats.append({
                                 "name": label,
-                                "displayName": label,
+                                "displayName": display,
                                 "value": str(raw_stats[i]),
                                 "abbreviation": label,
                             })
@@ -310,14 +332,16 @@ def _parse_player_stats(data: Dict[str, Any], athlete_id: str) -> Optional[Dict[
                 logger.debug(f"Error parsing stat category: {e}")
                 continue
 
-        # Parse splits if available (for season averages vs totals)
-        splits = data.get("splits", {}) or athlete.get("splits", {})
+        # Parse splits if available
+        splits = data.get("splits", {})
+        if not splits and athlete:
+            splits = athlete.get("splits", {})
         if splits:
             result["splits"] = splits
 
-        logger.info(f"Parsed stats result: name={result.get('name')}, categories={list(result.get('stats', {}).keys())}")
+        logger.info(f"Parsed stats: name={result.get('name')}, stat_categories={list(result.get('stats', {}).keys())}")
 
-        return result if result.get("name") else None
+        return result if (result.get("name") or result.get("stats")) else None
 
     except Exception as e:
         logger.error(f"Error parsing player stats: {e}", exc_info=True)
