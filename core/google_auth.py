@@ -371,19 +371,20 @@ async def cmd_checkauth(update, context):
     cal_err = ""
     tasks_err = ""
 
-    try:
-        cal_svc = _build("calendar", "v3", credentials=creds, cache_discovery=False)
-        cal_svc.calendarList().list(maxResults=1).execute()
-        calendar_ok = True
-    except Exception as e:
-        cal_err = str(e)[:120]
-
+    # Test Tasks FIRST (was failing when tested second — investigating order)
     try:
         tasks_svc = _build("tasks", "v1", credentials=creds, cache_discovery=False)
         tasks_svc.tasklists().list(maxResults=1).execute()
         tasks_ok = True
     except Exception as e:
         tasks_err = str(e)[:120]
+
+    try:
+        cal_svc = _build("calendar", "v3", credentials=creds, cache_discovery=False)
+        cal_svc.calendarList().list(maxResults=1).execute()
+        calendar_ok = True
+    except Exception as e:
+        cal_err = str(e)[:120]
 
     hours_left = token_expires_in_hours()
     if hours_left is not None:
