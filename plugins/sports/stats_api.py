@@ -156,8 +156,8 @@ async def get_player_stats(
         return None
 
     try:
-        # Try endpoint 1: common/v3 stats
-        url1 = f"{ESPN_WEB}/sports/{sport}/{league}/athletes/{athlete_id}/stats?region=us&lang=en&contentorigin=espn"
+        # Try endpoint 1: site/v2 athlete statistics
+        url1 = f"{ESPN_SITE}/sports/{sport}/{league}/athletes/{athlete_id}/statistics"
         logger.info(f"Fetching player stats from: {url1}")
         data = await _fetch_json(url1)
 
@@ -168,7 +168,7 @@ async def get_player_stats(
                 return result
             logger.warning(f"Failed to parse stats from endpoint 1")
 
-        # Fallback to endpoint 2: site/v2 athlete overview
+        # Fallback to endpoint 2: site/v2 athlete overview (includes some stats)
         url2 = f"{ESPN_SITE}/sports/{sport}/{league}/athletes/{athlete_id}"
         logger.info(f"Trying fallback: {url2}")
         data = await _fetch_json(url2)
@@ -179,6 +179,18 @@ async def get_player_stats(
             if result:
                 return result
             logger.warning(f"Failed to parse stats from endpoint 2")
+
+        # Fallback to endpoint 3: common/v3 web stats
+        url3 = f"{ESPN_WEB}/sports/{sport}/{league}/athletes/{athlete_id}/stats?region=us&lang=en&contentorigin=espn"
+        logger.info(f"Trying web endpoint: {url3}")
+        data = await _fetch_json(url3)
+
+        if data:
+            logger.info(f"Got web data, top-level keys: {list(data.keys())}")
+            result = _parse_player_stats(data, athlete_id)
+            if result:
+                return result
+            logger.warning(f"Failed to parse stats from endpoint 3")
 
         return None
 
@@ -336,8 +348,13 @@ async def get_player_gamelog(
         return None
 
     try:
-        url = f"{ESPN_WEB}/sports/{sport}/{league}/athletes/{athlete_id}/gamelog?region=us&lang=en&contentorigin=espn"
-        data = await _fetch_json(url)
+        # Try site/v2 first, then web API
+        url1 = f"{ESPN_SITE}/sports/{sport}/{league}/athletes/{athlete_id}/gamelog"
+        data = await _fetch_json(url1)
+
+        if not data:
+            url2 = f"{ESPN_WEB}/sports/{sport}/{league}/athletes/{athlete_id}/gamelog?region=us&lang=en&contentorigin=espn"
+            data = await _fetch_json(url2)
 
         if not data:
             return None
