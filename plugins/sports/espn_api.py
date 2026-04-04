@@ -145,46 +145,81 @@ async def get_standings(league_slug: str) -> Optional[Dict[str, Any]]:
 
     standings = []
 
-    # Parse standings
-    for division in data.get("standings", []):
-        div_name = division.get("name", "Standings")
-        groups = division.get("groups", [{}])
+    # ESPN standings API returns data in multiple possible structures:
+    #   Format A: data.children[] → .standings.entries[]  (NBA, NFL, MLB, NHL)
+    #   Format B: data.standings[] → .groups[].entries[]  (older format)
+    #   Format C: data.children[] → .children[] → .standings.entries[]  (nested conferences)
 
-        for group in groups:
-            teams = []
-            for team_entry in group.get("entries", []):
-                try:
-                    team = team_entry.get("team", {})
-                    stats = team_entry.get("stats", [])
+    def _parse_entries(entries: list) -> list:
+        """Parse a list of team standing entries."""
+        teams = []
+        for team_entry in entries:
+            try:
+                team = team_entry.get("team", {})
+                stats = team_entry.get("stats", [])
 
-                    # Extract relevant stats
-                    wins = losses = gb = pct = 0
-                    for stat in stats:
-                        if stat.get("name") == "wins":
-                            wins = stat.get("displayValue", "0")
-                        elif stat.get("name") == "losses":
-                            losses = stat.get("displayValue", "0")
-                        elif stat.get("name") == "gamesBehind":
-                            gb = stat.get("displayValue", "-")
-                        elif stat.get("name") == "winPercent":
-                            pct = stat.get("displayValue", "0")
+                wins = losses = gb = pct = "0"
+                for stat in stats:
+                    sname = stat.get("name", "")
+                    sval = stat.get("displayValue", "0")
+                    if sname == "wins":
+                        wins = sval
+                    elif sname == "losses":
+                        losses = sval
+                    elif sname == "gamesBehind":
+                        gb = sval
+                    elif sname in ("winPercent", "winPct"):
+                        pct = sval
 
-                    teams.append({
-                        "name": team.get("displayName", "Unknown"),
-                        "logo": team.get("logo", ""),
-                        "wins": wins,
-                        "losses": losses,
-                        "games_behind": gb,
-                        "win_pct": pct,
-                    })
-                except (KeyError, TypeError):
-                    continue
-
-            if teams:
-                standings.append({
-                    "division": div_name,
-                    "teams": teams,
+                teams.append({
+                    "name": team.get("displayName", "Unknown"),
+                    "logo": team.get("logo", ""),
+                    "wins": wins,
+                    "losses": losses,
+                    "games_behind": gb,
+                    "win_pct": pct,
                 })
+            except (KeyError, TypeError):
+                continue
+        return teams
+
+    # Try Format A: data.children[]
+    for child in data.get("children", []):
+        child_name = child.get("name", child.get("abbreviation", "Standings"))
+
+        # Check for nested children (Format C: conferences → divisions)
+        if "children" in child:
+            for sub_child in child.get("children", []):
+                sub_name = sub_child.get("name", sub_child.get("abbreviation", ""))
+                entries = sub_child.get("standings", {}).get("entries", [])
+                teams = _parse_entries(entries)
+                if teams:
+                    label = f"{child_name} — {sub_name}" if sub_name else child_name
+                    standings.append({"division": label, "teams": teams})
+
+        # Direct standings (Format A: conference → standings.entries)
+        entries = child.get("standings", {}).get("entries", [])
+        if entries:
+            teams = _parse_entries(entries)
+            if teams:
+                standings.append({"division": child_name, "teams": teams})
+
+    # Fallback: Format B — data.standings[]
+    if not standings:
+        for division in data.get("standings", []):
+            div_name = division.get("name", "Standings")
+            for group in division.get("groups", [{}]):
+                entries = group.get("entries", [])
+                teams = _parse_entries(entries)
+                if teams:
+                    standings.append({"division": div_name, "teams": teams})
+
+    # Last fallback: flat entries at top level
+    if not standings:
+        entries = data.get("standings", {}).get("entries", []) if isinstance(data.get("standings"), dict) else []
+        teams = _parse_entries(entries)
+        if teams:
+            standings.append({"division": "Standings", "teams": teams})
 
     return {
         "standings": standings,

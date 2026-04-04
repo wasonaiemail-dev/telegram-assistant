@@ -31,18 +31,60 @@ def format_scoreboard(games: List[Dict[str, Any]], league: str, emoji: str = "�
         away = game.get("away_team", "Unknown")
         home_score = game.get("home_score", "-")
         away_score = game.get("away_score", "-")
-        status = game.get("status", "Scheduled")
+        raw_status = game.get("status", "Scheduled")
 
-        # Format score line
-        if home_score != "" and away_score != "":
-            score_line = f"<code>{away:20} {away_score:3}</code>\n<code>{home:20} {home_score:3}</code>"
+        # Map ESPN status codes to friendly display text
+        status_map = {
+            "STATUS_SCHEDULED": "Scheduled",
+            "STATUS_IN_PROGRESS": "Live",
+            "STATUS_HALFTIME": "Halftime",
+            "STATUS_FINAL": "Final",
+            "STATUS_FINAL_OVERTIME": "Final (OT)",
+            "STATUS_POSTPONED": "Postponed",
+            "STATUS_CANCELED": "Canceled",
+            "STATUS_DELAYED": "Delayed",
+            "STATUS_END_PERIOD": "End of Period",
+        }
+        status = status_map.get(raw_status, raw_status.replace("STATUS_", "").replace("_", " ").title())
+
+        # Status indicator emoji
+        if "Live" in status or "Progress" in status or "Halftime" in status:
+            status_symbol = "🔴"
+        elif "Final" in status:
+            status_symbol = "✅"
+        elif "Postponed" in status or "Canceled" in status or "Delayed" in status:
+            status_symbol = "⚠️"
         else:
+            status_symbol = "🕐"
+
+        # Format based on game state
+        if status in ("Final", "Final (OT)") or "Live" in status or "Halftime" in status:
+            # Show scores
+            score_line = (
+                f"<code>{away:20} {away_score:>3}</code>\n"
+                f"<code>{home:20} {home_score:>3}</code>"
+            )
+        elif home_score and away_score and home_score != "0" and away_score != "0":
+            score_line = (
+                f"<code>{away:20} {away_score:>3}</code>\n"
+                f"<code>{home:20} {home_score:>3}</code>"
+            )
+        else:
+            # Scheduled game — show matchup and time
+            date_str = game.get("date", "")
+            time_str = ""
+            if date_str:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                    time_str = dt.strftime("%I:%M %p ET")
+                except Exception:
+                    pass
             score_line = f"{away} @ {home}"
+            if time_str:
+                score_line += f"  ({time_str})"
 
-        # Status indicator
-        status_symbol = "🔴" if "Live" in status else "✓" if "Final" in status else "⏱"
-
-        lines.append(f"{status_symbol} {status}")
+        lines.append(f"{status_symbol} <b>{status}</b>")
         lines.append(score_line)
         lines.append("")
 
