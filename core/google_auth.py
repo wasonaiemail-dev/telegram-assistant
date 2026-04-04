@@ -363,21 +363,27 @@ async def cmd_checkauth(update, context):
     # Try a lightweight real API call to confirm the token actually works
     calendar_ok = False
     tasks_ok    = False
+    cal_err = ""
+    tasks_err = ""
     try:
         svc = get_calendar_service()
         if svc:
             svc.calendarList().list(maxResults=1).execute()
             calendar_ok = True
-    except Exception:
-        pass
+        else:
+            cal_err = "service build returned None"
+    except Exception as e:
+        cal_err = str(e)[:100]
 
     try:
         svc = get_tasks_service()
         if svc:
             svc.tasklists().list(maxResults=1).execute()
             tasks_ok = True
-    except Exception:
-        pass
+        else:
+            tasks_err = "service build returned None"
+    except Exception as e:
+        tasks_err = str(e)[:100]
 
     hours_left = token_expires_in_hours()
     if hours_left is not None:
@@ -394,10 +400,14 @@ async def cmd_checkauth(update, context):
     cal_icon   = "✅" if calendar_ok else "❌"
     tasks_icon = "✅" if tasks_ok    else "❌"
 
+    # Build status lines with optional error detail
+    cal_line   = f"{cal_icon} Calendar API" + (f" — <code>{cal_err}</code>" if cal_err else "")
+    tasks_line = f"{tasks_icon} Tasks API" + (f" — <code>{tasks_err}</code>" if tasks_err else "")
+
     await update.message.reply_text(
         f"<b>Google Auth Status</b>\n\n"
-        f"{cal_icon} Calendar API\n"
-        f"{tasks_icon} Tasks API\n"
+        f"{cal_line}\n"
+        f"{tasks_line}\n"
         f"🕐 {expiry_line}\n\n"
         + ("Everything looks good." if calendar_ok and tasks_ok
            else "One or more services failed. Run /auth to reconnect."),
