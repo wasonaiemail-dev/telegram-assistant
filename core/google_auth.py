@@ -400,9 +400,10 @@ async def cmd_checkauth(update, context):
     cal_icon   = "✅" if calendar_ok else "❌"
     tasks_icon = "✅" if tasks_ok    else "❌"
 
-    # Build status lines with optional error detail
-    cal_line   = f"{cal_icon} Calendar API" + (f" — <code>{cal_err}</code>" if cal_err else "")
-    tasks_line = f"{tasks_icon} Tasks API" + (f" — <code>{tasks_err}</code>" if tasks_err else "")
+    # Build status lines with optional error detail (HTML-escape to avoid parse errors)
+    import html as _html
+    cal_line   = f"{cal_icon} Calendar API" + (f" — <code>{_html.escape(cal_err)}</code>" if cal_err else "")
+    tasks_line = f"{tasks_icon} Tasks API" + (f" — <code>{_html.escape(tasks_err)}</code>" if tasks_err else "")
 
     await update.message.reply_text(
         f"<b>Google Auth Status</b>\n\n"
