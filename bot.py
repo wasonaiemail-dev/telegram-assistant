@@ -442,6 +442,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if consumed:
             return
 
+        # Mood rating intercept — if /mood prompt is waiting for a typed rating
+        from features.mood import is_mood_awaiting, handle_mood_text_reply
+        if is_mood_awaiting():
+            consumed = await handle_mood_text_reply(text, update, context)
+            if consumed:
+                return
+
         # Reply refinement intercept
         from features.reply_assist import looks_like_refinement, handle_refinement
         if looks_like_refinement(text):

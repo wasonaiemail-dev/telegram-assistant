@@ -157,6 +157,40 @@ Respond with short bullet points (max 2-4) about patterns, triggers, or suggesti
 # COMMANDS
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _set_mood_awaiting(data: dict, awaiting: bool) -> None:
+    """Set or clear the mood-awaiting-rating flag in persistent state."""
+    data.setdefault("settings", {}).setdefault("mood", {})["_awaiting_rating"] = awaiting
+    save_data(data)
+
+
+def is_mood_awaiting() -> bool:
+    """Return True if a /mood prompt is waiting for a typed rating."""
+    data = load_data()
+    return bool(data.get("settings", {}).get("mood", {}).get("_awaiting_rating"))
+
+
+async def handle_mood_text_reply(text: str, update: Update, context) -> bool:
+    """
+    If mood is awaiting a rating, try to parse a bare number (1-10) from the
+    user's text and log it. Returns True if the message was consumed.
+    """
+    text = text.strip()
+    match = re.match(r'^(\d{1,2})(?:\s*/\s*10)?(?:\s+(.+))?$', text)
+    if not match:
+        return False
+
+    rating = int(match.group(1))
+    if rating < 1 or rating > 10:
+        return False
+
+    note = (match.group(2) or "").strip()
+    data = load_data()
+    _set_mood_awaiting(data, False)  # clear the flag
+    msg = log_mood(rating, note, data)
+    await update.message.reply_text(msg)
+    return True
+
+
 async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /mood command: show buttons for quick logging or view history."""
     if not update.message:
@@ -199,6 +233,10 @@ async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=markup,
     )
 
+    # Flag that we're awaiting a typed rating
+    data = load_data()
+    _set_mood_awaiting(data, True)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CALLBACK HANDLERS
@@ -212,6 +250,7 @@ async def handle_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if data_str.startswith("mood_rate_"):
         rating = int(data_str.split("_")[-1])
         data = load_data()
+        _set_mood_awaiting(data, False)  # clear awaiting flag
         msg = log_mood(rating, "", data)
         await query.answer(msg)
         await query.edit_message_text(msg)

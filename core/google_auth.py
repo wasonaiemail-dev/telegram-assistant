@@ -85,7 +85,18 @@ def get_creds():
         logger.error(f"get_creds: could not load token file: {e}")
         return None
 
-    if creds and creds.expired and creds.refresh_token:
+    # Refresh if expired OR expiring within 5 minutes (avoids edge-case
+    # failures when the token dies mid-request).
+    needs_refresh = False
+    if creds and creds.expired:
+        needs_refresh = True
+    elif creds and creds.expiry and creds.refresh_token:
+        import datetime as _dt
+        remaining = (creds.expiry - _dt.datetime.utcnow()).total_seconds()
+        if remaining < 300:  # less than 5 minutes
+            needs_refresh = True
+
+    if needs_refresh and creds.refresh_token:
         try:
             creds.refresh(Request())
             _save_creds(creds)
@@ -372,11 +383,11 @@ async def cmd_checkauth(update, context):
     if hours_left is not None:
         if hours_left < 0:
             expiry_line = "⚠️ Token appears expired (auto-refresh may be needed)"
-        elif hours_left < 24:
-            expiry_line = f"⚠️ Token expires in ~{hours_left:.0f} hours"
         else:
-            days = hours_left / 24
-            expiry_line = f"✅ Token valid for ~{days:.0f} more days"
+            # Google access tokens expire every ~1 hour — this is normal.
+            # The refresh token handles renewal automatically.
+            mins_left = int(hours_left * 60)
+            expiry_line = f"✅ Access token valid ({mins_left} min remaining, auto-refreshes)"
     else:
         expiry_line = "Token expiry unknown"
 
