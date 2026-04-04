@@ -9,7 +9,7 @@ import aiohttp
 import asyncio
 import logging
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from plugins.sports.config import (
     LEAGUES,
@@ -263,7 +263,7 @@ async def get_schedule(
         return None
 
     games = []
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     cutoff = now + timedelta(days=days)
 
     for event in data.get("events", []):
