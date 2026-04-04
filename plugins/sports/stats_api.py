@@ -265,15 +265,13 @@ def _parse_player_stats(data: Dict[str, Any], athlete_id: str) -> Optional[Dict[
 
         # ── Parse statistics ──────────────────────────────────────────────
         # Check multiple locations for categories/statistics data
-        categories = (
-            data.get("categories", [])
-            or data.get("statistics", [])
-            or athlete.get("statistics", []) if athlete else []
-            or athlete.get("categories", []) if athlete else []
-        )
-
+        categories = data.get("categories", [])
         if not categories:
-            categories = []
+            categories = data.get("statistics", [])
+        if not categories and athlete:
+            categories = athlete.get("statistics", [])
+        if not categories and athlete:
+            categories = athlete.get("categories", [])
 
         logger.info(f"Found {len(categories)} stat categories")
 
