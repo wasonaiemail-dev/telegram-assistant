@@ -180,13 +180,20 @@ def format_schedule(
 
         away = game.get("away_team", "Unknown")
         home = game.get("home_team", "Unknown")
-        status = game.get("status", "Scheduled")
+        raw_status = game.get("status", "Scheduled")
 
-        # Truncate team names if needed
-        if len(away) > 15:
-            away = away[:12] + "."
-        if len(home) > 15:
-            home = home[:12] + "."
+        # Map ESPN status codes to friendly display text
+        status_map = {
+            "STATUS_SCHEDULED": "Scheduled",
+            "STATUS_IN_PROGRESS": "Live",
+            "STATUS_HALFTIME": "Halftime",
+            "STATUS_FINAL": "Final",
+            "STATUS_FINAL_OVERTIME": "Final (OT)",
+            "STATUS_POSTPONED": "Postponed",
+            "STATUS_CANCELED": "Canceled",
+            "STATUS_DELAYED": "Delayed",
+        }
+        status = status_map.get(raw_status, raw_status.replace("STATUS_", "").replace("_", " ").title())
 
         lines.append(f"<b>{formatted_date}</b>")
         lines.append(f"{away} @ {home}")
