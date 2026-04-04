@@ -19,11 +19,13 @@ Commands:
   /schedule [league] [team]    — View upcoming games
   /sports [setup|config]       — Configure favorite teams and alerts
   /bets [view|add|stats]       — Manage sports betting records
+  /stats [player|team|gamelog|roster] — Player and team statistics
 
 Intents:
   sports_scores, sports_standings, sports_schedule, sports_setup,
   sports_alert_toggle, sports_bet_add, sports_bet_view, sports_bet_compare,
-  sports_bet_calculate
+  sports_bet_calculate, sports_player_stats, sports_player_gamelog,
+  sports_team_stats, sports_roster
 """
 
 PLUGIN_META = {
@@ -59,6 +61,11 @@ PLUGIN_META = {
             "handler": "plugins.sports.commands.cmd_bets",
             "description": "Manage sports betting records",
         },
+        {
+            "command": "stats",
+            "handler": "plugins.sports.commands.cmd_stats",
+            "description": "Player and team statistics",
+        },
     ],
 
     # ── Intent routing ──────────────────────────────────────────
@@ -72,6 +79,10 @@ PLUGIN_META = {
         "sports_bet_view",
         "sports_bet_compare",
         "sports_bet_calculate",
+        "sports_player_stats",
+        "sports_player_gamelog",
+        "sports_team_stats",
+        "sports_roster",
     ],
     "intent_handler": "plugins.sports.dispatch.handle_sports_intent",
 
@@ -89,6 +100,10 @@ sports_bet_add      Log a sports bet with odds, stake, and pick
 sports_bet_view     View recent bets or bet history
 sports_bet_compare  Compare ROI across leagues or teams
 sports_bet_calculate Calculate parlay, unit sizing, or expected value
+sports_player_stats  Get player stats, averages, or season numbers by name
+sports_player_gamelog View a player's recent game log or performance history
+sports_team_stats    Get team-level statistics and record
+sports_roster        View a team's current roster
 """,
 
     # ── Background jobs ────────────────────────────────────────

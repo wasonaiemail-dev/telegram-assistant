@@ -98,6 +98,51 @@ def _schedule_generic(m, t):
     )
 
 
+def _setup_handler(m, t):
+    """Sports setup/config handler."""
+    return IntentResult(
+        intent="sports_setup",
+        entities={},
+        confidence="keyword",
+        raw=t,
+    )
+
+
+def _stats_handler(m, t):
+    """Stats query handler — extracts player/team name from text."""
+    tl = t.lower()
+    # Try to detect if it's a team stats or player stats query
+    if "team stats" in tl or "team record" in tl:
+        return IntentResult(
+            intent="sports_team_stats",
+            entities={"query": t},
+            confidence="keyword",
+            raw=t,
+        )
+    elif "roster" in tl:
+        return IntentResult(
+            intent="sports_roster",
+            entities={"query": t},
+            confidence="keyword",
+            raw=t,
+        )
+    elif "game log" in tl or "gamelog" in tl or "recent games" in tl or "last.*games" in tl:
+        return IntentResult(
+            intent="sports_player_gamelog",
+            entities={"query": t},
+            confidence="keyword",
+            raw=t,
+        )
+    else:
+        # Default to player stats
+        return IntentResult(
+            intent="sports_player_stats",
+            entities={"query": t},
+            confidence="keyword",
+            raw=t,
+        )
+
+
 def _bet_handler(m, t):
     """Betting-related query handler — infers sub-intent from text."""
     tl = t.lower()
@@ -277,6 +322,60 @@ def build_rules() -> List[Tuple[object, Callable]]:
     rules.append((
         re.compile(r"\b(?:betting|bet)\s+(?:roi|p&l|profit|loss|pnl)\b", re.I),
         _bet_handler,
+    ))
+
+    # ── SETUP / CONFIG ───────────────────────────────────────────────────
+    rules.append((
+        re.compile(r"\b(?:setup|configure|config)\s+(?:my\s+)?(?:sports?|teams?|alerts?|favorites?)\b", re.I),
+        _setup_handler,
+    ))
+    rules.append((
+        re.compile(r"\b(?:set|change|pick)\s+(?:my\s+)?(?:favorite|fav)\s+(?:teams?|sports?)\b", re.I),
+        _setup_handler,
+    ))
+    rules.append((
+        re.compile(r"\b(?:enable|disable|toggle|turn\s+(?:on|off))\s+(?:game|sports?)\s+alerts?\b", re.I),
+        _setup_handler,
+    ))
+
+    # ── STATS ────────────────────────────────────────────────────────────
+
+    # Player stats by name: "LeBron stats", "show me Ohtani's stats"
+    rules.append((
+        re.compile(r"\b(?:show|get|what(?:'s|s)?|how)\b.+\b(?:stats?|statistics|numbers|averages?)\b", re.I),
+        _stats_handler,
+    ))
+    rules.append((
+        re.compile(r"\b(?:stats?|statistics|averages?|numbers)\s+(?:for|of|on)\s+", re.I),
+        _stats_handler,
+    ))
+    # "how is LeBron doing", "how's Mahomes playing"
+    rules.append((
+        re.compile(r"\bhow(?:'s|s| is| are)\s+\w+\s+(?:doing|playing|performing)\b", re.I),
+        _stats_handler,
+    ))
+    # Team stats: "Lakers team stats", "team stats for the Chiefs"
+    rules.append((
+        re.compile(r"\bteam\s+(?:stats?|statistics|record)\b", re.I),
+        _stats_handler,
+    ))
+    # Roster: "show me the Lakers roster", "who's on the Lakers"
+    rules.append((
+        re.compile(r"\b(?:show|get|list)\s+(?:me\s+)?(?:the\s+)?\w+\s+roster\b", re.I),
+        _stats_handler,
+    ))
+    rules.append((
+        re.compile(r"\bwho(?:'s|s| is)\s+on\s+(?:the\s+)?\w+\s+roster\b", re.I),
+        _stats_handler,
+    ))
+    # Game log: "LeBron's last 5 games", "recent games for Ohtani"
+    rules.append((
+        re.compile(r"\b(?:recent|last\s+\d+)\s+games?\s+(?:for|of|by)\b", re.I),
+        _stats_handler,
+    ))
+    rules.append((
+        re.compile(r"\bgame\s*log\b", re.I),
+        _stats_handler,
     ))
 
     return rules

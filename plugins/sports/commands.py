@@ -5,6 +5,7 @@ Each function handles a /command from Telegram.
 """
 
 import logging
+from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
@@ -15,6 +16,7 @@ from plugins.sports import formatting
 from plugins.sports import data as sports_data
 from plugins.sports import betting
 from plugins.sports import charts
+from plugins.sports import stats_api
 
 logger = logging.getLogger(__name__)
 
@@ -519,3 +521,390 @@ async def _show_league_menu(update: Update, action: str) -> None:
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle /stats command.
+
+    Usage:
+      /stats team nba lakers     — Lakers team stats
+      /stats player lebron        — LeBron James stats
+      /stats gamelog lebron       — Recent game log
+      /stats roster nba lakers    — Team roster
+
+    If just "/stats" with no args, show usage help.
+    """
+    if update.message.from_user.id != ALLOWED_USER_ID:
+        return
+
+    args = update.message.text.split()[1:] if len(update.message.text.split()) > 1 else []
+
+    if not args:
+        # Show help
+        await update.message.reply_text(
+            "<b>📊 Stats Command</b>\n\n"
+            "Usage:\n"
+            "<code>/stats player &lt;name&gt;</code> — Player stats\n"
+            "<code>/stats gamelog &lt;name&gt;</code> — Recent game log\n"
+            "<code>/stats team &lt;league&gt; &lt;name&gt;</code> — Team stats\n"
+            "<code>/stats roster &lt;league&gt; &lt;name&gt;</code> — Team roster\n\n"
+            "Examples:\n"
+            "  /stats player LeBron James\n"
+            "  /stats team nba lakers\n"
+            "  /stats gamelog lebron\n"
+            "  /stats roster nba celtics",
+            parse_mode="HTML"
+        )
+        return
+
+    subcommand = args[0].lower()
+    remaining = " ".join(args[1:]) if len(args) > 1 else ""
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # PLAYER STATS
+    # ─────────────────────────────────────────────────────────────────────────────
+    if subcommand == "player":
+        if not remaining:
+            await update.message.reply_text(
+                "Usage: /stats player &lt;player name&gt;",
+                parse_mode="HTML"
+            )
+            return
+
+        await update.message.reply_text("🔍 Searching for player...", parse_mode="HTML")
+
+        search_results = await stats_api.search_player(remaining)
+        if not search_results:
+            await update.message.reply_text(
+                f"❌ No players found matching: <b>{remaining}</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        # If exactly one result, show stats directly
+        if len(search_results) == 1:
+            player = search_results[0]
+            athlete_id = player.get("id")
+            sport = player.get("sport", "basketball")
+            league = player.get("league", "nba")
+
+            # Map ESPN league names to our league slugs
+            league_slug = _map_league_name_to_slug(league)
+            if not league_slug:
+                await update.message.reply_text(
+                    f"❌ Could not determine league for this player",
+                    parse_mode="HTML"
+                )
+                return
+
+            # Get league info for sport/league values
+            league_info = sports_config.get_league_info(league_slug)
+            if not league_info:
+                await update.message.reply_text(
+                    f"❌ Unsupported league: {league}",
+                    parse_mode="HTML"
+                )
+                return
+
+            player_stats = await stats_api.get_player_stats(
+                athlete_id,
+                league_info["sport"],
+                league_info["league"]
+            )
+
+            if player_stats:
+                message = formatting.format_player_stats(player_stats)
+                await update.message.reply_text(message, parse_mode="HTML")
+            else:
+                await update.message.reply_text(
+                    f"❌ Could not fetch stats for {player.get('name', remaining)}",
+                    parse_mode="HTML"
+                )
+        else:
+            # Show numbered list for user to pick
+            message = formatting.format_player_search_results(search_results[:5])
+            context.user_data["player_search_results"] = search_results
+            context.user_data["last_action"] = "player_stats"
+            await update.message.reply_text(message, parse_mode="HTML")
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # GAMELOG
+    # ─────────────────────────────────────────────────────────────────────────────
+    elif subcommand == "gamelog":
+        if not remaining:
+            await update.message.reply_text(
+                "Usage: /stats gamelog &lt;player name&gt;",
+                parse_mode="HTML"
+            )
+            return
+
+        await update.message.reply_text("🔍 Searching for player...", parse_mode="HTML")
+
+        search_results = await stats_api.search_player(remaining)
+        if not search_results:
+            await update.message.reply_text(
+                f"❌ No players found matching: <b>{remaining}</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        if len(search_results) == 1:
+            player = search_results[0]
+            athlete_id = player.get("id")
+            league = player.get("league", "nba")
+
+            league_slug = _map_league_name_to_slug(league)
+            if not league_slug:
+                await update.message.reply_text(
+                    f"❌ Could not determine league",
+                    parse_mode="HTML"
+                )
+                return
+
+            league_info = sports_config.get_league_info(league_slug)
+            if not league_info:
+                await update.message.reply_text(
+                    f"❌ Unsupported league: {league}",
+                    parse_mode="HTML"
+                )
+                return
+
+            gamelog = await stats_api.get_player_gamelog(
+                athlete_id,
+                league_info["sport"],
+                league_info["league"]
+            )
+
+            if gamelog:
+                message = formatting.format_player_gamelog(gamelog, limit=5)
+                await update.message.reply_text(message, parse_mode="HTML")
+            else:
+                await update.message.reply_text(
+                    f"❌ Could not fetch game log",
+                    parse_mode="HTML"
+                )
+        else:
+            message = formatting.format_player_search_results(search_results[:5])
+            context.user_data["player_search_results"] = search_results
+            context.user_data["last_action"] = "gamelog"
+            await update.message.reply_text(message, parse_mode="HTML")
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # TEAM STATS
+    # ─────────────────────────────────────────────────────────────────────────────
+    elif subcommand == "team":
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Usage: /stats team &lt;league&gt; &lt;team name&gt;",
+                parse_mode="HTML"
+            )
+            return
+
+        league_input = args[1].lower()
+        team_name = " ".join(args[2:]) if len(args) > 2 else ""
+
+        if not team_name:
+            await update.message.reply_text(
+                "Usage: /stats team &lt;league&gt; &lt;team name&gt;",
+                parse_mode="HTML"
+            )
+            return
+
+        # Normalize league
+        league_slug = sports_config.normalize_league(league_input)
+        if not league_slug:
+            await update.message.reply_text(
+                f"❌ Unknown league: <b>{league_input}</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        await update.message.reply_text(f"🔍 Searching for {team_name}...", parse_mode="HTML")
+
+        team_results = await stats_api.search_team(team_name, league_slug)
+        if not team_results:
+            await update.message.reply_text(
+                f"❌ No teams found matching: <b>{team_name}</b> in <b>{league_slug.upper()}</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        if len(team_results) == 1:
+            team = team_results[0]
+            team_id = team.get("id")
+            league_info = sports_config.get_league_info(league_slug)
+
+            team_stats = await stats_api.get_team_stats(
+                team_id,
+                league_info["sport"],
+                league_info["league"]
+            )
+
+            if team_stats:
+                message = formatting.format_team_stats(team_stats)
+                await update.message.reply_text(message, parse_mode="HTML")
+            else:
+                await update.message.reply_text(
+                    f"❌ Could not fetch stats for {team.get('name', team_name)}",
+                    parse_mode="HTML"
+                )
+        else:
+            # Show list
+            lines = ["<b>🔍 Team Search Results</b>", ""]
+            for idx, team in enumerate(team_results[:5], 1):
+                name = team.get("name", "Unknown")
+                abbrev = team.get("abbreviation", "")
+                lines.append(f"<code>{idx}. {name}</code>")
+                if abbrev:
+                    lines.append(f"   <i>{abbrev}</i>")
+            lines.append("")
+            lines.append("<i>Reply with the number to select a team</i>")
+
+            message = "\n".join(lines)
+            context.user_data["team_search_results"] = team_results
+            context.user_data["team_league"] = league_slug
+            context.user_data["last_action"] = "team_stats"
+            await update.message.reply_text(message, parse_mode="HTML")
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # TEAM ROSTER
+    # ─────────────────────────────────────────────────────────────────────────────
+    elif subcommand == "roster":
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Usage: /stats roster &lt;league&gt; &lt;team name&gt;",
+                parse_mode="HTML"
+            )
+            return
+
+        league_input = args[1].lower()
+        team_name = " ".join(args[2:]) if len(args) > 2 else ""
+
+        if not team_name:
+            await update.message.reply_text(
+                "Usage: /stats roster &lt;league&gt; &lt;team name&gt;",
+                parse_mode="HTML"
+            )
+            return
+
+        league_slug = sports_config.normalize_league(league_input)
+        if not league_slug:
+            await update.message.reply_text(
+                f"❌ Unknown league: <b>{league_input}</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        await update.message.reply_text(f"🔍 Searching for {team_name}...", parse_mode="HTML")
+
+        team_results = await stats_api.search_team(team_name, league_slug)
+        if not team_results:
+            await update.message.reply_text(
+                f"❌ No teams found matching: <b>{team_name}</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        if len(team_results) == 1:
+            team = team_results[0]
+            team_id = team.get("id")
+            league_info = sports_config.get_league_info(league_slug)
+
+            roster = await stats_api.get_team_roster(
+                team_id,
+                league_info["sport"],
+                league_info["league"]
+            )
+
+            if roster and roster.get("players"):
+                players = roster.get("players", [])
+                team_name_str = roster.get("team_name", team.get("name", "Team"))
+
+                lines = [f"<b>📋 {team_name_str} Roster</b>", ""]
+
+                for player in players[:20]:  # Limit to 20 for readability
+                    name = player.get("name", "")
+                    position = player.get("position", "")
+                    jersey = player.get("jersey", "")
+
+                    if name:
+                        pos_jersey = []
+                        if position:
+                            pos_jersey.append(position)
+                        if jersey:
+                            pos_jersey.append(f"#{jersey}")
+
+                        info_str = f" | {' | '.join(pos_jersey)}" if pos_jersey else ""
+                        lines.append(f"<code>{name:25}{info_str}</code>")
+
+                lines.append("")
+                lines.append(f"<i>Showing {min(20, len(players))} of {len(players)} players</i>")
+
+                message = "\n".join(lines)
+                await update.message.reply_text(message, parse_mode="HTML")
+            else:
+                await update.message.reply_text(
+                    f"❌ Could not fetch roster",
+                    parse_mode="HTML"
+                )
+        else:
+            # Show list
+            lines = ["<b>🔍 Team Search Results</b>", ""]
+            for idx, team in enumerate(team_results[:5], 1):
+                name = team.get("name", "Unknown")
+                abbrev = team.get("abbreviation", "")
+                lines.append(f"<code>{idx}. {name}</code>")
+                if abbrev:
+                    lines.append(f"   <i>{abbrev}</i>")
+            lines.append("")
+            lines.append("<i>Reply with the number to select a team</i>")
+
+            message = "\n".join(lines)
+            context.user_data["team_search_results"] = team_results
+            context.user_data["team_league"] = league_slug
+            context.user_data["last_action"] = "roster"
+            await update.message.reply_text(message, parse_mode="HTML")
+
+    else:
+        await update.message.reply_text(
+            f"❌ Unknown subcommand: <b>{subcommand}</b>\n\n"
+            "Use: /stats [player|gamelog|team|roster] ...",
+            parse_mode="HTML"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STATS COMMAND HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _map_league_name_to_slug(league_name: str) -> Optional[str]:
+    """
+    Map ESPN league names to our internal league slugs.
+
+    ESPN league names: "NBA", "NFL", "Major League Baseball", etc.
+    """
+    league_lower = league_name.lower().strip()
+
+    # Direct mappings
+    mappings = {
+        "nba": "nba",
+        "nfl": "nfl",
+        "mlb": "mlb",
+        "major league baseball": "mlb",
+        "nhl": "nhl",
+        "ncaaf": "ncaaf",
+        "college football": "ncaaf",
+        "ncaab": "ncaab",
+        "college basketball": "ncaab",
+        "mens college basketball": "ncaab",
+        "epl": "epl",
+        "premier league": "epl",
+        "english premier league": "epl",
+        "mls": "mls",
+        "bundesliga": "bundesliga",
+        "laliga": "laliga",
+        "la liga": "laliga",
+    }
+
+    return mappings.get(league_lower)

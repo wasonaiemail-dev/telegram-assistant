@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 
 from core.intent import IntentResult
 from plugins.sports import espn_api
+from plugins.sports import stats_api
 from plugins.sports import formatting
 from plugins.sports import config as sports_config
 from plugins.sports.commands import (
@@ -27,6 +28,40 @@ from plugins.sports.commands import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Words to strip when extracting player/team names from NL queries
+_STOP_WORDS = {
+    "what", "whats", "what's", "show", "get", "me", "the", "are", "is",
+    "how", "how's", "hows", "doing", "playing", "performing",
+    "stats", "stat", "statistics", "averages", "average", "numbers",
+    "for", "of", "on", "about", "a", "an", "his", "her", "their",
+    "game", "log", "gamelog", "recent", "games", "last", "roster",
+    "team", "record", "please", "can", "you", "tell", "give",
+}
+
+
+def _extract_name_from_query(query: str) -> str:
+    """
+    Extract a likely player or team name from a natural language query.
+
+    Examples:
+      "what are LeBron's stats" -> "LeBron"
+      "show me stats for Patrick Mahomes" -> "Patrick Mahomes"
+      "how is Ohtani doing" -> "Ohtani"
+    """
+    # Remove possessives
+    cleaned = query.replace("'s", "").replace("'s", "")
+    words = cleaned.split()
+    # Filter out stop words, keeping capitalized words and unknown words
+    name_parts = []
+    for w in words:
+        w_lower = w.lower().strip("?!.,")
+        if w_lower in _STOP_WORDS:
+            continue
+        if w_lower.isdigit():
+            continue
+        name_parts.append(w.strip("?!.,"))
+    return " ".join(name_parts).strip()
 
 
 async def handle_sports_intent(
@@ -200,10 +235,95 @@ async def handle_sports_intent(
                 parse_mode="HTML",
             )
 
+        elif intent == "sports_player_stats":
+            query = entities.get("query", intent_result.raw)
+            # Extract a likely player name from the query
+            player_name = _extract_name_from_query(query)
+            if not player_name:
+                await update.message.reply_text(
+                    "Who would you like stats for? Try: <code>LeBron stats</code>",
+                    parse_mode="HTML",
+                )
+                return
+            await update.message.reply_text(f"🔍 Looking up {player_name}...")
+            results = await stats_api.search_player(player_name)
+            if not results:
+                await update.message.reply_text(
+                    f"❌ No players found matching: <b>{player_name}</b>",
+                    parse_mode="HTML",
+                )
+                return
+            if len(results) == 1:
+                player = results[0]
+                sport = player.get("sport", "basketball")
+                league = player.get("league", "nba")
+                player_stats = await stats_api.get_player_stats(
+                    player["id"], sport, league
+                )
+                if player_stats:
+                    msg = formatting.format_player_stats(player_stats)
+                    await update.message.reply_text(msg, parse_mode="HTML")
+                else:
+                    await update.message.reply_text(
+                        f"❌ Could not fetch stats for {player.get('name', player_name)}",
+                        parse_mode="HTML",
+                    )
+            else:
+                msg = formatting.format_player_search_results(results[:5])
+                await update.message.reply_text(msg, parse_mode="HTML")
+
+        elif intent == "sports_player_gamelog":
+            query = entities.get("query", intent_result.raw)
+            player_name = _extract_name_from_query(query)
+            if not player_name:
+                await update.message.reply_text(
+                    "Whose game log? Try: <code>LeBron game log</code>",
+                    parse_mode="HTML",
+                )
+                return
+            await update.message.reply_text(f"🔍 Looking up {player_name}...")
+            results = await stats_api.search_player(player_name)
+            if not results:
+                await update.message.reply_text(
+                    f"❌ No players found matching: <b>{player_name}</b>",
+                    parse_mode="HTML",
+                )
+                return
+            player = results[0]
+            sport = player.get("sport", "basketball")
+            league = player.get("league", "nba")
+            gamelog = await stats_api.get_player_gamelog(
+                player["id"], sport, league
+            )
+            if gamelog:
+                msg = formatting.format_player_gamelog(gamelog)
+                await update.message.reply_text(msg, parse_mode="HTML")
+            else:
+                await update.message.reply_text(
+                    f"❌ Could not fetch game log for {player.get('name', player_name)}",
+                    parse_mode="HTML",
+                )
+
+        elif intent == "sports_team_stats":
+            query = entities.get("query", intent_result.raw)
+            await update.message.reply_text(
+                "For team stats, use: <code>/stats team nba lakers</code>\n"
+                "Specify the league and team name.",
+                parse_mode="HTML",
+            )
+
+        elif intent == "sports_roster":
+            query = entities.get("query", intent_result.raw)
+            await update.message.reply_text(
+                "For a roster, use: <code>/stats roster nba lakers</code>\n"
+                "Specify the league and team name.",
+                parse_mode="HTML",
+            )
+
         else:
             logger.warning(f"Unknown sports intent: {intent}")
             await update.message.reply_text(
-                "Try /scores, /standings, /schedule, or /bets",
+                "Try /scores, /standings, /schedule, /stats, or /bets",
                 parse_mode="HTML",
             )
 
