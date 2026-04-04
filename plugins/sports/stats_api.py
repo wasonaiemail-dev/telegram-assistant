@@ -288,40 +288,53 @@ def _parse_player_stats(data: Dict[str, Any], athlete_id: str) -> Optional[Dict[
 
                 stats = []
 
-                # v3/stats format uses "statistics" key with parallel "labels"
-                # v2 format uses "stats" key with individual objects
-                raw_stats = (
-                    stat_category.get("statistics", [])
-                    or stat_category.get("stats", [])
-                    or stat_category.get("totals", [])
-                )
-
-                if not raw_stats:
-                    continue
-
+                # ESPN v3/stats has parallel arrays: labels + totals/statistics
+                # v2 format has individual stat objects with name/value
                 labels = stat_category.get("labels", [])
                 display_names = stat_category.get("displayNames", [])
 
-                if labels and raw_stats and not isinstance(raw_stats[0], dict):
-                    # Parallel arrays format: labels=["PTS","REB"], statistics=[26.4, 12.3]
+                # Prefer "totals" (flat summary array) over "statistics" (may be 2D)
+                totals = stat_category.get("totals", [])
+                raw_statistics = stat_category.get("statistics", [])
+                raw_stats_legacy = stat_category.get("stats", [])
+
+                if labels and totals and isinstance(totals, list):
+                    # Flat parallel arrays: labels=["PTS","REB"], totals=["26.4","12.3"]
                     for i, label in enumerate(labels):
-                        if i < len(raw_stats):
+                        if i < len(totals):
                             display = display_names[i] if i < len(display_names) else label
                             stats.append({
                                 "name": label,
                                 "displayName": display,
-                                "value": str(raw_stats[i]),
+                                "value": str(totals[i]),
                                 "abbreviation": label,
                             })
-                elif raw_stats and isinstance(raw_stats[0], dict):
-                    # Object format: stats=[{name, displayName, value, ...}]
-                    for stat in raw_stats:
-                        stats.append({
-                            "name": stat.get("name", "") or stat.get("abbreviation", ""),
-                            "displayName": stat.get("displayName", "") or stat.get("name", ""),
-                            "value": str(stat.get("value", "")),
-                            "abbreviation": stat.get("abbreviation", ""),
-                        })
+                elif labels and raw_statistics and isinstance(raw_statistics, list):
+                    # statistics might be 2D (list of rows) or flat
+                    flat_row = raw_statistics
+                    if raw_statistics and isinstance(raw_statistics[0], list):
+                        # 2D: take most recent row (last one)
+                        flat_row = raw_statistics[-1] if raw_statistics else []
+                    if flat_row and not isinstance(flat_row[0], dict):
+                        for i, label in enumerate(labels):
+                            if i < len(flat_row):
+                                display = display_names[i] if i < len(display_names) else label
+                                stats.append({
+                                    "name": label,
+                                    "displayName": display,
+                                    "value": str(flat_row[i]),
+                                    "abbreviation": label,
+                                })
+                elif raw_stats_legacy and isinstance(raw_stats_legacy, list):
+                    if raw_stats_legacy and isinstance(raw_stats_legacy[0], dict):
+                        # Object format: stats=[{name, displayName, value, ...}]
+                        for stat in raw_stats_legacy:
+                            stats.append({
+                                "name": stat.get("name", "") or stat.get("abbreviation", ""),
+                                "displayName": stat.get("displayName", "") or stat.get("name", ""),
+                                "value": str(stat.get("value", "")),
+                                "abbreviation": stat.get("abbreviation", ""),
+                            })
 
                 if stats:
                     result["stats"][category_name] = stats
