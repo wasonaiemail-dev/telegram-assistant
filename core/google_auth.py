@@ -360,30 +360,30 @@ async def cmd_checkauth(update, context):
         )
         return
 
-    # Try a lightweight real API call to confirm the token actually works
+    # Try lightweight real API calls to confirm the token actually works.
+    # Build both services from the SAME credentials object to avoid
+    # multiple get_creds() calls (which can each trigger a refresh and
+    # occasionally cause a 403 race on the Tasks API).
+    from googleapiclient.discovery import build as _build
+
     calendar_ok = False
     tasks_ok    = False
     cal_err = ""
     tasks_err = ""
-    try:
-        svc = get_calendar_service()
-        if svc:
-            svc.calendarList().list(maxResults=1).execute()
-            calendar_ok = True
-        else:
-            cal_err = "service build returned None"
-    except Exception as e:
-        cal_err = str(e)[:100]
 
     try:
-        svc = get_tasks_service()
-        if svc:
-            svc.tasklists().list(maxResults=1).execute()
-            tasks_ok = True
-        else:
-            tasks_err = "service build returned None"
+        cal_svc = _build("calendar", "v3", credentials=creds, cache_discovery=False)
+        cal_svc.calendarList().list(maxResults=1).execute()
+        calendar_ok = True
     except Exception as e:
-        tasks_err = str(e)[:100]
+        cal_err = str(e)[:120]
+
+    try:
+        tasks_svc = _build("tasks", "v1", credentials=creds, cache_discovery=False)
+        tasks_svc.tasklists().list(maxResults=1).execute()
+        tasks_ok = True
+    except Exception as e:
+        tasks_err = str(e)[:120]
 
     hours_left = token_expires_in_hours()
     if hours_left is not None:
