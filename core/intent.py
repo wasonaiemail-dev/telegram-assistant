@@ -487,6 +487,147 @@ def _build_keyword_rules() -> list:
 
     rules.append((p, _weekly))
 
+    # ── TODO — COMPLETE (mark done) ───────────────────────────────────────
+    # "mark buy groceries done" / "check off buy groceries" / "done with laundry"
+    # "complete my todo about dentist" / "finished the report"
+    p = _r(r"^(?:mark|check)\s+(?:off\s+)?(.+?)\s+(?:done|complete|off|finished)$"
+           r"|^(?:done|finished)\s+(?:with\s+)?(.+)$"
+           r"|^(?:complete|finish)\s+(?:my\s+)?(?:todo|task)?\s*(?:about\s+|for\s+)?(.+)$")
+
+    def _todo_complete(m, t):
+        query = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+        return IntentResult(
+            intent=TODO_COMPLETE,
+            entities={"query": query},
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _todo_complete))
+
+    # ── TODO — DELETE ─────────────────────────────────────────────────────
+    # "delete todo buy milk" / "remove task dentist"
+    p = _r(r"^(?:delete|remove)\s+(?:my\s+)?(?:todo|task)\s+(.+)$")
+
+    def _todo_delete(m, t):
+        return IntentResult(
+            intent=TODO_DELETE,
+            entities={"query": m.group(1).strip()},
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _todo_delete))
+
+    # ── SHOP — COMPLETE (cross off) ───────────────────────────────────────
+    # "got the milk" / "crossed off eggs" / "got almond milk"
+    p = _r(r"^(?:got|crossed\s+off|picked\s+up|bought)\s+(?:the\s+)?(.+)$")
+
+    def _shop_complete(m, t):
+        item = m.group(1).strip()
+        return IntentResult(
+            intent=SHOP_COMPLETE,
+            entities={"item": item, "list_key": _detect_list_key(item)},
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _shop_complete))
+
+    # ── WORKOUT — LOG ─────────────────────────────────────────────────────
+    # "just finished my workout" / "workout done" / "did a workout"
+    # "did chest and triceps" / "lifted for 45 minutes"
+    p = _r(r"^(?:just\s+)?(?:finished|completed|did)\s+(?:my\s+|a\s+)?workout"
+           r"|^workout\s+(?:done|complete|finished)"
+           r"|^(?:just\s+)?(?:finished|completed|did)\s+(?:my\s+|a\s+)?(.+?)\s+workout$"
+           r"|^lifted\s+(?:weights?\s+)?(?:for\s+)?(.+)$"
+           r"|^(?:just\s+)?(?:did|finished|completed)\s+(chest|back|legs|shoulders|arms|cardio|abs|push|pull|upper|lower)")
+
+    def _workout_log(m, t):
+        desc = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+        entities = {"description": desc} if desc else {}
+        return IntentResult(
+            intent=WORKOUT_LOG,
+            entities=entities,
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _workout_log))
+
+    # ── MOOD — LOG ────────────────────────────────────────────────────────
+    # "mood 7" / "feeling 8" / "i feel great" / "i'm feeling happy"
+    p = _r(r"^(?:mood|feeling)\s+(\d{1,2})(?:\s+(.+))?$"
+           r"|^i(?:'m|\s+am)\s+feeling\s+(.+)$")
+
+    def _mood_log(m, t):
+        if m.group(1):
+            return IntentResult(
+                intent=MOOD_LOG,
+                entities={"rating": int(m.group(1)), "note": (m.group(2) or "").strip()},
+                confidence="keyword",
+                raw=t,
+            )
+        return IntentResult(
+            intent=MOOD_LOG,
+            entities={"note": (m.group(3) or "").strip()},
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _mood_log))
+
+    # ── MEMORY — ADD (quick) ──────────────────────────────────────────────
+    # "remember that I hate cilantro" / "remember my favorite color is blue"
+    p = _r(r"^remember\s+(?:that\s+)?(.+)$")
+
+    def _memory_add(m, t):
+        return IntentResult(
+            intent=MEMORY_ADD,
+            entities={"fact": m.group(1).strip()},
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _memory_add))
+
+    # ── MEMORY — REMOVE ──────────────────────────────────────────────────
+    # "forget that I hate cilantro" / "forget about my allergy"
+    p = _r(r"^forget\s+(?:that\s+|about\s+)?(.+)$")
+
+    def _memory_remove(m, t):
+        return IntentResult(
+            intent=MEMORY_REMOVE,
+            entities={"fact": m.group(1).strip()},
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _memory_remove))
+
+    # ── LINK — SAVE ───────────────────────────────────────────────────────
+    # "save this link https://..." / "read later https://..."
+    p = _r(r"^(?:save|bookmark|read\s+later)\s+(?:this\s+)?(?:link\s+|url\s+)?(https?://\S+)(?:\s+(.+))?$")
+
+    def _link_save(m, t):
+        return IntentResult(
+            intent=LINK_SAVE,
+            entities={"url": m.group(1).strip(), "note": (m.group(2) or "").strip()},
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _link_save))
+
+    # ── EXPORT ────────────────────────────────────────────────────────────
+    # "export my data" / "export everything" / "download my data"
+    p = _r(r"^(?:export|download)\s+(?:my\s+|all\s+)?(?:data|everything)$")
+
+    def _export(m, t):
+        return IntentResult(intent=EXPORT_DATA, entities={}, confidence="keyword", raw=t)
+
+    rules.append((p, _export))
+
     return rules
 
 
@@ -772,6 +913,14 @@ CLASSIFICATION RULES:
 - "add X to my list" without a specific list → shop_add with list_key "grocery".
 - Dates like "tomorrow", "next Monday", "in 2 days", "this Friday" are valid due values — pass them as-is.
 
+DISAMBIGUATION:
+- "I worked out" / "hit the gym" / "exercised" → habit_log (quick check-in for the habit streak).
+- "Did chest and triceps for 45 min" / "just finished 5x5 squats at 225" → workout_log (detailed session with description/exercises).
+- Rule of thumb: short acknowledgments of exercise → habit_log. Detailed workout descriptions → workout_log.
+- "done with X" / "mark X done" / "finished X" → todo_complete (not workout_log unless it explicitly says "workout").
+- "forget X" → memory_remove. "remember X" → memory_add.
+- "mood 7" or "feeling 8" → mood_log. "how's my mood" / "mood history" → mood_view.
+
 EXAMPLES:
 {{"user": "what's on my calendar today", "response": {{"intent": "cal_view", "entities": {{"period": "today"}}}}}}
 {{"user": "add almond milk to the grocery list", "response": {{"intent": "shop_add", "entities": {{"item": "almond milk", "list_key": "grocery"}}}}}}
@@ -781,6 +930,12 @@ EXAMPLES:
 {{"user": "what have I done this week", "response": {{"intent": "weekly_summary", "entities": {{}}}}}}
 {{"user": "get a gift for Megan's birthday next month", "response": {{"intent": "gift_add", "entities": {{"recipient": "Megan", "idea": "", "occasion": "birthday", "date": "next month"}}}}}}
 {{"user": "what is the capital of France", "response": {{"intent": "ask", "entities": {{"query": "what is the capital of France"}}}}}}
+{{"user": "mark buy groceries done", "response": {{"intent": "todo_complete", "entities": {{"query": "buy groceries"}}}}}}
+{{"user": "done with the laundry", "response": {{"intent": "todo_complete", "entities": {{"query": "laundry"}}}}}}
+{{"user": "delete todo dentist appointment", "response": {{"intent": "todo_delete", "entities": {{"query": "dentist appointment"}}}}}}
+{{"user": "got the milk", "response": {{"intent": "shop_complete", "entities": {{"item": "milk", "list_key": "grocery"}}}}}}
+{{"user": "did chest and triceps for 45 min", "response": {{"intent": "workout_log", "entities": {{"description": "chest and triceps", "duration_min": 45}}}}}}
+{{"user": "forget that I hate cilantro", "response": {{"intent": "memory_remove", "entities": {{"fact": "I hate cilantro"}}}}}}
 
 Return only the JSON for the user's message — no wrapper keys like "response"."""
 
@@ -789,9 +944,10 @@ Return only the JSON for the user's message — no wrapper keys like "response".
 _gpt_system_prompt = _build_gpt_system(MEMORY_CATEGORIES)
 
 
-def refresh_intent_prompt(memory_categories: list) -> None:
+def refresh_intent_prompt(memory_categories: list, plugin_gpt_block: str = "") -> None:
     """
-    Rebuild the GPT classification prompt with the live memory category list.
+    Rebuild the GPT classification prompt with the live memory category list
+    and any plugin intent definitions.
 
     Call this in bot.py at startup after loading alfred_memory.json:
 
@@ -801,10 +957,42 @@ def refresh_intent_prompt(memory_categories: list) -> None:
 
     Also call it after a buyer adds or removes a custom category so the
     intent classifier knows about it immediately.
+
+    Args:
+        memory_categories: The current active list of memory categories.
+        plugin_gpt_block:  Extra intent definitions from plugins, appended
+                           to the core GPT prompt.
     """
     global _gpt_system_prompt
-    _gpt_system_prompt = _build_gpt_system(memory_categories)
-    logger.debug(f"intent: GPT prompt rebuilt with categories: {memory_categories}")
+    base = _build_gpt_system(memory_categories)
+    if plugin_gpt_block:
+        base += "\n" + plugin_gpt_block
+    _gpt_system_prompt = base
+    logger.debug(f"intent: GPT prompt rebuilt with categories: {memory_categories}"
+                 f"{' + plugin intents' if plugin_gpt_block else ''}")
+
+
+def add_plugin_keyword_rules(rules: list) -> None:
+    """
+    Append plugin keyword rules to the Layer 1 rule set.
+
+    Called from bot.py at startup after plugins are discovered.
+    Each rule is a (compiled_regex, handler_fn) tuple — same format as
+    _build_keyword_rules().
+    """
+    global _KEYWORD_RULES
+    _KEYWORD_RULES = _KEYWORD_RULES + rules
+    logger.info(f"intent: {len(rules)} plugin keyword rules added (total: {len(_KEYWORD_RULES)})")
+
+
+def register_plugin_intents(intents: set) -> None:
+    """
+    Add plugin intent strings to the known-intents set.
+
+    This prevents GPT-classified plugin intents from being demoted to 'ask'.
+    """
+    _ALL_INTENTS.update(intents)
+    logger.info(f"intent: {len(intents)} plugin intents registered")
 
 
 async def _gpt_classify(text: str) -> "IntentResult | None":

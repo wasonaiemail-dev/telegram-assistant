@@ -85,7 +85,22 @@ from features.mood          import cmd_mood, handle_mood_intent, handle_mood_cal
 from features.links         import cmd_readlater, handle_link_intent, handle_link_callback
 from features.export_data   import cmd_export, handle_export_intent
 
+from core.plugin_loader import (
+    discover_plugins,
+    register_commands   as register_plugin_commands,
+    register_jobs       as register_plugin_jobs,
+    register_callbacks  as register_plugin_callbacks,
+    dispatch_plugin_intent,
+    get_plugin_gpt_block,
+    get_plugin_keyword_rules,
+    get_all_plugin_intents,
+    list_plugins,
+)
+
 logger = logging.getLogger(__name__)
+
+# Global plugin registry — populated in main(), used by _dispatch() and others
+_loaded_plugins: list = []
 
 
 # =============================================================================
@@ -297,11 +312,16 @@ async def _dispatch(intent_result, update: Update, context: ContextTypes.DEFAULT
         elif intent == EXPORT_DATA:
             await handle_export_intent(intent, ents, update, context)
 
+        # -- PLUGIN INTENTS (auto-discovered) ------------------------------------
         else:
-            await update.message.reply_text(
-                "I'm not sure how to handle that. Try `/help` to see what I can do.",
-                parse_mode=ParseMode.MARKDOWN,
+            handled = await dispatch_plugin_intent(
+                intent_result, update, context, _loaded_plugins
             )
+            if not handled:
+                await update.message.reply_text(
+                    "I'm not sure how to handle that. Try `/help` to see what I can do.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
 
     except ImportError as e:
         # Feature module not yet built -- fail gracefully
@@ -1003,6 +1023,10 @@ def _schedule_jobs(job_queue: JobQueue) -> None:
     except Exception:
         job_queue.run_daily(_job_meal_adherence_check, time=dtime(20, 0, tzinfo=tz), name="meal_adherence")
 
+    # ── Plugin jobs ──────────────────────────────────────────────────────────
+    if _loaded_plugins:
+        register_plugin_jobs(job_queue, tz, _loaded_plugins)
+
     logger.info("All background jobs scheduled.")
 
 
@@ -1036,14 +1060,32 @@ async def _on_startup(app: Application) -> None:
     """
     logger.info(f"{BOT_NAME} starting up...")
 
-    # Refresh intent classifier with live memory categories
+    # Refresh intent classifier with live memory categories + plugin intents
     try:
         mem        = load_memory()
         categories = get_active_categories(mem)
-        refresh_intent_prompt(categories)
+        plugin_gpt = get_plugin_gpt_block(_loaded_plugins)
+        refresh_intent_prompt(categories, plugin_gpt_block=plugin_gpt)
         logger.info(f"Intent prompt refreshed ({len(categories)} categories).")
     except Exception as e:
         logger.warning(f"Startup: could not refresh intent prompt: {e}")
+
+    # Inject plugin keyword rules into Layer 1
+    try:
+        from core.intent import add_plugin_keyword_rules
+        plugin_kw_rules = get_plugin_keyword_rules(_loaded_plugins)
+        if plugin_kw_rules:
+            add_plugin_keyword_rules(plugin_kw_rules)
+            logger.info(f"Injected {len(plugin_kw_rules)} plugin keyword rules.")
+
+        # Register plugin intents in the known-intents set
+        from core.intent import register_plugin_intents as _reg_intents
+        plugin_intents = get_all_plugin_intents(_loaded_plugins)
+        if plugin_intents:
+            _reg_intents(plugin_intents)
+            logger.info(f"Registered {len(plugin_intents)} plugin intents.")
+    except Exception as e:
+        logger.warning(f"Startup: plugin intent integration failed: {e}")
 
     # Warm up Google Tasks lists (creates missing lists)
     try:
@@ -1082,6 +1124,10 @@ async def _on_startup(app: Application) -> None:
             BotCommand("checkauth",  "Check Google connection"),
             BotCommand("help",       "All commands"),
         ]
+        # Add plugin commands to the menu
+        for plugin in _loaded_plugins:
+            for cmd in plugin.commands:
+                commands.append(BotCommand(cmd["command"], cmd["description"]))
         await app.bot.set_my_commands(commands)
         logger.info("Bot command menu set.")
     except Exception as e:
@@ -1137,7 +1183,18 @@ def main() -> None:
     app.add_handler(CommandHandler("rl",        cmd_readlater))
     app.add_handler(CommandHandler("export",    cmd_export))
 
+    # ── Plugin auto-discovery ────────────────────────────────────────────
+    global _loaded_plugins
+    _loaded_plugins = discover_plugins()
+    if _loaded_plugins:
+        register_plugin_commands(app, _loaded_plugins)
+        logger.info(f"Loaded {len(_loaded_plugins)} plugin(s): "
+                     f"{', '.join(p.name for p in _loaded_plugins)}")
+
     # Inline keyboard callbacks (single handler, prefix-routed)
+    # Plugin callbacks registered BEFORE the general fallback
+    if _loaded_plugins:
+        register_plugin_callbacks(app, _loaded_plugins)
     app.add_handler(CallbackQueryHandler(handle_mood_callback,   pattern="^mood_"))
     app.add_handler(CallbackQueryHandler(handle_link_callback,   pattern="^link_"))
     app.add_handler(CallbackQueryHandler(handle_callback))

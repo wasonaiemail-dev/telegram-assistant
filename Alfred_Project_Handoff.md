@@ -166,12 +166,12 @@ All Tasks-based features (todos, notes, shopping, gifts) were silently failing �
 5. **Set up GitHub Desktop** — File → Add Local Repository → point to your alfred folder. Makes future code pushes one-click.
 
 **Product / business:**
-6. **Build Sports Pack add-on** — ESPN scores, standings, team alerts, game previews. Drop-in plugin file.
+6. ~~**Build Sports Pack add-on** — ESPN scores, standings, team alerts, game previews. Drop-in plugin file.~~ ✅ Done (Session 5)
 7. **Build Finance/Crypto Pack add-on** — portfolio tracking, price alerts, P&L. Drop-in plugin file.
 8. **Choose sales channel** — Gumroad or Lemon Squeezy. Set up product listing with setup instructions.
-9. **Review SETUP_COMPANION.md** — ensure it covers all 22 features and is fully generalized (no Tyler-specific references).
+9. **Review SETUP_COMPANION.md** — ensure it covers all 22+ features and is fully generalized (no Tyler-specific references).
 10. **Generalize all features** — audit feature files for any hardcoded personal data before packaging for sale.
-11. **Add `aiohttp` to requirements.txt** — it's installed transitively but not listed explicitly. Makes the dependency contract clear.
+11. ~~**Add `aiohttp` to requirements.txt**~~ ✅ Done (Session 5)
 
 ---
 
@@ -208,17 +208,33 @@ Every time code is pushed to the `main` branch on GitHub, Railway automatically 
 
 ```
 telegram-assistant/
-├── bot.py                  # Main entry point, all handlers and job scheduler
+├── bot.py                  # Main entry point, handlers, scheduler, plugin loader integration
 ├── core/
 │   ├── config.py           # All settings and environment variables
 │   ├── data.py             # JSON state management (_next_id bug fixed here)
-│   ├── intent.py           # GPT-powered intent classifier (todo keyword rule fixed)
-│   └── google_auth.py      # Google OAuth setup
+│   ├── intent.py           # Two-layer intent classifier (keyword + GPT) + plugin hooks
+│   ├── google_auth.py      # Google OAuth setup
+│   └── plugin_loader.py    # ★ Auto-discovery plugin system (Session 5)
 ├── adapters/
 │   ├── google_calendar.py  # Calendar read/write
 │   └── google_tasks.py     # Tasks read/write
 ├── features/               # One file per feature (22 features)
 │   └── todos.py            # entity key bug fixed here
+├── plugins/                # ★ Auto-discovered plugin directory (Session 5)
+│   └── sports/             # ★ Sports Pack plugin (Session 5)
+│       ├── __init__.py     # PLUGIN_META — auto-registered by plugin_loader
+│       ├── config.py       # League definitions, ESPN API URLs, settings
+│       ├── espn_api.py     # Async ESPN public API client (10 leagues)
+│       ├── commands.py     # /scores, /standings, /schedule, /sports, /bets
+│       ├── dispatch.py     # Intent → command routing
+│       ├── keywords.py     # Layer 1 fast regex rules for sports queries
+│       ├── formatting.py   # Telegram HTML message formatters
+│       ├── data.py         # Bet tracking, settings persistence
+│       ├── jobs.py         # Game alerts, score update notifications
+│       ├── callbacks.py    # Inline keyboard button handlers
+│       ├── betting.py      # Screenshot analysis, line comparison, bet calculator
+│       ├── charts.py       # matplotlib chart generation (P&L, ROI, win rate)
+│       └── photo_handler.py # Sportsbook screenshot detection
 ├── railway.json            # Railway deployment config
 ├── Procfile                # Process definition
 └── requirements.txt        # Python dependencies
@@ -239,5 +255,5 @@ telegram-assistant/
 
 ---
 
-*Last updated: April 3, 2026*
-*Session 4 work: Tested /mood fix (confirmed working — typed rating correctly intercepted). Diagnosed /checkauth "services failed" as a real Google Tasks API 403 — the API was never enabled in Cloud Console. Enabled it, re-authorized via /auth, verified all features working (add todo ✓, /todos ✓, /calendar ✓, /checkauth "Everything looks good" ✓). Added troubleshooting guide to handoff doc. Previous sessions: fixed /briefing crash, "add todo" NL, /mood state drop, /checkauth display, full 20-command test.*
+*Last updated: April 4, 2026*
+*Session 5 work: (1) NL audit — analyzed all 74 intents, identified gaps, added 9 new keyword patterns (todo complete, todo delete, shop complete, workout log, mood log, memory add/remove, link save, export) taking Layer 1 coverage from 13→22 intents. Added disambiguation rules and 7 new GPT examples. (2) Built full plugin loader architecture — auto-discovery system that scans plugins/, reads PLUGIN_META, registers commands/intents/jobs/callbacks/keyword rules automatically. Zero changes to core code needed to add new plugins. (3) Built Sports Pack plugin — 4,000+ lines across 13 files. ESPN API integration for 10 leagues (NFL, NBA, MLB, NHL, NCAAF, NCAAB, EPL, MLS, Bundesliga, La Liga). Commands: /scores, /standings, /schedule, /sports, /bets. (4) Built Sports Betting module — screenshot-based line comparison (GPT-4o Vision for 8 sportsbooks), bet size calculator (fixed unit, percentage, Kelly Criterion), bet tracker with P&L, and matplotlib chart generation (cumulative P&L, win rate, ROI, unit tracker, bet distribution). Previous sessions: fixed /briefing crash, "add todo" NL, /mood state drop, /checkauth display, Google Tasks API 403, full 20-command test.*
