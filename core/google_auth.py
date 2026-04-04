@@ -361,30 +361,34 @@ async def cmd_checkauth(update, context):
         return
 
     # Try lightweight real API calls to confirm the token actually works.
-    # Build both services from the SAME credentials object to avoid
-    # multiple get_creds() calls (which can each trigger a refresh and
-    # occasionally cause a 403 race on the Tasks API).
-    from googleapiclient.discovery import build as _build
-
+    # Use the same service builder functions the features use.
     calendar_ok = False
     tasks_ok    = False
     cal_err = ""
     tasks_err = ""
 
-    # Test Tasks FIRST (was failing when tested second — investigating order)
     try:
-        tasks_svc = _build("tasks", "v1", credentials=creds, cache_discovery=False)
-        tasks_svc.tasklists().list(maxResults=1).execute()
-        tasks_ok = True
-    except Exception as e:
-        tasks_err = str(e)[:120]
-
-    try:
-        cal_svc = _build("calendar", "v3", credentials=creds, cache_discovery=False)
-        cal_svc.calendarList().list(maxResults=1).execute()
-        calendar_ok = True
+        cal_svc = get_calendar_service()
+        if cal_svc:
+            cal_svc.calendarList().list(maxResults=1).execute()
+            calendar_ok = True
+        else:
+            cal_err = "service build returned None"
     except Exception as e:
         cal_err = str(e)[:120]
+
+    try:
+        tasks_svc = get_tasks_service()
+        if tasks_svc:
+            # Use tasks().list() on the default task list instead of
+            # tasklists().list() — the latter returns 403 in some configs
+            # even when task operations work fine.
+            tasks_svc.tasks().list(tasklist="@default", maxResults=1).execute()
+            tasks_ok = True
+        else:
+            tasks_err = "service build returned None"
+    except Exception as e:
+        tasks_err = str(e)[:120]
 
     hours_left = token_expires_in_hours()
     if hours_left is not None:
