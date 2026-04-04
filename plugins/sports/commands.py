@@ -874,6 +874,74 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             context.user_data["last_action"] = "roster"
             await update.message.reply_text(message, parse_mode="HTML")
 
+    # ─────────────────────────────────────────────────────────────────────────────
+    # DEBUG — temporary: test ESPN endpoints directly
+    # ─────────────────────────────────────────────────────────────────────────────
+    elif subcommand == "debug":
+        if not remaining:
+            await update.message.reply_text("Usage: /stats debug <athlete_id> or /stats debug search <name>")
+            return
+
+        import aiohttp
+        from plugins.sports.espn_api import _fetch_json
+        from plugins.sports.config import ESPN_SITE
+
+        if remaining.startswith("search "):
+            name = remaining[7:]
+            await update.message.reply_text(f"🔍 Debug search: {name}")
+            results = await stats_api.search_player(name)
+            if results:
+                msg = "Search results:\n"
+                for r in results[:3]:
+                    msg += f"\nID: {r.get('id')}\nName: {r.get('name')}\nTeam: {r.get('team')}\nSport: {r.get('sport')}\nLeague: {r.get('league')}\n"
+                await update.message.reply_text(msg)
+            else:
+                await update.message.reply_text("No results found")
+            return
+
+        athlete_id = remaining.strip()
+        sport = "basketball"
+        league = "nba"
+
+        urls = [
+            f"{ESPN_SITE}/sports/{sport}/{league}/athletes/{athlete_id}/statistics",
+            f"{ESPN_SITE}/sports/{sport}/{league}/athletes/{athlete_id}",
+            f"https://site.web.api.espn.com/apis/common/v3/sports/{sport}/{league}/athletes/{athlete_id}/stats?region=us&lang=en&contentorigin=espn",
+        ]
+
+        for url in urls:
+            await update.message.reply_text(f"Testing: {url}")
+            data = await _fetch_json(url)
+            if data:
+                keys = list(data.keys())
+                msg = f"✅ Status: OK\nKeys: {keys}\n"
+                # Show athlete info if present
+                athlete = data.get("athlete", {})
+                if athlete:
+                    msg += f"athlete keys: {list(athlete.keys())}\n"
+                    msg += f"name: {athlete.get('displayName', 'N/A')}\n"
+                # Show categories if present
+                cats = data.get("categories", [])
+                if cats:
+                    msg += f"categories count: {len(cats)}\n"
+                    if cats:
+                        msg += f"first cat keys: {list(cats[0].keys())}\n"
+                        msg += f"first cat name: {cats[0].get('name', 'N/A')}\n"
+                # Show stats if in athlete
+                if athlete:
+                    stats = athlete.get("statistics", [])
+                    if stats:
+                        msg += f"athlete.statistics count: {len(stats)}\n"
+                    cats2 = athlete.get("categories", [])
+                    if cats2:
+                        msg += f"athlete.categories count: {len(cats2)}\n"
+                # Truncate
+                await update.message.reply_text(msg[:4000])
+            else:
+                await update.message.reply_text(f"❌ Failed (non-200 or error)")
+
+        return
+
     else:
         await update.message.reply_text(
             f"❌ Unknown subcommand: <b>{subcommand}</b>\n\n"
