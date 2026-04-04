@@ -586,17 +586,21 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if len(search_results) == 1:
             player = search_results[0]
             athlete_id = player.get("id")
-            sport = player.get("sport", "basketball")
-            league = player.get("league", "nba")
+            league = player.get("league") or ""
 
-            # Map ESPN league names to our league slugs
-            league_slug = _map_league_name_to_slug(league)
+            # Map ESPN league names to our league slugs, with fallback
+            league_slug = _map_league_name_to_slug(league) if league else None
             if not league_slug:
-                await update.message.reply_text(
-                    f"❌ Could not determine league for this player",
-                    parse_mode="HTML"
-                )
-                return
+                # Try to infer from sport field or default to NBA
+                sport_val = (player.get("sport") or "").lower()
+                if "football" in sport_val:
+                    league_slug = "nfl"
+                elif "baseball" in sport_val:
+                    league_slug = "mlb"
+                elif "hockey" in sport_val:
+                    league_slug = "nhl"
+                else:
+                    league_slug = "nba"  # default fallback
 
             # Get league info for sport/league values
             league_info = sports_config.get_league_info(league_slug)
@@ -652,15 +656,19 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if len(search_results) == 1:
             player = search_results[0]
             athlete_id = player.get("id")
-            league = player.get("league", "nba")
+            league = player.get("league") or ""
 
-            league_slug = _map_league_name_to_slug(league)
+            league_slug = _map_league_name_to_slug(league) if league else None
             if not league_slug:
-                await update.message.reply_text(
-                    f"❌ Could not determine league",
-                    parse_mode="HTML"
-                )
-                return
+                sport_val = (player.get("sport") or "").lower()
+                if "football" in sport_val:
+                    league_slug = "nfl"
+                elif "baseball" in sport_val:
+                    league_slug = "mlb"
+                elif "hockey" in sport_val:
+                    league_slug = "nhl"
+                else:
+                    league_slug = "nba"
 
             league_info = sports_config.get_league_info(league_slug)
             if not league_info:

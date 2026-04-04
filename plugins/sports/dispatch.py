@@ -255,8 +255,22 @@ async def handle_sports_intent(
                 return
             if len(results) == 1:
                 player = results[0]
-                sport = player.get("sport", "basketball")
-                league = player.get("league", "nba")
+                league_raw = player.get("league") or ""
+                from plugins.sports.commands import _map_league_name_to_slug
+                league_slug = _map_league_name_to_slug(league_raw) if league_raw else None
+                if not league_slug:
+                    sport_val = (player.get("sport") or "").lower()
+                    if "football" in sport_val:
+                        league_slug = "nfl"
+                    elif "baseball" in sport_val:
+                        league_slug = "mlb"
+                    elif "hockey" in sport_val:
+                        league_slug = "nhl"
+                    else:
+                        league_slug = "nba"
+                league_info = sports_config.get_league_info(league_slug)
+                sport = league_info["sport"] if league_info else "basketball"
+                league = league_info["league"] if league_info else "nba"
                 player_stats = await stats_api.get_player_stats(
                     player["id"], sport, league
                 )
@@ -290,8 +304,21 @@ async def handle_sports_intent(
                 )
                 return
             player = results[0]
-            sport = player.get("sport", "basketball")
-            league = player.get("league", "nba")
+            league_raw = player.get("league") or ""
+            league_slug = _map_league_name_to_slug(league_raw) if league_raw else None
+            if not league_slug:
+                sport_val = (player.get("sport") or "").lower()
+                if "football" in sport_val:
+                    league_slug = "nfl"
+                elif "baseball" in sport_val:
+                    league_slug = "mlb"
+                elif "hockey" in sport_val:
+                    league_slug = "nhl"
+                else:
+                    league_slug = "nba"
+            league_info = sports_config.get_league_info(league_slug)
+            sport = league_info["sport"] if league_info else "basketball"
+            league = league_info["league"] if league_info else "nba"
             gamelog = await stats_api.get_player_gamelog(
                 player["id"], sport, league
             )
