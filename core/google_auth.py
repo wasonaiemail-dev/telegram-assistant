@@ -361,34 +361,24 @@ async def cmd_checkauth(update, context):
         return
 
     # Try lightweight real API calls to confirm the token actually works.
-    # Use the same service builder functions the features use.
     calendar_ok = False
     tasks_ok    = False
-    cal_err = ""
-    tasks_err = ""
 
     try:
-        cal_svc = get_calendar_service()
-        if cal_svc:
-            cal_svc.calendarList().list(maxResults=1).execute()
+        svc = get_calendar_service()
+        if svc:
+            svc.calendarList().list(maxResults=1).execute()
             calendar_ok = True
-        else:
-            cal_err = "service build returned None"
-    except Exception as e:
-        cal_err = str(e)[:120]
+    except Exception:
+        pass
 
     try:
-        tasks_svc = get_tasks_service()
-        if tasks_svc:
-            # Use tasks().list() on the default task list instead of
-            # tasklists().list() — the latter returns 403 in some configs
-            # even when task operations work fine.
-            tasks_svc.tasks().list(tasklist="@default", maxResults=1).execute()
+        svc = get_tasks_service()
+        if svc:
+            svc.tasklists().list(maxResults=1).execute()
             tasks_ok = True
-        else:
-            tasks_err = "service build returned None"
-    except Exception as e:
-        tasks_err = str(e)[:120]
+    except Exception:
+        pass
 
     hours_left = token_expires_in_hours()
     if hours_left is not None:
@@ -405,15 +395,10 @@ async def cmd_checkauth(update, context):
     cal_icon   = "✅" if calendar_ok else "❌"
     tasks_icon = "✅" if tasks_ok    else "❌"
 
-    # Build status lines with optional error detail (HTML-escape to avoid parse errors)
-    import html as _html
-    cal_line   = f"{cal_icon} Calendar API" + (f" — <code>{_html.escape(cal_err)}</code>" if cal_err else "")
-    tasks_line = f"{tasks_icon} Tasks API" + (f" — <code>{_html.escape(tasks_err)}</code>" if tasks_err else "")
-
     await update.message.reply_text(
         f"<b>Google Auth Status</b>\n\n"
-        f"{cal_line}\n"
-        f"{tasks_line}\n"
+        f"{cal_icon} Calendar API\n"
+        f"{tasks_icon} Tasks API\n"
         f"🕐 {expiry_line}\n\n"
         + ("Everything looks good." if calendar_ok and tasks_ok
            else "One or more services failed. Run /auth to reconnect."),
