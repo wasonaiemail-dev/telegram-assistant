@@ -153,16 +153,6 @@ def _leaders_handler(m, t):
     )
 
 
-def _compare_handler(m, t):
-    """Player comparison handler — routes to GPT NL so player names are extracted properly."""
-    return IntentResult(
-        intent="sports_nl_query",
-        entities={"query": t},
-        confidence="keyword",
-        raw=t,
-    )
-
-
 def _sports_nl_handler(m, t):
     """
     Broad sports NL catch-all handler.
@@ -355,21 +345,6 @@ def build_rules() -> List[Tuple[object, Callable]]:
     rules.append((
         re.compile(r"\bwho\s+leads\b", re.I),
         _leaders_handler,
-    ))
-
-    # ── COMPARE ──────────────────────────────────────────────────────────
-
-    rules.append((
-        re.compile(r"\bcompare\s+\w+\b.+\bvs\.?\b", re.I),
-        _compare_handler,
-    ))
-    rules.append((
-        re.compile(r"\b\w+\s+vs\.?\s+\w+\s+stats?\b", re.I),
-        _compare_handler,
-    ))
-    rules.append((
-        re.compile(r"\b(?:who(?:'s|s| is)\s+better)\b.+\bor\b", re.I),
-        _compare_handler,
     ))
 
     # ── BETTING ───────────────────────────────────────────────────────────

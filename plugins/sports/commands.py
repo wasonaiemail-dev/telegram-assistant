@@ -559,12 +559,10 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "<code>/stats roster &lt;league&gt; &lt;name&gt;</code> — Team roster\n\n"
             "<b>Also try:</b>\n"
             "<code>/leaders &lt;league&gt;</code> — Top scorers & stat leaders\n"
-            "<code>/compare Player1 vs Player2</code> — Side-by-side comparison\n\n"
             "Examples:\n"
             "  /stats player LeBron James\n"
             "  /stats team nba lakers\n"
-            "  /leaders nba\n"
-            "  /compare LeBron vs Durant",
+            "  /leaders nba",
             parse_mode="HTML"
         )
         return
@@ -923,139 +921,6 @@ async def cmd_leaders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     message = formatting.format_leaders(leaders, emoji)
-    await update.message.reply_text(message, parse_mode="HTML")
-
-
-async def cmd_compare(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /compare [player1] vs [player2]
-
-    Compare two players' stats side by side.
-    """
-    if update.message.from_user.id != ALLOWED_USER_ID:
-        return
-
-    args = update.message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await update.message.reply_text(
-            "<b>⚔️ Player Comparison</b>\n\n"
-            "Usage: <code>/compare player1 vs player2</code>\n\n"
-            "Examples:\n"
-            "  /compare LeBron James vs Kevin Durant\n"
-            "  /compare Messi vs Ronaldo\n"
-            "  /compare Mahomes vs Allen",
-            parse_mode="HTML"
-        )
-        return
-
-    raw_query = args[1]
-
-    # Split on " vs " or " versus " or " v "
-    import re
-    parts = re.split(r'\s+(?:vs\.?|versus|v)\s+', raw_query, maxsplit=1, flags=re.I)
-
-    if len(parts) != 2:
-        await update.message.reply_text(
-            "❌ Please use 'vs' to separate two player names.\n\n"
-            "Example: <code>/compare LeBron James vs Kevin Durant</code>",
-            parse_mode="HTML"
-        )
-        return
-
-    name1 = parts[0].strip()
-    name2 = parts[1].strip()
-
-    if not name1 or not name2:
-        await update.message.reply_text(
-            "❌ Both player names are required.\n\n"
-            "Example: <code>/compare LeBron James vs Kevin Durant</code>",
-            parse_mode="HTML"
-        )
-        return
-
-    await update.message.reply_text(
-        f"🔍 Comparing {name1} vs {name2}...",
-        parse_mode="HTML"
-    )
-
-    # Search both players in parallel (with GPT fuzzy fallback)
-    import asyncio
-    results = await asyncio.gather(
-        search_with_fuzzy_fallback(name1),
-        search_with_fuzzy_fallback(name2),
-        return_exceptions=True,
-    )
-
-    r1 = results[0] if not isinstance(results[0], Exception) else (None, None, None, None)
-    r2 = results[1] if not isinstance(results[1], Exception) else (None, None, None, None)
-
-    player1, slug1, info1, resolved1 = r1
-    player2, slug2, info2, resolved2 = r2
-
-    # Let user know if names were fuzzy-resolved
-    resolved_msgs = []
-    if resolved1:
-        resolved_msgs.append(f"  {name1} → <b>{resolved1}</b>")
-    if resolved2:
-        resolved_msgs.append(f"  {name2} → <b>{resolved2}</b>")
-    if resolved_msgs:
-        await update.message.reply_text(
-            "💡 Resolved names:\n" + "\n".join(resolved_msgs),
-            parse_mode="HTML",
-        )
-
-    if not player1:
-        await update.message.reply_text(
-            f"❌ Could not find player: <b>{name1}</b>",
-            parse_mode="HTML"
-        )
-        return
-
-    if not player2:
-        await update.message.reply_text(
-            f"❌ Could not find player: <b>{name2}</b>",
-            parse_mode="HTML"
-        )
-        return
-
-    if not info1 or not info2:
-        await update.message.reply_text(
-            "❌ Could not determine league for one or both players.",
-            parse_mode="HTML"
-        )
-        return
-
-    # Fetch stats for both players in parallel
-    stat_results = await asyncio.gather(
-        stats_api.get_player_stats(
-            player1.get("id"), info1["sport"], info1["league"],
-            player_name=player1.get("name", name1),
-        ),
-        stats_api.get_player_stats(
-            player2.get("id"), info2["sport"], info2["league"],
-            player_name=player2.get("name", name2),
-        ),
-        return_exceptions=True,
-    )
-
-    stats1 = stat_results[0] if not isinstance(stat_results[0], Exception) else None
-    stats2 = stat_results[1] if not isinstance(stat_results[1], Exception) else None
-
-    if not stats1:
-        await update.message.reply_text(
-            f"❌ Could not fetch stats for {player1.get('name', name1)}",
-            parse_mode="HTML"
-        )
-        return
-
-    if not stats2:
-        await update.message.reply_text(
-            f"❌ Could not fetch stats for {player2.get('name', name2)}",
-            parse_mode="HTML"
-        )
-        return
-
-    message = formatting.format_player_comparison(stats1, stats2)
     await update.message.reply_text(message, parse_mode="HTML")
 
 

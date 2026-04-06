@@ -165,27 +165,6 @@ _SPORTS_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "compare_players",
-            "description": "Compare two players' stats side by side",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "player1": {
-                        "type": "string",
-                        "description": "First player's full name",
-                    },
-                    "player2": {
-                        "type": "string",
-                        "description": "Second player's full name",
-                    },
-                },
-                "required": ["player1", "player2"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "not_sports",
             "description": (
                 "This message is NOT a sports data question and cannot be answered "
@@ -212,8 +191,6 @@ Examples:
 - "nba mvp race" → get_leaders(league="nba", stat="points")
 - "how many ppg is jokic averaging" → get_player_stats(player_name="Nikola Jokic")
 - "show me mahomes stats" → get_player_stats(player_name="Patrick Mahomes")
-- "compare messi and ronaldo" → compare_players(player1="Lionel Messi", player2="Cristiano Ronaldo")
-- "lebron vs kd" → compare_players(player1="LeBron James", player2="Kevin Durant")
 - "who won last night" → get_scores(league="nba")
 - "nba scores" → get_scores(league="nba")
 - "nba standings" → get_standings(league="nba")
@@ -347,20 +324,6 @@ async def gpt_sports_dispatch(query: str, update, context) -> bool:
             intent_result = IntentResult(
                 intent="sports_player_gamelog",
                 entities={"query": args.get("player_name", query)},
-                confidence="gpt_function",
-                raw=query,
-            )
-
-        elif fn_name == "compare_players":
-            # Route to sports_compare_nl so dispatch.py can use player1/player2 directly
-            # (avoids needing to parse "vs" from a reconstructed string)
-            intent_result = IntentResult(
-                intent="sports_compare_nl",
-                entities={
-                    "player1": args.get("player1", ""),
-                    "player2": args.get("player2", ""),
-                    "query": query,
-                },
                 confidence="gpt_function",
                 raw=query,
             )
