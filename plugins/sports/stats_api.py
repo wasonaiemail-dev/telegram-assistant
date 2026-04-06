@@ -494,17 +494,25 @@ async def get_team_stats(
     try:
         # Try endpoint 1: statistics-specific
         url1 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}/statistics"
+        logger.info(f"Fetching team stats from: {url1}")
         data = await _fetch_json(url1)
 
         if data:
-            return _parse_team_stats(data)
+            logger.info(f"Got team stats data, top-level keys: {list(data.keys())}")
+            result = _parse_team_stats(data)
+            if result:
+                return result
 
-        # Fallback to endpoint 2: general team info (includes stats)
+        # Fallback to endpoint 2: general team info
         url2 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}"
+        logger.info(f"Trying team fallback: {url2}")
         data = await _fetch_json(url2)
 
         if data:
-            return _parse_team_stats(data)
+            logger.info(f"Got team fallback data, top-level keys: {list(data.keys())}")
+            result = _parse_team_stats(data)
+            if result:
+                return result
 
         return None
 
@@ -516,58 +524,134 @@ async def get_team_stats(
 def _parse_team_stats(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Parse team stats from ESPN API response."""
     try:
-        # Handle different response formats
-        team = data.get("team", {}) or data.get("teams", [{}])[0]
+        # Get team info from multiple possible locations
+        team = data.get("team", {})
+        if not team:
+            teams_list = data.get("teams", [])
+            if teams_list:
+                team = teams_list[0]
+                # Unwrap {"team": {...}} wrapper if present
+                if "team" in team and isinstance(team["team"], dict):
+                    team = team["team"]
 
-        if not team.get("id"):
+        if not team.get("id") and not team.get("displayName"):
             return None
 
         result = {
-            "id": team.get("id"),
+            "id": team.get("id", ""),
             "name": team.get("displayName", ""),
             "abbreviation": team.get("abbreviation", ""),
             "logo": team.get("logo", ""),
             "stats": {},
         }
 
-        # Extract record if available
+        # Extract record
         record = team.get("record", {})
         if record:
-            result["record"] = {
-                "wins": record.get("items", [{}])[0].get("wins", "") if record.get("items") else "",
-                "losses": record.get("items", [{}])[0].get("losses", "") if record.get("items") else "",
-            }
+            items = record.get("items", [])
+            if items:
+                first_item = items[0] if isinstance(items[0], dict) else {}
+                summary = first_item.get("summary", "")
+                if summary:
+                    result["record_summary"] = summary
+                result["record"] = {
+                    "wins": first_item.get("stats", [{}])[0].get("value", "") if first_item.get("stats") else "",
+                    "losses": first_item.get("stats", [{}])[1].get("value", "") if first_item.get("stats") and len(first_item.get("stats", [])) > 1 else "",
+                }
 
-        # Parse statistics
-        stats_list = team.get("statistics", []) or team.get("categories", [])
+        # ── Find statistics in multiple locations ─────────────────────────
+        stats_list = []
+
+        # Location 1: root-level "results" -> "stats" (v2/statistics endpoint)
+        results_obj = data.get("results", {})
+        if isinstance(results_obj, dict):
+            root_stats = results_obj.get("stats", [])
+            if root_stats:
+                # Flat list of stat objects — wrap in a single category
+                stats_list = [{"name": "Team Statistics", "stats": root_stats}]
+
+        # Location 2: root-level "splits" -> "categories"
+        if not stats_list:
+            splits = data.get("splits", {})
+            if isinstance(splits, dict):
+                stats_list = splits.get("categories", [])
+
+        # Location 3: team-level "statistics"
+        if not stats_list:
+            stats_list = team.get("statistics", [])
+
+        # Location 4: team-level "categories"
+        if not stats_list:
+            stats_list = team.get("categories", [])
+
+        # Location 5: root-level "statistics"
+        if not stats_list:
+            stats_list = data.get("statistics", [])
+
+        # Location 6: root-level "categories"
+        if not stats_list:
+            stats_list = data.get("categories", [])
+
+        logger.info(f"Team stats: found {len(stats_list)} categories for {result.get('name', 'unknown')}")
+
+        # Handle case where stats_list is a flat list of stat objects (not categorized)
+        if stats_list and isinstance(stats_list[0], dict) and "value" in stats_list[0]:
+            # Flat list — wrap as single category
+            stats_list = [{"name": "Team Statistics", "stats": stats_list}]
 
         for stat_category in stats_list:
             try:
-                category_name = stat_category.get("name", "") or stat_category.get("displayName", "")
-
+                category_name = (
+                    stat_category.get("name", "")
+                    or stat_category.get("displayName", "")
+                    or stat_category.get("type", "")
+                )
                 if not category_name:
                     continue
 
                 stats = []
-                for stat in stat_category.get("stats", []):
-                    stat_obj = {
-                        "name": stat.get("name", ""),
-                        "displayName": stat.get("displayName", ""),
-                        "value": stat.get("value", ""),
-                        "rank": stat.get("rank", ""),
-                    }
-                    stats.append(stat_obj)
+                raw_stats = (
+                    stat_category.get("stats", [])
+                    or stat_category.get("statistics", [])
+                )
+
+                # Handle parallel arrays (labels + totals)
+                labels = stat_category.get("labels", [])
+                totals = stat_category.get("totals", [])
+                display_names = stat_category.get("displayNames", [])
+
+                if labels and totals and isinstance(totals, list) and totals and not isinstance(totals[0], dict):
+                    for i, label in enumerate(labels):
+                        if i < len(totals):
+                            display = display_names[i] if i < len(display_names) else label
+                            stats.append({
+                                "name": label,
+                                "displayName": display,
+                                "value": str(totals[i]),
+                                "rank": "",
+                            })
+                elif raw_stats and isinstance(raw_stats[0], dict):
+                    for stat in raw_stats:
+                        stats.append({
+                            "name": stat.get("name", "") or stat.get("abbreviation", ""),
+                            "displayName": stat.get("displayName", "") or stat.get("name", ""),
+                            "value": str(stat.get("value", "")),
+                            "rank": str(stat.get("rank", "")) if stat.get("rank") else "",
+                        })
 
                 if stats:
                     result["stats"][category_name] = stats
 
-            except (KeyError, TypeError):
+            except (KeyError, TypeError) as e:
+                logger.debug(f"Error parsing team stat category: {e}")
                 continue
+
+        logger.info(f"Team stats parsed: {result.get('name')}, categories={list(result.get('stats', {}).keys())}")
 
         return result if result.get("name") else None
 
     except Exception as e:
-        logger.debug(f"Error parsing team stats: {e}")
+        logger.error(f"Error parsing team stats: {e}", exc_info=True)
         return None
 
 
