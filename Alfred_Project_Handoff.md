@@ -36,13 +36,15 @@ Alfred has **two simultaneous goals:**
 
 ---
 
-## Current Status: ✅ LIVE — Sports Redesign Pending
+## Current Status: ✅ LIVE — Phase B of Sports Redesign Complete (Partially Tested)
 
 - Core bot: Deployed and running on Railway, all 20+ commands working
-- Sports Pack: **Working but architecture redesign planned** (see "What Still Needs to Be Done")
-  - Working: `/scores`, `/standings`, `/schedule`, `/sports`, `/bets`, `/stats player`, `/stats team`, `/stats gamelog`, `/stats roster`, NL sports queries (with limitations)
-  - Known NL issues: stop words pollute player search, intent misrouting for complex queries
-  - Plan: Replace ESPN scraping + keyword regex with BALLDONTLIE API + GPT function-calling
+- Sports Pack: **Phase A and Phase B complete. Phase B deployed but needs full re-testing.**
+  - Working (confirmed via Telegram): `/scores` (yesterday's results), `/standings` (sorted by wins), `/schedule`, `/sports`, `/bets`, `/stats player`, `/stats team`, `/stats gamelog`, `/stats roster`
+  - Working (confirmed): GPT date awareness (no longer thinks it's 2023), GPT fuzzy player name resolution (nicknames/misspellings → full names)
+  - Partially working: NL sports queries — "who leads" regex added but not yet tested live. Soccer `/compare` has correct code but depends on API_SPORTS_KEY being set in Railway (confirmed set as of April 6, 2026).
+  - Not yet tested after latest deploy: previous-season fallback, "who leads" keyword routing, soccer compare with API_SPORTS_KEY
+  - Rate limit concern: Multi-league soccer fallback can burn ~10-20 API-Sports requests per failed player lookup (100/day free tier)
 
 ---
 
@@ -74,12 +76,18 @@ Alfred has **two simultaneous goals:**
 
 ## Environment Variables (set in Railway → Variables)
 
-All 21 variables are already configured in Railway. They are:
+All 22 variables are configured in Railway. They are:
 
 `TELEGRAM_TOKEN`, `ALLOWED_USER_ID`, `BOT_NAME`, `BOT_USERNAME`, `OPENAI_API_KEY`, `GOOGLE_CREDENTIALS`, `SERPER_API_KEY`, `TIMEZONE`, `WEATHER_LAT`, `WEATHER_LON`, `HOME_CITY`, `QUOTE_TYPE`, `BRIEFING_HOUR`, `BRIEFING_MINUTE`, `HABIT_NUDGE_HOUR`, `HABIT_NUDGE_MINUTE`, `TRAVEL_WEATHER_HOUR`, `TRAVEL_WEATHER_MINUTE`, `WEEKLY_SUMMARY_HOUR`, `WEEKLY_SUMMARY_MINUTE`, `WEEKLY_SUMMARY_WEEKDAY`, `API_SPORTS_KEY`
 
+**Critical env vars (bot won't start without these):**
+- `TELEGRAM_TOKEN` — from BotFather
+- `ALLOWED_USER_ID` — your Telegram user ID
+- `OPENAI_API_KEY` — OpenAI API key
+- `GOOGLE_CREDENTIALS` — full JSON from Google Cloud credentials
+
 **Sports plugin variables (optional — bot works without them, ESPN is free fallback):**
-- `API_SPORTS_KEY` — Get from https://dashboard.api-football.com/register (free, 100 req/day per sport)
+- `API_SPORTS_KEY` — Get from https://dashboard.api-football.com/register (free, 100 req/day per sport). Value: `4326891bc76a7ead7932910d21c771f6`. **CONFIRMED SET in Railway as of April 6, 2026.** Without this key, all API-Sports calls silently return None (the `is_available()` function returns False), making soccer compare and any non-ESPN stats source completely non-functional with no visible error to the user.
 
 ---
 
@@ -114,8 +122,10 @@ All 21 variables are already configured in Railway. They are:
 | Sports Schedule | `/schedule` | ✅ Tested |
 | Sports Config | `/sports` | ✅ Tested |
 | Bet Tracker | `/bets` | ✅ Tested |
-| Player/Team Stats | `/stats` | ✅ Tested (redesign pending) |
-| Sports NL queries | natural language | ⚠️ Works but has routing limitations |
+| Player/Team Stats | `/stats` | ✅ Tested (ESPN + API-Sports fallback) |
+| Player Compare | `/compare` | ⚠️ Code complete, needs re-test with API_SPORTS_KEY set |
+| Leaders | `/leaders` | ✅ Tested (keyword routing for "who leads" added) |
+| Sports NL queries | natural language | ⚠️ Improved — GPT fuzzy name matching added, "who leads" regex added, but full NL routing still has gaps |
 
 ---
 
@@ -147,7 +157,7 @@ All 21 variables are already configured in Railway. They are:
 
 ---
 
-## Known Issues — All Resolved
+## Known Issues
 
 ### `/mood` state drop — ✅ Fixed (Session 3)
 After `/mood` prompts "How are you feeling today? (1–10)?", sending a bare number like `7` was intercepted by the general intent classifier instead of the mood handler.
@@ -164,6 +174,19 @@ All Tasks-based features (todos, notes, shopping, gifts) were silently failing �
 **Root cause:** The Google Tasks API was never enabled in Google Cloud Console (console.cloud.google.com → APIs & Services → Library). Calendar API was enabled, Tasks was not.
 **Fix:** Enabled "Google Tasks API" in Cloud Console + ran `/auth` to re-authorize with fresh tokens.
 **Lesson learned:** When `/checkauth` shows a service failure, it's real — don't assume features are working just because they return "Nothing here" instead of an error. The adapters silently swallow API failures.
+
+### API-Sports calls silently fail when key is missing — ⚠️ By Design but Dangerous
+`api_sports.py` line 138: if `API_SPORTS_KEY` is empty, `_api_fetch()` returns `None` with only a debug-level log. This means every feature that depends on API-Sports (soccer compare, non-ESPN stats) silently returns nothing to the user. There is NO user-facing error message. This is a design choice for graceful degradation but it makes debugging extremely difficult — you can't tell whether the API returned no data or the key isn't set.
+**Recommendation:** Consider adding a user-facing warning when `is_available()` returns False and a command specifically needs API-Sports data.
+
+### NL routing still has gaps — ⚠️ Open
+Many natural language query patterns still don't match any keyword regex in `keywords.py` and fall through to GPT Layer 2 intent classification, which often misclassifies them as general "ask" intent instead of the correct sports intent. Only "who leads" was added in session 10. Other missing patterns likely include variations of stats queries, comparison requests, and other sports questions. The permanent fix is Phase 2 (GPT function-calling to replace keyword regex).
+
+### Multi-league soccer fallback rate limit risk — ⚠️ Open
+In `stats_api.py`, when a soccer player's league can't be resolved, the code cycles through up to 5 leagues (epl, mls, laliga, bundesliga, plus the original). Each attempt = search + stats = 2 API-Sports requests. With previous-season fallback doubling attempts, worst case is ~20 requests for a single failed player lookup against a 100/day free tier. Heavy soccer usage could exhaust the daily limit quickly.
+
+### ESPN has no stats for some sports/players — ⚠️ Known Limitation
+ESPN's `/athletes/{id}/stats` endpoint returns empty for some sports (notably NFL). Patrick Mahomes name resolution works (via GPT fuzzy match) but stats come back empty. This is an ESPN API limitation, not a bug.
 
 ---
 
@@ -219,15 +242,30 @@ The current ESPN scraping + keyword regex approach has been identified as fragil
 
 **🔨 BUILD PLAN (Session 9+):**
 
-**Phase 1 — API-Sports Integration (Session 9)**
-- [ ] Sign up for API-Sports free tier, get API key
-- [ ] Add `API_SPORTS_KEY` to Railway env vars
-- [ ] Create `plugins/sports/api_sports.py` — async client for API-Sports endpoints
-- [ ] Implement: player stats, team stats, league leaders, player comparisons
-- [ ] Wire up ESPN-first → API-Sports-fallback pattern
-- [ ] Test all stat queries via Telegram
+**Phase 1 — API-Sports Integration (Sessions 9-10) — COMPLETE**
+- [x] Sign up for API-Sports free tier, get API key
+- [x] Add `API_SPORTS_KEY` to Railway env vars (confirmed set April 6, 2026)
+- [x] Create `plugins/sports/api_sports.py` — async client for API-Sports endpoints (1060+ lines)
+- [x] Implement: player stats, team stats, league leaders, player comparisons
+- [x] Wire up ESPN-first → API-Sports-fallback pattern (in `stats_api.py`)
+- [x] Dynamic season computation (replaces hardcoded "2024")
+- [x] Previous-season fallback for all sports (current season → previous season retry)
+- [x] Multi-league soccer fallback (tries epl, mls, laliga, bundesliga if league unknown)
+- [ ] **NEEDS RE-TEST**: Soccer compare with API_SPORTS_KEY now set
+- [ ] **NEEDS RE-TEST**: Previous-season fallback end-to-end
+- [ ] **NEEDS RE-TEST**: "who leads the nba in blocks" now that keyword regex is fixed
 
-**Phase 2 — GPT Function-Calling NL (Session 9 or 10)**
+**Phase 1.5 — NL Routing & Name Resolution Fixes (Session 10) — COMPLETE**
+- [x] GPT fuzzy player name resolution (`gpt_resolve_player_name()` in `player_search.py`)
+- [x] `search_with_fuzzy_fallback()` — tries ESPN search first, falls back to GPT name resolution
+- [x] Added "who leads" keyword regex to `keywords.py` (was missing, caused NL queries to go to GPT fallback)
+- [x] Fixed GPT date awareness — injected `{today}` into system prompts so GPT knows current date
+- [x] Fixed `/scores` to show yesterday's results by default (not today's empty schedule)
+- [x] Fixed standings sort order (by wins descending)
+- [x] Added `_extract_stat_category()` and `_filter_leaders_category()` to filter leaders by specific stat
+- [ ] **STILL MISSING**: Many NL query patterns still don't match keyword regexes and fall to GPT Layer 2 which often misclassifies them. Full GPT function-calling (Phase 2) would solve this.
+
+**Phase 2 — GPT Function-Calling NL (Future session)**
 - [ ] Define function schemas for all sports actions (get_player_stats, get_team_stats, get_leaders, get_scores, get_standings, compare_players, etc.)
 - [ ] Replace keyword regex dispatch with GPT function-calling in `dispatch.py`
 - [ ] Keep Layer 1 keyword rules as a fast-path optimization for obvious queries (e.g., "NBA scores" doesn't need GPT)
@@ -260,6 +298,34 @@ The current ESPN scraping + keyword regex approach has been identified as fragil
 
 ---
 
+## AI Failures & Lessons (Session 10)
+
+This section documents specific failures made by the AI assistant during session 10. These are recorded so the next session (or a different AI) does not repeat them.
+
+**Failure 1: Repeatedly tried to use Terminal despite being told not to**
+The user explicitly stated multiple times not to use Terminal/bash for git operations, preferring Finder and GitHub Desktop. The AI repeatedly attempted `rm` bash commands to delete git lock files, was rejected, and kept trying different bash variations instead of immediately switching to Finder. This happened at least 3 times before the AI finally used Finder.
+**Lesson:** When the user says don't use a tool, switch to the alternative IMMEDIATELY. Don't try the same approach with slight variations.
+
+**Failure 2: Failed to identify API_SPORTS_KEY as already set in Railway**
+During the audit, the AI claimed `API_SPORTS_KEY` was "NOT in your Railway variables" based on looking at an alphabetically-sorted list and not scrolling to the bottom. The variable was there — it was just below the visible area. The AI then confidently told the user the key was missing when it wasn't. The user had already added it earlier (the "Variable overwrite detected" dialog proved it existed).
+**Lesson:** Don't make confident claims about what's NOT on a page if you can't see the full page. Say "I can't see the full list" instead of "it's not there."
+
+**Failure 3: Told the user to add API_SPORTS_KEY as if it were a new task, when it was already documented**
+The handoff document already listed `API_SPORTS_KEY` as a required variable (line 79 and line 224 checklist item). The AI treated this as a new discovery during the audit rather than checking the existing documentation first. This made the user feel like the AI wasn't reading its own project docs.
+**Lesson:** Always check existing documentation before presenting "findings." Cross-reference against what's already written.
+
+**Failure 4: Recklessly tried to delete git lock files without auditing first**
+When git commits failed due to lock files, the AI immediately tried to force-delete them. The user correctly pushed back: "why are you trying to delete the lock file? shouldn't that tell you there is something important in that file? I want you to do a full audit before moving forward." The lock files turned out to be safe to delete (0 bytes, stale), but the AI should have verified that BEFORE attempting deletion.
+**Lesson:** When something unexpected blocks you, investigate first, act second. Don't just force through blockers.
+
+**Failure 5: Git push from sandbox failed silently**
+The AI tried `git push origin main` from the sandbox which returned HTTP 403 from the proxy. Instead of recognizing that the sandbox doesn't have git push permissions, it kept trying.
+**Lesson:** The sandbox environment cannot push to GitHub. Always use GitHub Desktop for push operations.
+
+**General pattern:** The AI was too eager to act and not careful enough to verify. It rushed through fixes, made confident assertions about things it hadn't fully checked, and ignored the user's preferred workflow. Slow down, verify, then act.
+
+---
+
 ## Troubleshooting Guide
 
 ### `/checkauth` shows "One or more services failed"
@@ -280,6 +346,28 @@ The `adapters/google_tasks.py` module catches all API exceptions and returns emp
 
 ### Railway deploy not picking up changes
 Railway auto-deploys on push to `main`. If a push doesn't seem to take effect: wait 60-90 seconds (build + deploy), then send any command to Alfred. If still old behavior, check Railway dashboard for build errors.
+
+### Soccer compare / API-Sports features return nothing
+If `/compare` or any API-Sports dependent feature returns empty/no data:
+1. Check Railway → Variables → confirm `API_SPORTS_KEY` exists and has value `4326891bc76a7ead7932910d21c771f6`
+2. `API_SPORTS_KEY` is loaded at module import time (`os.environ.get`). If you add/change it, Railway must redeploy for it to take effect.
+3. Check API-Sports daily quota: the free tier is 100 requests/day per sport. If exhausted, all calls return errors until midnight UTC.
+4. The `is_available()` function in `api_sports.py` returns `bool(API_SPORTS_KEY)` — if the key is empty string, everything silently fails with no user-facing error.
+
+### Git lock files blocking commits
+If GitHub Desktop shows errors about lock files (HEAD.lock, index.lock, etc.):
+1. Navigate to the `.git/` folder in Finder (you may need to show hidden files: Cmd+Shift+.)
+2. Check if the lock files are 0 bytes — if so, they're stale from a failed operation and safe to delete
+3. If they have content, a git process may be running — check Activity Monitor for git processes first
+4. Delete the 0-byte lock files via Finder (select → Cmd+Delete)
+5. Do NOT use the sandbox/AI terminal to delete these — it doesn't have proper git permissions
+
+### Sandbox limitations
+The AI coding sandbox (Claude/Cowork) has specific limitations:
+- Cannot `git push` — always use GitHub Desktop for pushing
+- Cannot interact with Chrome browser (read-only tier) — use Chrome MCP extension tools or do it manually
+- Git operations in the sandbox can leave stale lock files — always clean up via Finder if commits fail
+- The sandbox filesystem is separate from your Mac — file paths in the sandbox don't exist on your computer
 
 ---
 
@@ -306,13 +394,18 @@ telegram-assistant/
 ├── features/               # One file per feature (22 features)
 │   └── todos.py            # entity key bug fixed here
 ├── plugins/                # ★ Auto-discovered plugin directory (Session 5)
-│   └── sports/             # ★ Sports Pack plugin (Session 5)
+│   ├── shared/             # ★ Shared modules used by multiple plugins
+│   │   ├── __init__.py
+│   │   └── player_search.py # Central player search + league resolution + GPT fuzzy matching
+│   └── sports/             # ★ Sports Pack plugin (Session 5, expanded Sessions 9-10)
 │       ├── __init__.py     # PLUGIN_META — auto-registered by plugin_loader
 │       ├── config.py       # League definitions, ESPN API URLs, settings
-│       ├── espn_api.py     # Async ESPN public API client (10 leagues)
-│       ├── commands.py     # /scores, /standings, /schedule, /sports, /bets
-│       ├── dispatch.py     # Intent → command routing
-│       ├── keywords.py     # Layer 1 fast regex rules for sports queries
+│       ├── espn_api.py     # Async ESPN public API client (10 leagues), /scores defaults to yesterday
+│       ├── api_sports.py   # ★ Async API-Sports client (1060+ lines) — player/team stats, search, seasons
+│       ├── stats_api.py    # ★ Unified stats layer — ESPN-first → API-Sports fallback, multi-league soccer
+│       ├── commands.py     # /scores, /standings, /schedule, /sports, /bets, /stats, /compare, /leaders
+│       ├── dispatch.py     # Intent → command routing, stat category filtering, fuzzy name fallback
+│       ├── keywords.py     # Layer 1 fast regex rules for sports queries (includes "who leads")
 │       ├── formatting.py   # Telegram HTML message formatters
 │       ├── data.py         # Bet tracking, settings persistence
 │       ├── jobs.py         # Game alerts, score update notifications
@@ -340,11 +433,42 @@ telegram-assistant/
 
 ---
 
-*Last updated: April 5, 2026*
+*Last updated: April 6, 2026*
 
 ---
 
 ## Session History (newest first)
+
+**Session 10 — Phase B Bug Fixes, Audit Failures, Handoff (April 6, 2026)**
+Continued from session 9. Fixed 7 bugs identified during testing, but the session was plagued by repeated AI mistakes (see "AI Failures & Lessons" below). The user lost confidence and requested a full handoff document.
+
+**Bugs targeted (7 total):**
+1. `/scores` showing today's empty schedule instead of yesterday's results — **FIXED, TESTED** (espn_api.py `yesterday=True` default)
+2. "who leads the league in blocks" returning all stats instead of just blocks — **FIXED in code** (`_extract_stat_category()` + `_filter_leaders_category()` in dispatch.py), but NL routing bypasses it (see #7)
+3. Standings out of order — **FIXED, TESTED** (espn_api.py sorts by wins descending)
+4. `/compare` not working for soccer players — **FIXED in code** (multi-league fallback in stats_api.py + previous-season fallback in api_sports.py), **root cause was missing API_SPORTS_KEY env var** which the AI failed to identify early
+5. GPT fallback thinks it's 2023 — **FIXED, TESTED** (`{today}` injected into system prompts via config.py and features/ask.py)
+6. Single-name player lookups and misspellings — **FIXED, TESTED** (GPT fuzzy resolution in player_search.py, confirmed "Mahommes" → "Patrick Mahomes")
+7. NL queries not routing to commands — **PARTIALLY FIXED** (added `\bwho\s+leads\b` regex to keywords.py, but many other patterns still fall to GPT Layer 2 which often misclassifies)
+
+**Code changes committed and deployed:**
+- `plugins/sports/api_sports.py` — Dynamic season computation + previous-season fallback (`_prev_season()`, `seasons_to_try` loops in `search_player()` and `get_player_stats()`)
+- `plugins/sports/keywords.py` — Added `\bwho\s+leads\b` regex pattern for leaders intent routing
+- `plugins/sports/espn_api.py` — `/scores` defaults to yesterday, standings sorted by wins
+- `plugins/sports/stats_api.py` — Multi-league soccer fallback
+- `plugins/sports/commands.py` — `/compare` uses `search_with_fuzzy_fallback`, `/stats` uses fuzzy fallback
+- `plugins/sports/dispatch.py` — `_extract_stat_category()`, `_filter_leaders_category()`, fuzzy fallback
+- `plugins/shared/player_search.py` — `gpt_resolve_player_name()`, `search_with_fuzzy_fallback()`, expanded stop words
+- `core/config.py` — `{today}` placeholder in MEMORY_SYSTEM_PREFIX
+- `features/ask.py` — Injects today's date into GPT system prompts
+
+**What still needs testing after this deploy:**
+- Soccer `/compare` (API_SPORTS_KEY now confirmed set)
+- "who leads the nba in blocks" (keyword regex now in place)
+- Previous-season fallback for any sport where current season returns empty
+
+**Session 9 — Phase A: API-Sports Client Build (April 5-6, 2026)**
+Built the full `api_sports.py` client (1060+ lines): player search, player stats, team stats for NBA/NFL/MLB/NHL/Soccer across API-Sports endpoints. Created `stats_api.py` unified layer with ESPN-first → API-Sports fallback pattern. Created `plugins/shared/player_search.py` for centralized player/league resolution. Initially used hardcoded "2024" season which was wrong — replaced with dynamic `_current_season()` computation in session 10.
 
 **Session 8 — Architecture Planning & All Decisions Finalized (April 5, 2026)**
 Continued from session 7. Completed testing of team stats and gamelog (both working after fixes). Discovered fundamental limitations of ESPN scraping + keyword NL approach. Researched 5 sports data APIs: API-Sports, BALLDONTLIE, MySportsFeeds, SportsDataIO, TheSportsDB. **All architecture decisions finalized:**
