@@ -32,11 +32,15 @@ logger = logging.getLogger(__name__)
 # Words to strip when extracting player/team names from NL queries
 _STOP_WORDS = {
     "what", "whats", "what's", "show", "get", "me", "the", "are", "is",
-    "how", "how's", "hows", "doing", "playing", "performing",
+    "how", "how's", "hows", "doing", "playing", "performing", "did",
     "stats", "stat", "statistics", "averages", "average", "numbers",
     "for", "of", "on", "about", "a", "an", "his", "her", "their",
     "game", "log", "gamelog", "recent", "games", "last", "roster",
-    "team", "record", "please", "can", "you", "tell", "give",
+    "team", "record", "please", "can", "you", "tell", "give", "look",
+    "up", "check", "find", "search", "player", "players",
+    "this", "that", "season", "year", "today", "tonight", "currently",
+    "current", "right", "now", "so", "far", "in", "at", "with", "been",
+    "has", "have", "had", "do", "does", "not", "just", "like",
 }
 
 
