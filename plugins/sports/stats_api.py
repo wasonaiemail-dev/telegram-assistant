@@ -244,16 +244,27 @@ async def get_player_stats(
         # Fallback 2: API-Sports (if configured)
         # We need to find the league slug from sport/league to use API-Sports
         league_slug = _find_league_slug(sport, league)
-        if league_slug and api_sports.is_available() and api_sports.has_player_stats(league_slug):
-            logger.info(f"ESPN failed, trying API-Sports for player stats (league={league_slug})")
-            # We need the API-Sports player ID — search by name
-            if player_name:
-                api_players = await api_sports.search_player(player_name, league_slug)
+        if api_sports.is_available() and player_name:
+            # Build list of leagues to try: resolved league first, then other soccer leagues
+            leagues_to_try = []
+            if league_slug and api_sports.has_player_stats(league_slug):
+                leagues_to_try.append(league_slug)
+
+            # For soccer, also try other leagues if first one fails
+            # (player may have transferred or ESPN returned wrong league)
+            if sport == "soccer":
+                for fallback_slug in ["epl", "mls", "laliga", "bundesliga"]:
+                    if fallback_slug not in leagues_to_try and api_sports.has_player_stats(fallback_slug):
+                        leagues_to_try.append(fallback_slug)
+
+            for try_slug in leagues_to_try:
+                logger.info(f"ESPN failed, trying API-Sports for player stats (league={try_slug})")
+                api_players = await api_sports.search_player(player_name, try_slug)
                 if api_players:
                     api_player_id = api_players[0]["id"]
-                    api_result = await api_sports.get_player_stats(api_player_id, league_slug)
+                    api_result = await api_sports.get_player_stats(api_player_id, try_slug)
                     if api_result:
-                        logger.info(f"Got player stats from API-Sports fallback")
+                        logger.info(f"Got player stats from API-Sports fallback (league={try_slug})")
                         return api_result
 
         return None

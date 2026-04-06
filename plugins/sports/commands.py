@@ -23,6 +23,7 @@ from plugins.shared.player_search import (
     map_league_name_to_slug,
     search_and_resolve_player,
     search_and_resolve_players,
+    search_with_fuzzy_fallback,
 )
 
 logger = logging.getLogger(__name__)
@@ -584,13 +585,25 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         await update.message.reply_text("🔍 Searching for player...", parse_mode="HTML")
 
+        # Try direct search first, then fuzzy GPT fallback
         results, slug, info = await search_and_resolve_players(remaining)
+
         if not results:
-            await update.message.reply_text(
-                f"❌ No players found matching: <b>{remaining}</b>",
-                parse_mode="HTML"
-            )
-            return
+            # Fuzzy fallback — GPT resolves nickname/misspelling
+            player, slug, info, resolved_name = await search_with_fuzzy_fallback(remaining)
+            if player:
+                if resolved_name:
+                    await update.message.reply_text(
+                        f"💡 Showing results for <b>{resolved_name}</b>",
+                        parse_mode="HTML",
+                    )
+                results = [player]
+            else:
+                await update.message.reply_text(
+                    f"❌ No players found matching: <b>{remaining}</b>",
+                    parse_mode="HTML"
+                )
+                return
 
         if len(results) == 1:
             player = results[0]
@@ -636,13 +649,24 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         await update.message.reply_text("🔍 Searching for player...", parse_mode="HTML")
 
+        # Try direct search first, then fuzzy GPT fallback
         results, slug, info = await search_and_resolve_players(remaining)
+
         if not results:
-            await update.message.reply_text(
-                f"❌ No players found matching: <b>{remaining}</b>",
-                parse_mode="HTML"
-            )
-            return
+            player, slug, info, resolved_name = await search_with_fuzzy_fallback(remaining)
+            if player:
+                if resolved_name:
+                    await update.message.reply_text(
+                        f"💡 Showing results for <b>{resolved_name}</b>",
+                        parse_mode="HTML",
+                    )
+                results = [player]
+            else:
+                await update.message.reply_text(
+                    f"❌ No players found matching: <b>{remaining}</b>",
+                    parse_mode="HTML"
+                )
+                return
 
         if len(results) == 1:
             player = results[0]
@@ -954,19 +978,31 @@ async def cmd_compare(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode="HTML"
     )
 
-    # Search both players in parallel
+    # Search both players in parallel (with GPT fuzzy fallback)
     import asyncio
     results = await asyncio.gather(
-        search_and_resolve_player(name1),
-        search_and_resolve_player(name2),
+        search_with_fuzzy_fallback(name1),
+        search_with_fuzzy_fallback(name2),
         return_exceptions=True,
     )
 
-    r1 = results[0] if not isinstance(results[0], Exception) else (None, None, None)
-    r2 = results[1] if not isinstance(results[1], Exception) else (None, None, None)
+    r1 = results[0] if not isinstance(results[0], Exception) else (None, None, None, None)
+    r2 = results[1] if not isinstance(results[1], Exception) else (None, None, None, None)
 
-    player1, slug1, info1 = r1
-    player2, slug2, info2 = r2
+    player1, slug1, info1, resolved1 = r1
+    player2, slug2, info2, resolved2 = r2
+
+    # Let user know if names were fuzzy-resolved
+    resolved_msgs = []
+    if resolved1:
+        resolved_msgs.append(f"  {name1} → <b>{resolved1}</b>")
+    if resolved2:
+        resolved_msgs.append(f"  {name2} → <b>{resolved2}</b>")
+    if resolved_msgs:
+        await update.message.reply_text(
+            "💡 Resolved names:\n" + "\n".join(resolved_msgs),
+            parse_mode="HTML",
+        )
 
     if not player1:
         await update.message.reply_text(

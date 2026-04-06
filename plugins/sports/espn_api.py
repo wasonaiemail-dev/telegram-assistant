@@ -57,18 +57,21 @@ async def _fetch_json(url: str) -> Optional[Dict[str, Any]]:
 # SCORES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def get_scores(league_slug: str) -> Optional[Dict[str, Any]]:
+async def get_scores(league_slug: str, yesterday: bool = True) -> Optional[Dict[str, Any]]:
     """
-    Get current and recent scores for a league.
+    Get scores for a league. Defaults to yesterday's completed games.
 
     Args:
         league_slug: One of "nfl", "nba", "mlb", "nhl", "ncaaf", "ncaab",
                      "epl", "mls", "bundesliga", "laliga"
+        yesterday: If True (default), fetch yesterday's scores. If False,
+                   fetch today's games (schedule/live).
 
     Returns:
         dict with keys:
             "games": List of game objects with home, away, status, score
             "league": League name and emoji
+            "date_label": "Yesterday" or "Today"
         or None if API fails
     """
     league_info = LEAGUES.get(league_slug.lower())
@@ -76,7 +79,19 @@ async def get_scores(league_slug: str) -> Optional[Dict[str, Any]]:
         logger.warning(f"Unknown league: {league_slug}")
         return None
 
-    url = get_scoreboard_url(league_info["sport"], league_info["league"])
+    base_url = get_scoreboard_url(league_info["sport"], league_info["league"])
+
+    # ESPN scoreboard supports ?dates=YYYYMMDD
+    if yesterday:
+        target = datetime.now(timezone.utc) - timedelta(days=1)
+        date_label = "Yesterday"
+    else:
+        target = datetime.now(timezone.utc)
+        date_label = "Today"
+
+    date_str = target.strftime("%Y%m%d")
+    url = f"{base_url}?dates={date_str}"
+    logger.info(f"Fetching scores from: {url}")
     data = await _fetch_json(url)
 
     if not data:
@@ -113,6 +128,7 @@ async def get_scores(league_slug: str) -> Optional[Dict[str, Any]]:
         "games": games,
         "league": league_info["name"],
         "emoji": league_info["emoji"],
+        "date_label": date_label,
     }
 
 
@@ -181,6 +197,14 @@ async def get_standings(league_slug: str) -> Optional[Dict[str, Any]]:
                 })
             except (KeyError, TypeError):
                 continue
+
+        # Sort by wins descending (ESPN sometimes returns unsorted data)
+        def _sort_key(t):
+            try:
+                return -int(t.get("wins", "0"))
+            except (ValueError, TypeError):
+                return 0
+        teams.sort(key=_sort_key)
         return teams
 
     # Try Format A: data.children[]

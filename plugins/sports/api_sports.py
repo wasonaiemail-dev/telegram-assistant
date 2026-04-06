@@ -37,21 +37,60 @@ SPORT_BASES = {
 }
 
 # Map our league slugs to API-Sports league IDs
-# These are required parameters for most API-Sports endpoints
+# These are required parameters for most API-Sports endpoints.
+# Seasons are computed dynamically so they stay correct across years.
+from datetime import datetime as _dt
+
+def _current_season() -> dict:
+    """Compute current season values based on today's date."""
+    now = _dt.now()
+    year = now.year
+
+    # NBA/NHL: season spans Oct-Jun, labeled as "YYYY-YYYY+1"
+    # If before October, we're in the season that started last year
+    nba_start = year if now.month >= 10 else year - 1
+    nba_season = f"{nba_start}-{nba_start + 1}"
+
+    # NFL: season spans Sep-Feb, labeled by start year
+    nfl_season = str(year if now.month >= 9 else year - 1)
+
+    # MLB: season spans Mar-Oct, labeled by year
+    mlb_season = str(year if now.month >= 3 else year - 1)
+
+    # NHL: same pattern as NBA
+    nhl_season = str(nba_start)
+
+    # European soccer: season spans Aug-May, labeled by start year
+    soccer_eu_season = str(year if now.month >= 8 else year - 1)
+
+    # MLS: season spans Feb-Dec, labeled by year
+    mls_season = str(year if now.month >= 2 else year - 1)
+
+    return {
+        "nba": nba_season,
+        "nfl": nfl_season,
+        "mlb": mlb_season,
+        "nhl": nhl_season,
+        "soccer_eu": soccer_eu_season,
+        "mls": mls_season,
+    }
+
+_seasons = _current_season()
+
 LEAGUE_IDS = {
     # NBA
-    "nba":        {"base": "nba",    "league_id": 12,   "season": "2024-2025"},
+    "nba":        {"base": "nba",    "league_id": 12,   "season": _seasons["nba"]},
     # NFL
-    "nfl":        {"base": "nfl",    "league_id": 1,    "season": "2024"},
+    "nfl":        {"base": "nfl",    "league_id": 1,    "season": _seasons["nfl"]},
     # MLB
-    "mlb":        {"base": "mlb",    "league_id": 1,    "season": "2024"},
+    "mlb":        {"base": "mlb",    "league_id": 1,    "season": _seasons["mlb"]},
     # NHL
-    "nhl":        {"base": "nhl",    "league_id": 57,   "season": "2024"},
+    "nhl":        {"base": "nhl",    "league_id": 57,   "season": _seasons["nhl"]},
     # Soccer leagues
-    "epl":        {"base": "soccer", "league_id": 39,   "season": "2024"},
-    "mls":        {"base": "soccer", "league_id": 253,  "season": "2024"},
-    "bundesliga": {"base": "soccer", "league_id": 78,   "season": "2024"},
-    "laliga":     {"base": "soccer", "league_id": 140,  "season": "2024"},
+    "epl":        {"base": "soccer", "league_id": 39,   "season": _seasons["soccer_eu"]},
+    "mls":        {"base": "soccer", "league_id": 253,  "season": _seasons["mls"]},
+    "bundesliga": {"base": "soccer", "league_id": 78,   "season": _seasons["soccer_eu"]},
+    "laliga":     {"base": "soccer", "league_id": 140,  "season": _seasons["soccer_eu"]},
 }
 
 # Which sports support player-level endpoints

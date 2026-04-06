@@ -225,14 +225,19 @@ async def handle_ask(
 
     # ── Memory context ────────────────────────────────────────────────────────
     memory_block = get_context_for_message(text)
+    from datetime import date as _date
+    today_str = _date.today().strftime("%B %d, %Y")
+
     if memory_block:
         system_content = MEMORY_SYSTEM_PREFIX.format(
             bot_name=BOT_NAME,
             memory_block=memory_block,
+            today=today_str,
         )
     else:
         system_content = (
             f"You are {BOT_NAME}, a personal assistant. "
+            f"Today's date is {today_str}. "
             "Be concise, helpful, and direct."
         )
 

@@ -11,6 +11,7 @@ Usage from any plugin:
         resolve_player_league,
         map_league_name_to_slug,
         extract_name_from_query,
+        gpt_resolve_player_name,
     )
 
     # Full pipeline: search + resolve in one call
@@ -217,18 +218,40 @@ async def search_and_resolve_players(
 
 # Words to strip when extracting player/team names from natural language
 _STOP_WORDS = {
+    # Question words / grammar
     "what", "whats", "what's", "show", "get", "me", "the", "are", "is",
-    "how", "how's", "hows", "doing", "playing", "performing", "did",
-    "stats", "stat", "statistics", "averages", "average", "numbers",
-    "for", "of", "on", "about", "a", "an", "his", "her", "their",
-    "game", "log", "gamelog", "recent", "games", "last", "roster",
-    "team", "record", "please", "can", "you", "tell", "give", "look",
-    "up", "check", "find", "search", "player", "players",
-    "this", "that", "season", "year", "today", "tonight", "currently",
-    "current", "right", "now", "so", "far", "in", "at", "with", "been",
-    "has", "have", "had", "do", "does", "not", "just", "like",
-    "leaders", "leader", "leading", "top", "best", "compare", "vs",
-    "versus", "or", "better", "worse", "than",
+    "how", "how's", "hows", "who", "which", "where", "when", "why",
+    "doing", "playing", "performing", "did", "was", "were",
+    "for", "of", "on", "about", "a", "an", "his", "her", "their", "its",
+    "this", "that", "these", "those", "it", "they", "he", "she", "we",
+    "please", "can", "you", "tell", "give", "look", "would", "could", "should",
+    "up", "check", "find", "search", "if", "and", "but", "to", "from",
+    "has", "have", "had", "do", "does", "not", "just", "like", "been",
+    "so", "far", "in", "at", "with", "by", "as", "or", "also",
+
+    # Stats / data terms
+    "stats", "stat", "statistics", "averages", "average", "averaged",
+    "numbers", "number", "total", "totals", "career", "per",
+
+    # Sports-specific stat terms
+    "points", "rebounds", "assists", "steals", "blocks", "turnovers",
+    "goals", "saves", "tackles", "sacks", "touchdowns", "yards",
+    "home", "runs", "batting", "era", "strikeouts", "hits",
+    "ppg", "rpg", "apg", "spg", "bpg",
+    "scoring", "rebounding", "blocking", "passing", "rushing", "receiving",
+
+    # Time / quantity modifiers
+    "game", "log", "gamelog", "recent", "games", "last", "past",
+    "season", "year", "today", "tonight", "currently", "current",
+    "right", "now", "over", "many", "much", "often", "frequently",
+
+    # Ranking / comparison terms
+    "leaders", "leader", "leading", "top", "best", "worst",
+    "compare", "vs", "versus", "better", "worse", "than",
+    "highest", "lowest", "most", "least", "first", "second",
+
+    # Entity terms
+    "player", "players", "team", "roster", "record",
 }
 
 
@@ -269,3 +292,107 @@ def extract_name_from_query(query: str) -> str:
         name_parts.append(w.strip("?!.,"))
 
     return " ".join(name_parts).strip()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GPT-POWERED FUZZY PLAYER NAME RESOLVER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def gpt_resolve_player_name(query: str) -> Optional[str]:
+    """
+    Use GPT to resolve a partial name, single name, or misspelling
+    into the most likely full player name.
+
+    Examples:
+        "wemby"        → "Victor Wembanyama"
+        "Bron"         → "LeBron James"
+        "Mahommes"     → "Patrick Mahomes"
+        "Giannis"      → "Giannis Antetokounmpo"
+
+    Returns:
+        The full player name as a string, or None if GPT can't determine one.
+    """
+    from core.config import OPENAI_API_KEY, GPT_CHAT_MODEL
+
+    if not query or not query.strip():
+        return None
+
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+        resp = await client.chat.completions.create(
+            model=GPT_CHAT_MODEL,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"The user searched for the athlete \"{query}\".\n"
+                    "This might be a nickname, single name, abbreviation, or misspelling.\n"
+                    "Who is the most likely professional athlete they mean?\n\n"
+                    "Reply with ONLY the athlete's full name (first and last), "
+                    "nothing else. If you truly cannot determine who they mean, "
+                    "reply with exactly: UNKNOWN"
+                ),
+            }],
+            max_tokens=30,
+            temperature=0,
+            timeout=8,
+        )
+        answer = resp.choices[0].message.content.strip()
+
+        # If GPT couldn't figure it out
+        if answer.upper() == "UNKNOWN" or len(answer) > 60:
+            return None
+
+        # Basic sanity: should contain at least 2 words for a full name
+        # (but allow single-word names like "Pelé" or "Neymar")
+        if not answer:
+            return None
+
+        logger.info(f"GPT resolved player name: '{query}' → '{answer}'")
+        return answer
+
+    except Exception as e:
+        logger.warning(f"gpt_resolve_player_name error: {e}")
+        return None
+
+
+async def search_with_fuzzy_fallback(
+    name: str,
+    default_league: str = "nba",
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Search for a player with GPT fuzzy-match fallback.
+
+    First tries a direct ESPN search. If that returns no results,
+    asks GPT to resolve the name, then searches again.
+
+    Args:
+        name: Player name (possibly partial, misspelled, or nickname)
+        default_league: Fallback league slug
+
+    Returns:
+        (player, league_slug, league_info, resolved_name)
+        resolved_name is the GPT-corrected name if fuzzy matching was used,
+        or None if the original name worked directly.
+        Returns (None, None, None, None) if nothing found.
+    """
+    if not name or not name.strip():
+        return None, None, None, None
+
+    # 1. Try direct search first
+    player, slug, info = await search_and_resolve_player(name, default_league)
+    if player:
+        return player, slug, info, None
+
+    # 2. Ask GPT to resolve the name
+    resolved = await gpt_resolve_player_name(name)
+    if not resolved:
+        return None, None, None, None
+
+    # 3. Search again with the resolved name
+    player, slug, info = await search_and_resolve_player(resolved, default_league)
+    if player:
+        return player, slug, info, resolved
+
+    return None, None, None, None

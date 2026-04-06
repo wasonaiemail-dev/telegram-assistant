@@ -30,6 +30,7 @@ from plugins.shared.player_search import (
     resolve_player_league,
     get_player_league_info,
     extract_name_from_query,
+    search_with_fuzzy_fallback,
 )
 
 logger = logging.getLogger(__name__)
@@ -220,33 +221,37 @@ async def handle_sports_intent(
                 )
                 return
             await update.message.reply_text(f"🔍 Looking up {player_name}...")
-            results = await stats_api.search_player(player_name)
-            if not results:
+
+            # Use fuzzy fallback: direct ESPN search → GPT name resolve → retry
+            player, league_slug, league_info, resolved_name = await search_with_fuzzy_fallback(player_name)
+
+            if not player:
                 await update.message.reply_text(
                     f"❌ No players found matching: <b>{player_name}</b>",
                     parse_mode="HTML",
                 )
                 return
-            if len(results) == 1:
-                player = results[0]
-                league_slug, league_info = get_player_league_info(player)
-                sport = league_info["sport"] if league_info else "basketball"
-                league = league_info["league"] if league_info else "nba"
-                player_stats = await stats_api.get_player_stats(
-                    player["id"], sport, league,
-                    player_name=player.get("name", player_name),
+
+            if resolved_name:
+                await update.message.reply_text(
+                    f"💡 Showing results for <b>{resolved_name}</b>",
+                    parse_mode="HTML",
                 )
-                if player_stats:
-                    msg = formatting.format_player_stats(player_stats)
-                    await update.message.reply_text(msg, parse_mode="HTML")
-                else:
-                    await update.message.reply_text(
-                        f"❌ Could not fetch stats for {player.get('name', player_name)}",
-                        parse_mode="HTML",
-                    )
-            else:
-                msg = formatting.format_player_search_results(results[:5])
+
+            sport = league_info["sport"] if league_info else "basketball"
+            league = league_info["league"] if league_info else "nba"
+            player_stats = await stats_api.get_player_stats(
+                player["id"], sport, league,
+                player_name=player.get("name", player_name),
+            )
+            if player_stats:
+                msg = formatting.format_player_stats(player_stats)
                 await update.message.reply_text(msg, parse_mode="HTML")
+            else:
+                await update.message.reply_text(
+                    f"❌ Could not fetch stats for {player.get('name', player_name)}",
+                    parse_mode="HTML",
+                )
 
         elif intent == "sports_player_gamelog":
             query = entities.get("query", intent_result.raw)
@@ -258,15 +263,23 @@ async def handle_sports_intent(
                 )
                 return
             await update.message.reply_text(f"🔍 Looking up {player_name}...")
-            results = await stats_api.search_player(player_name)
-            if not results:
+
+            # Use fuzzy fallback: direct ESPN search → GPT name resolve → retry
+            player, league_slug, league_info, resolved_name = await search_with_fuzzy_fallback(player_name)
+
+            if not player:
                 await update.message.reply_text(
                     f"❌ No players found matching: <b>{player_name}</b>",
                     parse_mode="HTML",
                 )
                 return
-            player = results[0]
-            league_slug, league_info = get_player_league_info(player)
+
+            if resolved_name:
+                await update.message.reply_text(
+                    f"💡 Showing results for <b>{resolved_name}</b>",
+                    parse_mode="HTML",
+                )
+
             sport = league_info["sport"] if league_info else "basketball"
             league = league_info["league"] if league_info else "nba"
             gamelog = await stats_api.get_player_gamelog(
@@ -312,11 +325,20 @@ async def handle_sports_intent(
                 await _show_league_menu(update, "leaders")
                 return
 
+            # Extract specific stat category from query (e.g., "blocks", "assists")
+            stat_filter = entities.get("stat_category", "")
+            if not stat_filter:
+                stat_filter = _extract_stat_category(query)
+
             league_info = sports_config.get_league_info(league_slug)
             emoji = league_info.get("emoji", "🏆")
-            await update.message.reply_text(f"🔍 Fetching {league_info['name']} leaders...")
+            cat_label = f" {stat_filter}" if stat_filter else ""
+            await update.message.reply_text(f"🔍 Fetching {league_info['name']}{cat_label} leaders...")
             leaders = await stats_api.get_league_leaders(league_slug)
             if leaders:
+                # Filter to specific category if requested
+                if stat_filter:
+                    leaders = _filter_leaders_category(leaders, stat_filter)
                 msg = formatting.format_leaders(leaders, emoji)
                 await update.message.reply_text(msg, parse_mode="HTML")
             else:
@@ -364,3 +386,88 @@ async def handle_sports_intent(
             "/scores, /standings, /schedule, or /bets",
             parse_mode="HTML",
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LEADERS CATEGORY FILTERING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Map of common stat terms → category name patterns (case-insensitive)
+_STAT_KEYWORDS = {
+    "points": ["points", "scoring", "ppg"],
+    "assists": ["assists", "apg"],
+    "rebounds": ["rebounds", "rpg", "rebounding"],
+    "steals": ["steals", "spg"],
+    "blocks": ["blocks", "bpg", "blocking"],
+    "goals": ["goals", "top scorers", "scoring"],
+    "field goal": ["field goal"],
+    "three point": ["three point", "3-point", "3pt", "threes"],
+    "passing": ["passing"],
+    "rushing": ["rushing"],
+    "receiving": ["receiving"],
+    "touchdowns": ["touchdowns", "tds"],
+    "wins": ["wins"],
+    "era": ["era", "earned run"],
+    "home runs": ["home runs", "hr"],
+    "batting": ["batting", "average"],
+    "penalty": ["penalty", "pim"],
+    "plus/minus": ["plus/minus", "+/-"],
+    "save": ["saves", "save percentage"],
+}
+
+
+def _extract_stat_category(query: str) -> str:
+    """
+    Extract a stat category keyword from a natural language query.
+
+    Examples:
+        "who leads the nba in blocks" → "blocks"
+        "who has the most assists in the nba" → "assists"
+        "nba points leader" → "points"
+
+    Returns empty string if no specific stat found.
+    """
+    query_lower = query.lower()
+    for stat, keywords in _STAT_KEYWORDS.items():
+        for kw in keywords:
+            if kw in query_lower:
+                return stat
+    return ""
+
+
+def _filter_leaders_category(leaders: dict, stat_filter: str) -> dict:
+    """
+    Filter leaders data to only include the matching stat category.
+
+    Performs fuzzy matching of stat_filter against category names.
+    If no match found, returns original (unfiltered) data.
+    """
+    if not leaders or not stat_filter:
+        return leaders
+
+    stat_lower = stat_filter.lower()
+    categories = leaders.get("categories", [])
+
+    # Find matching categories
+    matched = []
+    for cat in categories:
+        cat_name = cat.get("name", "").lower()
+        # Check if the stat keyword appears in the category name
+        if stat_lower in cat_name:
+            matched.append(cat)
+            continue
+        # Also check reverse (category name in stat keyword)
+        if cat_name in stat_lower:
+            matched.append(cat)
+            continue
+        # Check our keyword map for broader matching
+        for kw_list in _STAT_KEYWORDS.get(stat_lower, []):
+            if kw_list in cat_name:
+                matched.append(cat)
+                break
+
+    if matched:
+        return {**leaders, "categories": matched}
+
+    # No match found — return all categories
+    return leaders

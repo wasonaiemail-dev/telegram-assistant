@@ -433,9 +433,9 @@ MEMORY_SETUP_QUESTIONS = {
 
 # System message prefix injected with memory context into every /ask call
 MEMORY_SYSTEM_PREFIX = (
-    "You are {bot_name}, a personal assistant. You know the following facts "
-    "about the user:\n\n{memory_block}\n\nUse this context when it is "
-    "relevant, but do not repeat facts back unless asked."
+    "You are {bot_name}, a personal assistant. Today's date is {today}. "
+    "You know the following facts about the user:\n\n{memory_block}\n\n"
+    "Use this context when it is relevant, but do not repeat facts back unless asked."
 )
 
 # Setup wizard state file
