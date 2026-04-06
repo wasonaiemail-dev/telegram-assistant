@@ -335,6 +335,10 @@ def build_rules() -> List[Tuple[object, Callable]]:
         re.compile(r"\b(?:mvp|scoring)\s+(?:race|leader|title)\b", re.I),
         _leaders_handler,
     ))
+    rules.append((
+        re.compile(r"\bwho\s+leads\b", re.I),
+        _leaders_handler,
+    ))
 
     # ── COMPARE ──────────────────────────────────────────────────────────
 

@@ -93,6 +93,20 @@ LEAGUE_IDS = {
     "laliga":     {"base": "soccer", "league_id": 140,  "season": _seasons["soccer_eu"]},
 }
 
+def _prev_season(season_str: str) -> str:
+    """Compute the previous season string.
+
+    Handles both formats:
+        "2025-2026" → "2024-2025"   (NBA style)
+        "2026"      → "2025"        (everything else)
+    """
+    if "-" in season_str:
+        parts = season_str.split("-")
+        start = int(parts[0]) - 1
+        return f"{start}-{start + 1}"
+    return str(int(season_str) - 1)
+
+
 # Which sports support player-level endpoints
 # Hockey and Baseball only have team-level stats on API-Sports
 PLAYER_SPORTS = {"nba", "nfl", "soccer"}
@@ -211,67 +225,82 @@ async def search_player(
     params = {"search": name.strip()}
 
     # Add season for context
-    if config.get("season"):
-        params["season"] = config["season"]
+    current_season = config.get("season", "")
+    if current_season:
+        params["season"] = current_season
 
     # Soccer requires league_id for player search
     if base == "soccer":
         params["league"] = config["league_id"]
 
-    data = await _api_fetch(base, "/players", params)
-    if not data:
-        return None
+    # Try current season first, then previous season as fallback
+    seasons_to_try = [current_season]
+    if current_season:
+        seasons_to_try.append(_prev_season(current_season))
 
-    results = []
-    for player in data.get("response", []):
-        try:
-            player_info = player if base != "nba" else player
+    for season in seasons_to_try:
+        if season:
+            params["season"] = season
 
-            # NBA format: {id, firstname, lastname, ...}
-            # NFL format: {id, name, ...}
-            # Soccer format: {player: {id, name, ...}, statistics: [...]}
-            if base == "soccer":
-                p = player.get("player", {})
-                stats_list = player.get("statistics", [])
-                team_name = ""
-                position = ""
-                if stats_list:
-                    team_name = stats_list[0].get("team", {}).get("name", "")
-                    games = stats_list[0].get("games", {})
-                    position = games.get("position", "") if isinstance(games, dict) else ""
-                results.append({
-                    "id": str(p.get("id", "")),
-                    "name": p.get("name", ""),
-                    "team": team_name,
-                    "position": position,
-                    "source": "api_sports",
-                })
-            elif base == "nba":
-                first = player_info.get("firstname", "")
-                last = player_info.get("lastname", "")
-                full_name = f"{first} {last}".strip()
-                team = player_info.get("team", {})
-                results.append({
-                    "id": str(player_info.get("id", "")),
-                    "name": full_name or player_info.get("name", ""),
-                    "team": team.get("name", "") if isinstance(team, dict) else "",
-                    "position": player_info.get("pos", ""),
-                    "source": "api_sports",
-                })
-            elif base == "nfl":
-                results.append({
-                    "id": str(player_info.get("id", "")),
-                    "name": player_info.get("name", ""),
-                    "team": player_info.get("team", {}).get("name", "") if isinstance(player_info.get("team"), dict) else "",
-                    "position": player_info.get("position", ""),
-                    "source": "api_sports",
-                })
-
-        except (KeyError, TypeError) as e:
-            logger.debug(f"Error parsing API-Sports player result: {e}")
+        data = await _api_fetch(base, "/players", params)
+        if not data:
             continue
 
-    return results if results else None
+        results = []
+        for player in data.get("response", []):
+            try:
+                player_info = player if base != "nba" else player
+
+                # NBA format: {id, firstname, lastname, ...}
+                # NFL format: {id, name, ...}
+                # Soccer format: {player: {id, name, ...}, statistics: [...]}
+                if base == "soccer":
+                    p = player.get("player", {})
+                    stats_list = player.get("statistics", [])
+                    team_name = ""
+                    position = ""
+                    if stats_list:
+                        team_name = stats_list[0].get("team", {}).get("name", "")
+                        games = stats_list[0].get("games", {})
+                        position = games.get("position", "") if isinstance(games, dict) else ""
+                    results.append({
+                        "id": str(p.get("id", "")),
+                        "name": p.get("name", ""),
+                        "team": team_name,
+                        "position": position,
+                        "source": "api_sports",
+                    })
+                elif base == "nba":
+                    first = player_info.get("firstname", "")
+                    last = player_info.get("lastname", "")
+                    full_name = f"{first} {last}".strip()
+                    team = player_info.get("team", {})
+                    results.append({
+                        "id": str(player_info.get("id", "")),
+                        "name": full_name or player_info.get("name", ""),
+                        "team": team.get("name", "") if isinstance(team, dict) else "",
+                        "position": player_info.get("pos", ""),
+                        "source": "api_sports",
+                    })
+                elif base == "nfl":
+                    results.append({
+                        "id": str(player_info.get("id", "")),
+                        "name": player_info.get("name", ""),
+                        "team": player_info.get("team", {}).get("name", "") if isinstance(player_info.get("team"), dict) else "",
+                        "position": player_info.get("position", ""),
+                        "source": "api_sports",
+                    })
+
+            except (KeyError, TypeError) as e:
+                logger.debug(f"Error parsing API-Sports player result: {e}")
+                continue
+
+        if results:
+            if season != current_season:
+                logger.info(f"API-Sports: found player with previous season {season} (current {current_season} had no results)")
+            return results
+
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -302,22 +331,39 @@ async def get_player_stats(
     if base not in PLAYER_SPORTS:
         return None
 
+    current_season = config["season"]
+    seasons_to_try = [current_season, _prev_season(current_season)]
+
+    for season in seasons_to_try:
+        result = await _get_player_stats_for_season(base, player_id, season, config)
+        if result:
+            if season != current_season:
+                logger.info(f"API-Sports: got player stats with previous season {season} (current {current_season} had no data)")
+            return result
+
+    return None
+
+
+async def _get_player_stats_for_season(
+    base: str, player_id: str, season: str, config: dict,
+) -> Optional[Dict[str, Any]]:
+    """Fetch player stats for a specific season. Returns parsed result or None."""
     if base == "nba":
-        params = {"id": player_id, "season": config["season"]}
+        params = {"id": player_id, "season": season}
         data = await _api_fetch(base, "/players/statistics", params)
         if not data or not data.get("response"):
             return None
         return _parse_nba_player_stats(data["response"])
 
     elif base == "nfl":
-        params = {"season": config["season"]}
+        params = {"season": season}
         data = await _api_fetch(base, f"/players/{player_id}/statistics", params)
         if not data or not data.get("response"):
             return None
         return _parse_nfl_player_stats(data["response"])
 
     elif base == "soccer":
-        params = {"id": player_id, "season": config["season"]}
+        params = {"id": player_id, "season": season}
         data = await _api_fetch(base, "/players", params)
         if not data or not data.get("response"):
             return None
