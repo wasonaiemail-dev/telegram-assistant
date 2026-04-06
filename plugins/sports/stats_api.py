@@ -492,21 +492,32 @@ async def get_team_stats(
         return None
 
     try:
-        # Try endpoint 1: v3 web stats (most likely to have full stats)
-        url1 = f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/statistics?region=us&lang=en&contentorigin=espn"
+        # Try endpoint 1: v3 web /stats (matches player stats pattern)
+        url1 = f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/stats?region=us&lang=en&contentorigin=espn"
         logger.info(f"Fetching team stats from: {url1}")
         data = await _fetch_json(url1)
 
         if data:
-            logger.info(f"Got team stats data (v3), top-level keys: {list(data.keys())}")
+            logger.info(f"Got team stats data (v3 /stats), top-level keys: {list(data.keys())}")
             result = _parse_team_stats(data)
             if result and result.get("stats"):
                 return result
 
-        # Fallback to endpoint 2: v2 statistics
-        url2 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}/statistics"
-        logger.info(f"Trying v2 stats: {url2}")
+        # Try endpoint 2: v3 web /statistics
+        url2 = f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/statistics?region=us&lang=en&contentorigin=espn"
+        logger.info(f"Trying v3 /statistics: {url2}")
         data = await _fetch_json(url2)
+
+        if data:
+            logger.info(f"Got team stats data (v3 /statistics), top-level keys: {list(data.keys())}")
+            result = _parse_team_stats(data)
+            if result and result.get("stats"):
+                return result
+
+        # Fallback to endpoint 3: v2 statistics
+        url3 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}/statistics"
+        logger.info(f"Trying v2 stats: {url3}")
+        data = await _fetch_json(url3)
 
         if data:
             logger.info(f"Got team stats data (v2), top-level keys: {list(data.keys())}")
@@ -514,10 +525,10 @@ async def get_team_stats(
             if result and result.get("stats"):
                 return result
 
-        # Fallback to endpoint 3: general team info (at least has name/record)
-        url3 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}"
-        logger.info(f"Trying team overview: {url3}")
-        data = await _fetch_json(url3)
+        # Fallback to endpoint 4: general team info (at least has name/record)
+        url4 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}"
+        logger.info(f"Trying team overview: {url4}")
+        data = await _fetch_json(url4)
 
         if data:
             logger.info(f"Got team overview data, top-level keys: {list(data.keys())}")
@@ -530,6 +541,45 @@ async def get_team_stats(
     except Exception as e:
         logger.error(f"Error fetching team stats for {team_id}: {e}")
         return None
+
+
+async def debug_team_stats(
+    team_id: str, sport: str, league: str,
+) -> str:
+    """Debug: dump raw ESPN team stats response structure."""
+    import json
+    lines = []
+    endpoints = [
+        (f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/stats?region=us&lang=en&contentorigin=espn", "v3 /stats"),
+        (f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/statistics?region=us&lang=en&contentorigin=espn", "v3 /statistics"),
+        (f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}/statistics", "v2 /statistics"),
+        (f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}", "v2 overview"),
+    ]
+    for url, label in endpoints:
+        data = await _fetch_json(url)
+        if data:
+            lines.append(f"<b>{label}</b>: ✅")
+            lines.append(f"  keys: {list(data.keys())}")
+            # Check for categories/statistics
+            for k in ["categories", "statistics", "splits", "results", "team", "teams"]:
+                if k in data:
+                    val = data[k]
+                    if isinstance(val, list):
+                        lines.append(f"  {k}: list[{len(val)}]")
+                        if val and isinstance(val[0], dict):
+                            lines.append(f"    [0] keys: {list(val[0].keys())}")
+                            # Show labels/totals if present
+                            for sk in ["labels", "totals", "statistics", "stats", "displayNames"]:
+                                if sk in val[0]:
+                                    sv = val[0][sk]
+                                    if isinstance(sv, list):
+                                        lines.append(f"    [0].{sk}: list[{len(sv)}], first={sv[:3] if sv else '[]'}")
+                    elif isinstance(val, dict):
+                        lines.append(f"  {k}: dict keys={list(val.keys())[:10]}")
+        else:
+            lines.append(f"<b>{label}</b>: ❌ no data")
+        lines.append("")
+    return "\n".join(lines) if lines else "No data from any endpoint"
 
 
 def _parse_team_stats(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
