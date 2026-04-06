@@ -836,7 +836,8 @@ async def get_league_leaders(
 
     # ── NBA/NFL/MLB/NHL: Use ESPN leaders endpoint ───────────────────────
     try:
-        url = f"{ESPN_SITE}/sports/{sport}/{league}/leaders"
+        # ESPN leaders are on the web v3 API (not site v2)
+        url = f"https://site.web.api.espn.com/apis/site/v3/sports/{sport}/{league}/leaders"
         logger.info(f"Fetching leaders from ESPN: {url}")
         data = await _fetch_json(url)
 
@@ -845,13 +846,15 @@ async def get_league_leaders(
 
         result = {"league_name": league_info["name"], "categories": []}
 
-        # ESPN leaders format: {leaders: {categories: [{name, leaders: [{athlete, value}]}]}}
+        # ESPN v3 leaders format: {leaders: {categories: [{name, displayName, leaders: [{athlete, displayValue}]}]}}
         leaders_data = data.get("leaders", {})
         categories = leaders_data.get("categories", [])
 
         if not categories:
             # Alternate format: root-level categories
             categories = data.get("categories", [])
+
+        logger.info(f"ESPN leaders: found {len(categories)} categories")
 
         for cat in categories[:6]:  # Limit to 6 stat categories
             cat_name = cat.get("displayName", "") or cat.get("name", "")
