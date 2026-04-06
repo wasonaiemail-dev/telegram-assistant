@@ -492,24 +492,35 @@ async def get_team_stats(
         return None
 
     try:
-        # Try endpoint 1: statistics-specific
-        url1 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}/statistics"
+        # Try endpoint 1: v3 web stats (most likely to have full stats)
+        url1 = f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/statistics?region=us&lang=en&contentorigin=espn"
         logger.info(f"Fetching team stats from: {url1}")
         data = await _fetch_json(url1)
 
         if data:
-            logger.info(f"Got team stats data, top-level keys: {list(data.keys())}")
+            logger.info(f"Got team stats data (v3), top-level keys: {list(data.keys())}")
             result = _parse_team_stats(data)
-            if result:
+            if result and result.get("stats"):
                 return result
 
-        # Fallback to endpoint 2: general team info
-        url2 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}"
-        logger.info(f"Trying team fallback: {url2}")
+        # Fallback to endpoint 2: v2 statistics
+        url2 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}/statistics"
+        logger.info(f"Trying v2 stats: {url2}")
         data = await _fetch_json(url2)
 
         if data:
-            logger.info(f"Got team fallback data, top-level keys: {list(data.keys())}")
+            logger.info(f"Got team stats data (v2), top-level keys: {list(data.keys())}")
+            result = _parse_team_stats(data)
+            if result and result.get("stats"):
+                return result
+
+        # Fallback to endpoint 3: general team info (at least has name/record)
+        url3 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}"
+        logger.info(f"Trying team overview: {url3}")
+        data = await _fetch_json(url3)
+
+        if data:
+            logger.info(f"Got team overview data, top-level keys: {list(data.keys())}")
             result = _parse_team_stats(data)
             if result:
                 return result
