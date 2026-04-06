@@ -26,46 +26,17 @@ from plugins.sports.commands import (
     cmd_bets,
     _show_league_menu,
 )
+from plugins.shared.player_search import (
+    resolve_player_league,
+    get_player_league_info,
+    extract_name_from_query,
+)
 
 logger = logging.getLogger(__name__)
 
-# Words to strip when extracting player/team names from NL queries
-_STOP_WORDS = {
-    "what", "whats", "what's", "show", "get", "me", "the", "are", "is",
-    "how", "how's", "hows", "doing", "playing", "performing", "did",
-    "stats", "stat", "statistics", "averages", "average", "numbers",
-    "for", "of", "on", "about", "a", "an", "his", "her", "their",
-    "game", "log", "gamelog", "recent", "games", "last", "roster",
-    "team", "record", "please", "can", "you", "tell", "give", "look",
-    "up", "check", "find", "search", "player", "players",
-    "this", "that", "season", "year", "today", "tonight", "currently",
-    "current", "right", "now", "so", "far", "in", "at", "with", "been",
-    "has", "have", "had", "do", "does", "not", "just", "like",
-}
-
-
-def _extract_name_from_query(query: str) -> str:
-    """
-    Extract a likely player or team name from a natural language query.
-
-    Examples:
-      "what are LeBron's stats" -> "LeBron"
-      "show me stats for Patrick Mahomes" -> "Patrick Mahomes"
-      "how is Ohtani doing" -> "Ohtani"
-    """
-    # Remove possessives
-    cleaned = query.replace("'s", "").replace("'s", "")
-    words = cleaned.split()
-    # Filter out stop words, keeping capitalized words and unknown words
-    name_parts = []
-    for w in words:
-        w_lower = w.lower().strip("?!.,")
-        if w_lower in _STOP_WORDS:
-            continue
-        if w_lower.isdigit():
-            continue
-        name_parts.append(w.strip("?!.,"))
-    return " ".join(name_parts).strip()
+# _extract_name_from_query and _STOP_WORDS moved to plugins.shared.player_search
+# Local alias kept so existing references in this file still work
+_extract_name_from_query = extract_name_from_query
 
 
 async def handle_sports_intent(
@@ -241,8 +212,7 @@ async def handle_sports_intent(
 
         elif intent == "sports_player_stats":
             query = entities.get("query", intent_result.raw)
-            # Extract a likely player name from the query
-            player_name = _extract_name_from_query(query)
+            player_name = extract_name_from_query(query)
             if not player_name:
                 await update.message.reply_text(
                     "Who would you like stats for? Try: <code>LeBron stats</code>",
@@ -259,20 +229,7 @@ async def handle_sports_intent(
                 return
             if len(results) == 1:
                 player = results[0]
-                league_raw = player.get("league") or ""
-                from plugins.sports.commands import _map_league_name_to_slug
-                league_slug = _map_league_name_to_slug(league_raw) if league_raw else None
-                if not league_slug:
-                    sport_val = (player.get("sport") or "").lower()
-                    if "football" in sport_val:
-                        league_slug = "nfl"
-                    elif "baseball" in sport_val:
-                        league_slug = "mlb"
-                    elif "hockey" in sport_val:
-                        league_slug = "nhl"
-                    else:
-                        league_slug = "nba"
-                league_info = sports_config.get_league_info(league_slug)
+                league_slug, league_info = get_player_league_info(player)
                 sport = league_info["sport"] if league_info else "basketball"
                 league = league_info["league"] if league_info else "nba"
                 player_stats = await stats_api.get_player_stats(
@@ -293,7 +250,7 @@ async def handle_sports_intent(
 
         elif intent == "sports_player_gamelog":
             query = entities.get("query", intent_result.raw)
-            player_name = _extract_name_from_query(query)
+            player_name = extract_name_from_query(query)
             if not player_name:
                 await update.message.reply_text(
                     "Whose game log? Try: <code>LeBron game log</code>",
@@ -309,19 +266,7 @@ async def handle_sports_intent(
                 )
                 return
             player = results[0]
-            league_raw = player.get("league") or ""
-            league_slug = _map_league_name_to_slug(league_raw) if league_raw else None
-            if not league_slug:
-                sport_val = (player.get("sport") or "").lower()
-                if "football" in sport_val:
-                    league_slug = "nfl"
-                elif "baseball" in sport_val:
-                    league_slug = "mlb"
-                elif "hockey" in sport_val:
-                    league_slug = "nhl"
-                else:
-                    league_slug = "nba"
-            league_info = sports_config.get_league_info(league_slug)
+            league_slug, league_info = get_player_league_info(player)
             sport = league_info["sport"] if league_info else "basketball"
             league = league_info["league"] if league_info else "nba"
             gamelog = await stats_api.get_player_gamelog(

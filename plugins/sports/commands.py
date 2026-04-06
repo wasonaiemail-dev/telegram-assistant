@@ -17,6 +17,13 @@ from plugins.sports import data as sports_data
 from plugins.sports import betting
 from plugins.sports import charts
 from plugins.sports import stats_api
+from plugins.shared.player_search import (
+    resolve_player_league,
+    get_player_league_info,
+    map_league_name_to_slug,
+    search_and_resolve_player,
+    search_and_resolve_players,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -577,47 +584,27 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         await update.message.reply_text("🔍 Searching for player...", parse_mode="HTML")
 
-        search_results = await stats_api.search_player(remaining)
-        if not search_results:
+        results, slug, info = await search_and_resolve_players(remaining)
+        if not results:
             await update.message.reply_text(
                 f"❌ No players found matching: <b>{remaining}</b>",
                 parse_mode="HTML"
             )
             return
 
-        # If exactly one result, show stats directly
-        if len(search_results) == 1:
-            player = search_results[0]
-            athlete_id = player.get("id")
-            league = player.get("league") or ""
-
-            # Map ESPN league names to our league slugs, with fallback
-            league_slug = _map_league_name_to_slug(league) if league else None
-            if not league_slug:
-                # Try to infer from sport field or default to NBA
-                sport_val = (player.get("sport") or "").lower()
-                if "football" in sport_val:
-                    league_slug = "nfl"
-                elif "baseball" in sport_val:
-                    league_slug = "mlb"
-                elif "hockey" in sport_val:
-                    league_slug = "nhl"
-                else:
-                    league_slug = "nba"  # default fallback
-
-            # Get league info for sport/league values
-            league_info = sports_config.get_league_info(league_slug)
-            if not league_info:
+        if len(results) == 1:
+            player = results[0]
+            if not info:
                 await update.message.reply_text(
-                    f"❌ Unsupported league: {league}",
+                    f"❌ Unsupported league for {player.get('name', remaining)}",
                     parse_mode="HTML"
                 )
                 return
 
             player_stats = await stats_api.get_player_stats(
-                athlete_id,
-                league_info["sport"],
-                league_info["league"],
+                player.get("id"),
+                info["sport"],
+                info["league"],
                 player_name=player.get("name", remaining),
             )
 
@@ -631,8 +618,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
         else:
             # Show numbered list for user to pick
-            message = formatting.format_player_search_results(search_results[:5])
-            context.user_data["player_search_results"] = search_results
+            message = formatting.format_player_search_results(results[:5])
+            context.user_data["player_search_results"] = results
             context.user_data["last_action"] = "player_stats"
             await update.message.reply_text(message, parse_mode="HTML")
 
@@ -649,43 +636,27 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         await update.message.reply_text("🔍 Searching for player...", parse_mode="HTML")
 
-        search_results = await stats_api.search_player(remaining)
-        if not search_results:
+        results, slug, info = await search_and_resolve_players(remaining)
+        if not results:
             await update.message.reply_text(
                 f"❌ No players found matching: <b>{remaining}</b>",
                 parse_mode="HTML"
             )
             return
 
-        if len(search_results) == 1:
-            player = search_results[0]
-            athlete_id = player.get("id")
-            league = player.get("league") or ""
-
-            league_slug = _map_league_name_to_slug(league) if league else None
-            if not league_slug:
-                sport_val = (player.get("sport") or "").lower()
-                if "football" in sport_val:
-                    league_slug = "nfl"
-                elif "baseball" in sport_val:
-                    league_slug = "mlb"
-                elif "hockey" in sport_val:
-                    league_slug = "nhl"
-                else:
-                    league_slug = "nba"
-
-            league_info = sports_config.get_league_info(league_slug)
-            if not league_info:
+        if len(results) == 1:
+            player = results[0]
+            if not info:
                 await update.message.reply_text(
-                    f"❌ Unsupported league: {league}",
+                    f"❌ Unsupported league for {player.get('name', remaining)}",
                     parse_mode="HTML"
                 )
                 return
 
             gamelog = await stats_api.get_player_gamelog(
-                athlete_id,
-                league_info["sport"],
-                league_info["league"],
+                player.get("id"),
+                info["sport"],
+                info["league"],
                 player_name=player.get("name", remaining),
             )
 
@@ -698,8 +669,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     parse_mode="HTML"
                 )
         else:
-            message = formatting.format_player_search_results(search_results[:5])
-            context.user_data["player_search_results"] = search_results
+            message = formatting.format_player_search_results(results[:5])
+            context.user_data["player_search_results"] = results
             context.user_data["last_action"] = "gamelog"
             await update.message.reply_text(message, parse_mode="HTML")
 
@@ -986,52 +957,30 @@ async def cmd_compare(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Search both players in parallel
     import asyncio
     results = await asyncio.gather(
-        stats_api.search_player(name1),
-        stats_api.search_player(name2),
+        search_and_resolve_player(name1),
+        search_and_resolve_player(name2),
         return_exceptions=True,
     )
 
-    search1 = results[0] if not isinstance(results[0], Exception) else None
-    search2 = results[1] if not isinstance(results[1], Exception) else None
+    r1 = results[0] if not isinstance(results[0], Exception) else (None, None, None)
+    r2 = results[1] if not isinstance(results[1], Exception) else (None, None, None)
 
-    if not search1:
+    player1, slug1, info1 = r1
+    player2, slug2, info2 = r2
+
+    if not player1:
         await update.message.reply_text(
             f"❌ Could not find player: <b>{name1}</b>",
             parse_mode="HTML"
         )
         return
 
-    if not search2:
+    if not player2:
         await update.message.reply_text(
             f"❌ Could not find player: <b>{name2}</b>",
             parse_mode="HTML"
         )
         return
-
-    player1 = search1[0]
-    player2 = search2[0]
-
-    # Get league info for both players
-    def _resolve_league(player):
-        league_raw = player.get("league") or ""
-        slug = _map_league_name_to_slug(league_raw) if league_raw else None
-        if not slug:
-            sport_val = (player.get("sport") or "").lower()
-            if "football" in sport_val:
-                slug = "nfl"
-            elif "baseball" in sport_val:
-                slug = "mlb"
-            elif "hockey" in sport_val:
-                slug = "nhl"
-            else:
-                slug = "nba"
-        return slug
-
-    slug1 = _resolve_league(player1)
-    slug2 = _resolve_league(player2)
-
-    info1 = sports_config.get_league_info(slug1)
-    info2 = sports_config.get_league_info(slug2)
 
     if not info1 or not info2:
         await update.message.reply_text(
@@ -1041,7 +990,6 @@ async def cmd_compare(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     # Fetch stats for both players in parallel
-    import asyncio
     stat_results = await asyncio.gather(
         stats_api.get_player_stats(
             player1.get("id"), info1["sport"], info1["league"],
@@ -1083,29 +1031,7 @@ def _map_league_name_to_slug(league_name: str) -> Optional[str]:
     """
     Map ESPN league names to our internal league slugs.
 
-    ESPN league names: "NBA", "NFL", "Major League Baseball", etc.
+    DEPRECATED: Use plugins.shared.player_search.map_league_name_to_slug instead.
+    Kept for backward compatibility with dispatch.py imports.
     """
-    league_lower = league_name.lower().strip()
-
-    # Direct mappings
-    mappings = {
-        "nba": "nba",
-        "nfl": "nfl",
-        "mlb": "mlb",
-        "major league baseball": "mlb",
-        "nhl": "nhl",
-        "ncaaf": "ncaaf",
-        "college football": "ncaaf",
-        "ncaab": "ncaab",
-        "college basketball": "ncaab",
-        "mens college basketball": "ncaab",
-        "epl": "epl",
-        "premier league": "epl",
-        "english premier league": "epl",
-        "mls": "mls",
-        "bundesliga": "bundesliga",
-        "laliga": "laliga",
-        "la liga": "laliga",
-    }
-
-    return mappings.get(league_lower)
+    return map_league_name_to_slug(league_name)
