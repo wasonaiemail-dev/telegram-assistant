@@ -289,7 +289,10 @@ def format_player_stats(player_data: Dict[str, Any]) -> str:
 
 
 def format_player_gamelog(gamelog_data: Dict[str, Any], limit: int = 5) -> str:
-    """Format recent game log into Telegram HTML message."""
+    """Format recent game log into Telegram HTML message.
+
+    v3 format: each game has stats dict keyed by label (MIN, PTS, REB, etc.)
+    """
     if not gamelog_data:
         return "❌ Could not load game log."
 
@@ -304,12 +307,18 @@ def format_player_gamelog(gamelog_data: Dict[str, Any], limit: int = 5) -> str:
         lines.append(f"<i>{team}</i>")
     lines.append("")
 
+    # Key stat labels to show (in order)
+    KEY_LABELS = ["PTS", "REB", "AST", "STL", "BLK", "FG", "3PT", "MIN"]
+
     # Game entries
     games = gamelog_data.get("games", [])
     for game in games[:limit]:
         try:
             date_str = game.get("date", "")
             opponent = game.get("opponent", "Unknown")
+            at_vs = game.get("at_vs", "vs")
+            result = game.get("result", "")
+            score = game.get("score", "")
             game_stats = game.get("stats", {})
 
             # Parse date if ISO format
@@ -317,21 +326,25 @@ def format_player_gamelog(gamelog_data: Dict[str, Any], limit: int = 5) -> str:
                 try:
                     from datetime import datetime
                     dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                    formatted_date = dt.strftime("%m/%d/%Y")
-                except:
+                    formatted_date = dt.strftime("%m/%d")
+                except Exception:
                     formatted_date = date_str[:10]
             else:
                 formatted_date = "TBD"
 
-            lines.append(f"<b>{formatted_date}</b> vs {opponent}")
+            # Result + score line
+            result_str = f" ({result} {score})" if result and score else ""
+            lines.append(f"<b>{formatted_date}</b> {at_vs} {opponent}{result_str}")
 
-            # Show key stats from this game
+            # Show key stats
             if game_stats:
-                for category, stats_dict in game_stats.items():
-                    if isinstance(stats_dict, dict):
-                        stat_items = [f"{k}: {v}" for k, v in stats_dict.items() if v and str(v) != "0"][:3]
-                        if stat_items:
-                            lines.append(f"  <code>{' | '.join(stat_items)}</code>")
+                stat_items = []
+                for label in KEY_LABELS:
+                    val = game_stats.get(label, "")
+                    if val and str(val) != "0":
+                        stat_items.append(f"{label}: {val}")
+                if stat_items:
+                    lines.append(f"  <code>{' | '.join(stat_items)}</code>")
             lines.append("")
         except Exception:
             continue

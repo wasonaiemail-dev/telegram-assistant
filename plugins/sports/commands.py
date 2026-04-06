@@ -682,7 +682,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             gamelog = await stats_api.get_player_gamelog(
                 athlete_id,
                 league_info["sport"],
-                league_info["league"]
+                league_info["league"],
+                player_name=player.get("name", remaining),
             )
 
             if gamelog:

@@ -325,7 +325,8 @@ async def handle_sports_intent(
             sport = league_info["sport"] if league_info else "basketball"
             league = league_info["league"] if league_info else "nba"
             gamelog = await stats_api.get_player_gamelog(
-                player["id"], sport, league
+                player["id"], sport, league,
+                player_name=player.get("name", player_name),
             )
             if gamelog:
                 msg = formatting.format_player_gamelog(gamelog)

@@ -363,100 +363,104 @@ async def get_player_gamelog(
     athlete_id: str,
     sport: str,
     league: str,
+    player_name: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     Get recent game log for a player.
 
-    Args:
-        athlete_id: ESPN athlete ID
-        sport: Sport slug
-        league: League slug
+    ESPN v3 gamelog format:
+        labels: ["MIN", "FG", "FG%", ...] — stat column headers
+        events: {eventId: {gameDate, opponent, atVs, score, gameResult, ...}} — game info
+        seasonTypes[0].categories[]: monthly groups, each with
+            events[]: {eventId, stats: ["44", "13-25", ...]} — parallel to labels
 
-    Returns:
-        Dict with player name, team, and list of recent game performances.
-        Returns None if not found.
-
-    Endpoint:
-        https://site.web.api.espn.com/apis/common/v3/sports/{sport}/{league}/athletes/{id}/gamelog
+    We join seasonTypes events with the events dict by eventId.
     """
     if not athlete_id or not sport or not league:
         return None
 
     try:
-        # Try site/v2 first, then web API
-        url1 = f"{ESPN_SITE}/sports/{sport}/{league}/athletes/{athlete_id}/gamelog"
-        data = await _fetch_json(url1)
-
-        if not data:
-            url2 = f"{ESPN_WEB}/sports/{sport}/{league}/athletes/{athlete_id}/gamelog?region=us&lang=en&contentorigin=espn"
-            data = await _fetch_json(url2)
+        # v3 web API is the only working endpoint for gamelog
+        url = f"{ESPN_WEB}/sports/{sport}/{league}/athletes/{athlete_id}/gamelog?region=us&lang=en&contentorigin=espn"
+        logger.info(f"Fetching gamelog from: {url}")
+        data = await _fetch_json(url)
 
         if not data:
             return None
 
-        athlete = data.get("athlete", {})
+        # Get stat labels
+        labels = data.get("labels", [])
+        if not labels:
+            logger.warning("Gamelog has no labels")
+            return None
 
         result = {
             "id": athlete_id,
-            "name": athlete.get("displayName", ""),
-            "position": athlete.get("position", {}).get("name", ""),
+            "name": player_name,
             "games": [],
+            "labels": labels,
         }
 
-        # Extract team
-        team = athlete.get("team", {})
-        if team:
-            result["team"] = team.get("displayName", "")
+        # events dict: eventId -> game info (date, opponent, score, result)
+        events_dict = data.get("events", {})
+        if not isinstance(events_dict, dict):
+            events_dict = {}
 
-        # Parse game log entries
-        events = data.get("events", [])
-        for event in events:
+        # Collect all game stat entries from seasonTypes (most recent first)
+        # seasonTypes[0] = Regular Season, categories are by month (newest first)
+        season_types = data.get("seasonTypes", [])
+        all_stat_events = []
+
+        for st in season_types:
+            st_name = st.get("displayName", "")
+            # Skip preseason
+            if "preseason" in st_name.lower():
+                continue
+            categories = st.get("categories", [])
+            for cat in categories:
+                cat_events = cat.get("events", [])
+                for cev in cat_events:
+                    all_stat_events.append(cev)
+
+        # Build game entries by joining stat events with event info
+        for stat_event in all_stat_events:
             try:
+                event_id = stat_event.get("eventId", "")
+                stats_values = stat_event.get("stats", [])
+
+                # Look up game info from events dict
+                event_info = events_dict.get(event_id, {})
+
+                # Build stat dict: label -> value
+                game_stats = {}
+                for i, label in enumerate(labels):
+                    if i < len(stats_values):
+                        game_stats[label] = stats_values[i]
+
+                opponent = event_info.get("opponent", {})
+                at_vs = event_info.get("atVs", "vs")
+                opp_name = opponent.get("displayName", "") if isinstance(opponent, dict) else ""
+                opp_abbrev = opponent.get("abbreviation", "") if isinstance(opponent, dict) else ""
+                game_result = event_info.get("gameResult", "")
+                score = event_info.get("score", "")
+
                 game_entry = {
-                    "date": event.get("date", ""),
-                    "game_id": event.get("id", ""),
-                    "opponent": "",
-                    "stats": {},
+                    "date": event_info.get("gameDate", ""),
+                    "game_id": event_id,
+                    "opponent": opp_name or opp_abbrev,
+                    "opponent_abbrev": opp_abbrev,
+                    "at_vs": at_vs,
+                    "result": game_result,
+                    "score": score,
+                    "stats": game_stats,
                 }
-
-                # Get opponent info
-                competitions = event.get("competitions", [])
-                if competitions:
-                    competition = competitions[0]
-                    competitors = competition.get("competitors", [])
-                    if len(competitors) >= 2:
-                        # Find the opponent (the one that isn't the player's team)
-                        for competitor in competitors:
-                            if competitor.get("homeAway") == "away":
-                                game_entry["opponent"] = competitor.get("team", {}).get("displayName", "")
-                                break
-
-                # Parse game stats
-                stats_list = event.get("statistics", []) or event.get("categories", [])
-                for stat_category in stats_list:
-                    try:
-                        cat_name = stat_category.get("name", "") or stat_category.get("displayName", "")
-                        if not cat_name:
-                            continue
-
-                        stats = {}
-                        for stat in stat_category.get("stats", []):
-                            stat_name = stat.get("name", "") or stat.get("abbreviation", "")
-                            if stat_name:
-                                stats[stat_name] = stat.get("value", "")
-
-                        if stats:
-                            game_entry["stats"][cat_name] = stats
-
-                    except (KeyError, TypeError):
-                        continue
 
                 result["games"].append(game_entry)
 
-            except (KeyError, TypeError):
+            except (KeyError, TypeError, IndexError):
                 continue
 
-        return result if result.get("name") else None
+        return result if result.get("games") else None
 
     except Exception as e:
         logger.error(f"Error fetching player gamelog for {athlete_id}: {e}")
