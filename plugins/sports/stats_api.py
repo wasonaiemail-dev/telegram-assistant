@@ -1,8 +1,15 @@
 """
-ESPN Stats API — Team and Player statistics for Big 4 US leagues.
+Sports Stats API — Player and Team statistics with ESPN + API-Sports failover.
 
-Provides functions to fetch player and team statistics from ESPN's public APIs.
-All functions are async and return None on failure.
+Primary source: ESPN public API (free, no key needed)
+Fallback source: API-Sports (free 100 req/day, requires API_SPORTS_KEY)
+
+Failover pattern:
+    1. Try ESPN first (free, proven for basic stats)
+    2. If ESPN fails or returns empty → try API-Sports
+    3. If both fail → return None
+
+This ensures zero cost for most queries while having a reliable backup.
 """
 
 import logging
@@ -12,12 +19,41 @@ from typing import Optional, Dict, Any, List
 
 from .espn_api import _fetch_json
 from .config import LEAGUES, ESPN_BASE, ESPN_SITE
+from . import api_sports
 
 logger = logging.getLogger(__name__)
 
 # Additional ESPN API endpoints for stats/athletes
 ESPN_COMMON = f"{ESPN_BASE}/common/v3"
 ESPN_WEB = "https://site.web.api.espn.com/apis/common/v3"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPER: Map ESPN sport/league to our league slug
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _find_league_slug(sport: str, league: str) -> Optional[str]:
+    """
+    Find our league slug from ESPN sport/league values.
+
+    Args:
+        sport: ESPN sport (e.g., "basketball", "football")
+        league: ESPN league (e.g., "nba", "nfl")
+
+    Returns:
+        League slug (e.g., "nba", "nfl") or None if not found.
+    """
+    # Direct match on league
+    league_lower = league.lower()
+    if league_lower in LEAGUES:
+        return league_lower
+
+    # Try to match by sport + league combo
+    for slug, info in LEAGUES.items():
+        if info["sport"] == sport and info["league"] == league:
+            return slug
+
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -120,7 +156,26 @@ async def search_player(
                 logger.debug(f"Error parsing player search result: {e}")
                 continue
 
-        return results if results else None
+        if results:
+            return results
+
+        # ESPN returned no results — try API-Sports fallback
+        league_slug = league.lower() if league else None
+        if not league_slug and sport:
+            # Guess the league slug from sport
+            sport_to_league = {
+                "basketball": "nba", "football": "nfl",
+                "baseball": "mlb", "hockey": "nhl", "soccer": "epl",
+            }
+            league_slug = sport_to_league.get(sport.lower())
+
+        if league_slug and api_sports.is_available() and api_sports.has_player_stats(league_slug):
+            logger.info(f"ESPN player search empty, trying API-Sports (league={league_slug})")
+            api_results = await api_sports.search_player(name, league_slug)
+            if api_results:
+                return api_results
+
+        return None
 
     except Exception as e:
         logger.error(f"Error searching for player '{name}': {e}")
@@ -172,9 +227,9 @@ async def get_player_stats(
                 return result
             logger.warning(f"Failed to parse stats from web endpoint")
 
-        # Fallback: site/v2 athlete overview
+        # Fallback 1: ESPN site/v2 athlete overview
         url2 = f"{ESPN_SITE}/sports/{sport}/{league}/athletes/{athlete_id}"
-        logger.info(f"Trying fallback: {url2}")
+        logger.info(f"Trying ESPN fallback: {url2}")
         data = await _fetch_json(url2)
 
         if data:
@@ -185,6 +240,21 @@ async def get_player_stats(
                     result["name"] = player_name
                 return result
             logger.warning(f"Failed to parse stats from v2 endpoint")
+
+        # Fallback 2: API-Sports (if configured)
+        # We need to find the league slug from sport/league to use API-Sports
+        league_slug = _find_league_slug(sport, league)
+        if league_slug and api_sports.is_available() and api_sports.has_player_stats(league_slug):
+            logger.info(f"ESPN failed, trying API-Sports for player stats (league={league_slug})")
+            # We need the API-Sports player ID — search by name
+            if player_name:
+                api_players = await api_sports.search_player(player_name, league_slug)
+                if api_players:
+                    api_player_id = api_players[0]["id"]
+                    api_result = await api_sports.get_player_stats(api_player_id, league_slug)
+                    if api_result:
+                        logger.info(f"Got player stats from API-Sports fallback")
+                        return api_result
 
         return None
 
@@ -507,9 +577,9 @@ async def get_team_stats(
             if result and result.get("stats"):
                 return result
 
-        # Fallback: general team info (at least has name/record)
+        # Fallback 1: ESPN general team info (at least has name/record)
         url2 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}"
-        logger.info(f"Trying team overview: {url2}")
+        logger.info(f"Trying ESPN team overview: {url2}")
         data = await _fetch_json(url2)
 
         if data:
@@ -517,6 +587,15 @@ async def get_team_stats(
             result = _parse_team_stats(data)
             if result:
                 return result
+
+        # Fallback 2: API-Sports team stats (if configured)
+        league_slug = _find_league_slug(sport, league)
+        if league_slug and api_sports.is_available():
+            logger.info(f"ESPN failed, trying API-Sports for team stats (league={league_slug})")
+            api_result = await api_sports.get_team_stats(team_id, league_slug)
+            if api_result:
+                logger.info(f"Got team stats from API-Sports fallback")
+                return api_result
 
         return None
 

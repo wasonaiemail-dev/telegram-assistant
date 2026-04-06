@@ -36,12 +36,13 @@ Alfred has **two simultaneous goals:**
 
 ---
 
-## Current Status: ✅ LIVE & FULLY TESTED
+## Current Status: ✅ LIVE — Sports Redesign Pending
 
-- Deployed and running on Railway
-- Responding to messages in Telegram
-- All background jobs active (briefing, reminders, habits, etc.)
-- **20 commands fully tested — 18/20 passing, 2 bugs found and fixed**
+- Core bot: Deployed and running on Railway, all 20+ commands working
+- Sports Pack: **Working but architecture redesign planned** (see "What Still Needs to Be Done")
+  - Working: `/scores`, `/standings`, `/schedule`, `/sports`, `/bets`, `/stats player`, `/stats team`, `/stats gamelog`, `/stats roster`, NL sports queries (with limitations)
+  - Known NL issues: stop words pollute player search, intent misrouting for complex queries
+  - Plan: Replace ESPN scraping + keyword regex with BALLDONTLIE API + GPT function-calling
 
 ---
 
@@ -60,10 +61,13 @@ Alfred has **two simultaneous goals:**
 
 - **Python 3.10** running on Railway
 - **python-telegram-bot 22.6** — bot framework
-- **OpenAI API** — intent classification, AI responses, voice transcription (GPT-4o-mini / GPT-4o / Whisper)
+- **OpenAI API** — intent classification, AI responses, voice transcription, GPT function-calling for sports NL (GPT-4o-mini / GPT-4o / Whisper)
 - **Google Calendar & Tasks API** — calendar and task management
 - **Open-Meteo** — free weather (no key needed)
 - **Serper.dev** — optional live web search in /ask
+- **ESPN public API** — scores, standings, schedules (free, no key, fallback source)
+- **API-Sports** *(adding next)* — detailed player/team stats, leaders, comparisons (free 100 req/day)
+- **The-Odds-API** *(adding next)* — betting odds, spreads, props, futures (free 500 credits/mo)
 - **Railway** — hosting with persistent /data volume
 
 ---
@@ -72,7 +76,10 @@ Alfred has **two simultaneous goals:**
 
 All 21 variables are already configured in Railway. They are:
 
-`TELEGRAM_TOKEN`, `ALLOWED_USER_ID`, `BOT_NAME`, `BOT_USERNAME`, `OPENAI_API_KEY`, `GOOGLE_CREDENTIALS`, `SERPER_API_KEY`, `TIMEZONE`, `WEATHER_LAT`, `WEATHER_LON`, `HOME_CITY`, `QUOTE_TYPE`, `BRIEFING_HOUR`, `BRIEFING_MINUTE`, `HABIT_NUDGE_HOUR`, `HABIT_NUDGE_MINUTE`, `TRAVEL_WEATHER_HOUR`, `TRAVEL_WEATHER_MINUTE`, `WEEKLY_SUMMARY_HOUR`, `WEEKLY_SUMMARY_MINUTE`, `WEEKLY_SUMMARY_WEEKDAY`
+`TELEGRAM_TOKEN`, `ALLOWED_USER_ID`, `BOT_NAME`, `BOT_USERNAME`, `OPENAI_API_KEY`, `GOOGLE_CREDENTIALS`, `SERPER_API_KEY`, `TIMEZONE`, `WEATHER_LAT`, `WEATHER_LON`, `HOME_CITY`, `QUOTE_TYPE`, `BRIEFING_HOUR`, `BRIEFING_MINUTE`, `HABIT_NUDGE_HOUR`, `HABIT_NUDGE_MINUTE`, `TRAVEL_WEATHER_HOUR`, `TRAVEL_WEATHER_MINUTE`, `WEEKLY_SUMMARY_HOUR`, `WEEKLY_SUMMARY_MINUTE`, `WEEKLY_SUMMARY_WEEKDAY`, `API_SPORTS_KEY`
+
+**Sports plugin variables (optional — bot works without them, ESPN is free fallback):**
+- `API_SPORTS_KEY` — Get from https://dashboard.api-football.com/register (free, 100 req/day per sport)
 
 ---
 
@@ -102,6 +109,13 @@ All 21 variables are already configured in Railway. They are:
 | Reply Assist | natural language | ✅ |
 | Data Export | `/export` | ✅ Tested (sends .xlsx) |
 | Setup Wizard | `/setup` | ✅ |
+| Sports Scores | `/scores` | ✅ Tested |
+| Sports Standings | `/standings` | ✅ Tested |
+| Sports Schedule | `/schedule` | ✅ Tested |
+| Sports Config | `/sports` | ✅ Tested |
+| Bet Tracker | `/bets` | ✅ Tested |
+| Player/Team Stats | `/stats` | ✅ Tested (redesign pending) |
+| Sports NL queries | natural language | ⚠️ Works but has routing limitations |
 
 ---
 
@@ -155,23 +169,94 @@ All Tasks-based features (todos, notes, shopping, gifts) were silently failing �
 
 ## What Still Needs to Be Done
 
+**Completed (previous sessions):**
+- ~~Run `/auth` in Telegram~~ ✅
+- ~~Fix `/mood` conversation state~~ ✅
+- ~~Fix `/checkauth` false-positive~~ ✅
+- ~~Enable Google Tasks API~~ ✅
+- ~~Build Sports Pack add-on~~ ✅ (Session 5)
+- ~~Add `aiohttp` to requirements.txt~~ ✅
+
 **Immediate (critical):**
-1. ~~Run `/auth` in Telegram — connects Google Calendar & Tasks.~~ ✅ Done
-2. **Add payment method to Railway** — ⚠️ trial expires in ~8 days ($4.21 credit remaining). Go to railway.com → account settings → billing. Reminder set for April 8.
-3. ~~Fix `/mood` conversation state~~ ✅ Done
-4. ~~Fix `/checkauth` false-positive~~ ✅ Done
-5. ~~Enable Google Tasks API in Cloud Console~~ ✅ Done (was returning 403 on all task operations)
+1. **Add payment method to Railway** — trial may be expired or close to it. Go to railway.com → account settings → billing.
+
+**🏗️ MAJOR: Sports Plugin Architecture Redesign (Session 9+) — DECISIONS FINALIZED**
+
+The current ESPN scraping + keyword regex approach has been identified as fragile and limited. Rebuilding with proper APIs and GPT function-calling.
+
+**The Problem:**
+- ESPN APIs are undocumented, inconsistent between v2/v3, and break unpredictably
+- Keyword regex + stop words NL intent system can't handle the variety of sports queries (leaders, comparisons, betting, trivia, history)
+- Stop words are incomplete — words like "career", "many", "goals", "points", "averaging", "per" pollute player name searches
+- NL intent misroutes queries (e.g., "who won DPOY last year" triggers scores because keyword "NBA" matches)
+
+**✅ FINAL ARCHITECTURE (all decisions confirmed April 5, 2026):**
+
+1. **API-Sports** (primary stats/scores API) — Free tier: 100 requests/day per sport, permanent, no credit card. Paid: $19/mo for higher limits. All endpoints and all competitions included at every tier. Covers basketball, football, baseball, hockey, soccer, and more.
+   - Docs: https://api-sports.io/
+   - Free tier is sufficient for a personal bot answering on-demand queries
+   - Each buyer sets up their own API key (template model — no commercial license issue)
+
+2. **ESPN** (free fallback — KEEP existing code) — No API key needed, covers 10+ leagues. Used for scores, standings, schedules (proven working endpoints from sessions 5-8). Serves as first-try source for basic queries.
+   - **Failover pattern:** ESPN first → API-Sports fallback. If ESPN dies permanently, API-Sports becomes primary with zero code changes (just remove the ESPN call).
+   - No coding issue with dual-source — it's a clean try/except failover.
+
+3. **The-Odds-API** (betting odds — SEPARATE PLUGIN) — Free: 500 credits/mo. Paid: $30/mo for 20K credits. Aggregates ~40 bookmakers.
+   - Betting features are a **separate plugin** (`plugins/betting/`), NOT bundled with sports stats
+   - Each buyer sets up their own Odds API key
+
+4. **GPT function-calling** (replaces keyword regex + stop words) — Uses existing OpenAI key already in Railway. All NL sports messages go to GPT, GPT decides which API tool to call. Eliminates stop word/routing issues entirely.
+
+5. **Shared player/team search module** (`plugins/shared/player_search.py`) — Both sports and betting plugins import from here. Resolves "Jokic" → Nikola Jokic, Denver Nuggets, NBA. Single source of truth for lookups, bugs fixed once.
+
+**✅ KEY DESIGN DECISIONS:**
+- **Template model:** Bot ships without API keys. Each buyer configures their own API-Sports key, Odds API key, etc. This means MySportsFeeds (free for personal, paid for commercial) IS viable since each user is "personal use." But we're going with API-Sports for its simpler free tier.
+- **Selling BOTH:** The whole bot as a template ($1) AND individual plugin packs as add-ons ($1 each)
+- **OpenAI key:** Reuse the existing key in Railway for GPT function-calling
+- **ESPN kept:** No downside to keeping ESPN for scores/standings/schedule — those v2 endpoints are stable. Only problem areas (detailed stats, leaders, comparisons) get replaced by API-Sports.
+- **Multi-sport:** NBA, NFL, MLB, NHL, soccer/World Cup — all covered by API-Sports
+- **Multiple sessions:** Build this right, don't rush. Test thoroughly before moving on.
+
+**🔨 BUILD PLAN (Session 9+):**
+
+**Phase 1 — API-Sports Integration (Session 9)**
+- [ ] Sign up for API-Sports free tier, get API key
+- [ ] Add `API_SPORTS_KEY` to Railway env vars
+- [ ] Create `plugins/sports/api_sports.py` — async client for API-Sports endpoints
+- [ ] Implement: player stats, team stats, league leaders, player comparisons
+- [ ] Wire up ESPN-first → API-Sports-fallback pattern
+- [ ] Test all stat queries via Telegram
+
+**Phase 2 — GPT Function-Calling NL (Session 9 or 10)**
+- [ ] Define function schemas for all sports actions (get_player_stats, get_team_stats, get_leaders, get_scores, get_standings, compare_players, etc.)
+- [ ] Replace keyword regex dispatch with GPT function-calling in `dispatch.py`
+- [ ] Keep Layer 1 keyword rules as a fast-path optimization for obvious queries (e.g., "NBA scores" doesn't need GPT)
+- [ ] Test NL queries that previously failed: "who leads the NBA in ppg?", "how many ppg is SGA averaging?", "who won DPOY last year?"
+- [ ] Regression test: ensure existing /scores, /standings, /schedule still work
+
+**Phase 3 — Betting Plugin (Session 10 or 11)**
+- [ ] Sign up for The-Odds-API free tier, get API key
+- [ ] Create `plugins/betting/` as a separate plugin with its own PLUGIN_META
+- [ ] Import from `plugins/shared/player_search.py` for lookups
+- [ ] Implement: game odds (spreads, moneylines), player props, futures
+- [ ] Move existing bet tracker/screenshot features from `plugins/sports/betting.py` to new plugin
+- [ ] Test: "what are the odds on the Nuggets game?", "show me Jokic rebound props", "World Cup futures"
+
+**Phase 4 — Polish & Sell-Ready (Session 11 or 12)**
+- [ ] Add API key setup instructions to SETUP_COMPANION.md
+- [ ] Audit all files for hardcoded personal data
+- [ ] Error handling: graceful messages when API keys are missing or rate-limited
+- [ ] Number selection handler (reply "1" to pick from search results)
+- [ ] Final regression test of entire bot
 
 **Setup / workflow:**
-5. **Set up GitHub Desktop** — File → Add Local Repository → point to your alfred folder. Makes future code pushes one-click.
+- **Set up GitHub Desktop** — File → Add Local Repository → point to your alfred folder.
 
-**Product / business:**
-6. ~~**Build Sports Pack add-on** — ESPN scores, standings, team alerts, game previews. Drop-in plugin file.~~ ✅ Done (Session 5)
-7. **Build Finance/Crypto Pack add-on** — portfolio tracking, price alerts, P&L. Drop-in plugin file.
-8. **Choose sales channel** — Gumroad or Lemon Squeezy. Set up product listing with setup instructions.
-9. **Review SETUP_COMPANION.md** — ensure it covers all 22+ features and is fully generalized (no Tyler-specific references).
-10. **Generalize all features** — audit feature files for any hardcoded personal data before packaging for sale.
-11. ~~**Add `aiohttp` to requirements.txt**~~ ✅ Done (Session 5)
+**Product / business (future):**
+- **Build Finance/Crypto Pack add-on** — portfolio tracking, price alerts, P&L.
+- **Choose sales channel** — Gumroad or Lemon Squeezy.
+- **Review SETUP_COMPANION.md** — ensure it covers all features and is fully generalized.
+- **Generalize all features** — audit feature files for hardcoded personal data before packaging.
 
 ---
 
@@ -255,7 +340,56 @@ telegram-assistant/
 
 ---
 
-*Last updated: April 4, 2026*
-*Session 7 work: Stats Command Debugging & ESPN API Integration — ESPN search API returns empty `team`, `sport`, and `league` fields for many players, fixed with sport-based fallback logic. Discovered `site.api.espn.com/apis/site/v2/sports/{sport}/{league}/athletes/{id}` and `{id}/statistics` return non-200 for individual athletes via debug testing. Only working stats endpoint: `site.web.api.espn.com/apis/common/v3/sports/{sport}/{league}/athletes/{id}/stats`. ESPN v3 stats response format: `{filters, teams, categories, glossary}` — NO `athlete` key at root. Categories use `statistics` key (2D array of season rows) and `totals` key (flat summary array), NOT `stats` key. Fixed Python operator precedence bug: inline `if/else` ternary has lower precedence than `or`, wrapping entire `or` chain unexpectedly — resolved with explicit if/elif statements. Athlete name must come from search results since v3/stats endpoint doesn't include it — added `player_name` parameter to `get_player_stats()`. Files modified: `plugins/sports/stats_api.py` (rewrote `_parse_player_stats()` and `get_player_stats()`), `plugins/sports/commands.py` (added player_name passthrough, removed debug command), `plugins/sports/dispatch.py` (added player_name passthrough). Status: `/stats player` working with full averages, totals, and miscellaneous categories. Team stats, roster, gamelog, and NL stats queries still need testing.*
-*Session 6 work: Live testing of Sports Pack — found and fixed 4 bugs: (1) NL dispatch crash — dispatch.py tried to set read-only `update.message.text` in PTB v22, rewritten to call ESPN API directly. (2) Standings empty — ESPN standings API returns `children[]→standings.entries[]`, not `standings[]→groups[].entries[]`; rewrote parser with 3-format fallback. (3) Scores raw status — `STATUS_SCHEDULED` displayed raw; added `status_map` dict mapping to friendly text + emojis. (4) Schedule empty — `datetime.utcnow()` (naive) compared with timezone-aware dates from ESPN, causing silent TypeError; fixed with `datetime.now(timezone.utc)`. Also fixed schedule formatter: added status code mapping and removed aggressive 15-char team name truncation. All 5 sports commands tested and passing: /scores, /standings, /schedule, /bets, NL queries. Regression check: /briefing confirmed working.*
-*Session 5 work: (1) NL audit — analyzed all 74 intents, identified gaps, added 9 new keyword patterns (todo complete, todo delete, shop complete, workout log, mood log, memory add/remove, link save, export) taking Layer 1 coverage from 13→22 intents. Added disambiguation rules and 7 new GPT examples. (2) Built full plugin loader architecture — auto-discovery system that scans plugins/, reads PLUGIN_META, registers commands/intents/jobs/callbacks/keyword rules automatically. Zero changes to core code needed to add new plugins. (3) Built Sports Pack plugin — 4,000+ lines across 13 files. ESPN API integration for 10 leagues (NFL, NBA, MLB, NHL, NCAAF, NCAAB, EPL, MLS, Bundesliga, La Liga). Commands: /scores, /standings, /schedule, /sports, /bets. (4) Built Sports Betting module — screenshot-based line comparison (GPT-4o Vision for 8 sportsbooks), bet size calculator (fixed unit, percentage, Kelly Criterion), bet tracker with P&L, and matplotlib chart generation (cumulative P&L, win rate, ROI, unit tracker, bet distribution). Previous sessions: fixed /briefing crash, "add todo" NL, /mood state drop, /checkauth display, Google Tasks API 403, full 20-command test.*
+*Last updated: April 5, 2026*
+
+---
+
+## Session History (newest first)
+
+**Session 8 — Architecture Planning & All Decisions Finalized (April 5, 2026)**
+Continued from session 7. Completed testing of team stats and gamelog (both working after fixes). Discovered fundamental limitations of ESPN scraping + keyword NL approach. Researched 5 sports data APIs: API-Sports, BALLDONTLIE, MySportsFeeds, SportsDataIO, TheSportsDB. **All architecture decisions finalized:**
+- **API-Sports** selected as primary stats API (free 100 req/day, $19/mo paid)
+- **ESPN kept** as free fallback for scores/standings/schedule (failover pattern: ESPN first → API-Sports)
+- **The-Odds-API** for betting (separate plugin)
+- **GPT function-calling** replaces keyword regex NL (uses existing OpenAI key)
+- **Shared player search module** (`plugins/shared/`) for both plugins
+- **Template model confirmed** — bot ships without API keys, each buyer sets up their own
+- **Selling both** whole bot template + individual plugin add-ons
+- 4-phase build plan documented (API-Sports → GPT NL → Betting plugin → Polish)
+**Key lesson:** use Chrome MCP to inspect API response formats BEFORE coding parsers — saves hours vs. deploy-debug cycles.
+
+**Session 7 — Stats Command Debugging & ESPN API Integration**
+ESPN search API returns empty `team`, `sport`, `league` fields for many players — fixed with sport-based fallback logic. Discovered v2 athlete endpoints return non-200. Only working stats endpoint: `site.web.api.espn.com/apis/common/v3/sports/{sport}/{league}/athletes/{id}/stats`. v3 format: `{filters, teams, categories, glossary}` — NO `athlete` key. Categories use `statistics` (2D array) and `totals` (flat array), NOT `stats`. Fixed Python operator precedence bug with inline ternary. Added `player_name` parameter passthrough. Team stats fixed: `results.stats` is a dict with `categories`, not a flat list — parser was wrapping it wrong. Gamelog rewritten for v3 format (labels + events dict + seasonTypes join by eventId). Files: `stats_api.py`, `commands.py`, `dispatch.py`, `formatting.py`.
+
+**Session 6 — Live Testing of Sports Pack**
+Found and fixed 4 bugs: (1) NL dispatch crash — dispatch.py tried to set read-only `update.message.text` in PTB v22. (2) Standings empty — ESPN uses `children[]→standings.entries[]` format. (3) Scores raw status codes. (4) Schedule empty — naive vs aware datetime comparison. All 5 commands tested and passing.
+
+**Session 5 — Plugin Architecture + Sports Pack Build**
+NL audit (13→22 keyword intents). Built plugin loader (auto-discovery via PLUGIN_META). Built Sports Pack: 4,000+ lines, 13 files, 10 leagues, ESPN API. Built betting module: screenshot analysis (GPT-4o Vision), bet calculator, tracker, charts.
+
+**Sessions 1-4 — Core Bot Build**
+Fixed /briefing crash, "add todo" NL, /mood state drop, /checkauth display, Google Tasks API 403. Full 20-command test: 18/20 passing → all fixed.
+
+---
+
+## ESPN API Reference (for existing code)
+
+These are the ESPN endpoints currently in use. Documented here because they're undocumented publicly and were discovered through trial and error:
+
+| Endpoint | Works For | Does NOT Work For |
+|---|---|---|
+| `site.api.espn.com/apis/site/v2/sports/{sport}/{league}/teams/{id}/statistics` | Team stats (full categories) | — |
+| `site.api.espn.com/apis/site/v2/sports/{sport}/{league}/teams/{id}` | Team info (record, roster) | Detailed stats |
+| `site.web.api.espn.com/apis/common/v3/sports/{sport}/{league}/athletes/{id}/stats` | Player stats (averages, totals) | Team stats |
+| `site.web.api.espn.com/apis/common/v3/sports/{sport}/{league}/athletes/{id}/gamelog` | Player game log | — |
+| `site.api.espn.com/apis/common/v3/search?query={name}&type=player` | Player search | — |
+| `site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard` | Live scores | — |
+| `site.api.espn.com/apis/site/v2/sports/{sport}/{league}/standings` | Standings | — |
+| `site.api.espn.com/apis/site/v2/sports/{sport}/{league}/teams/{id}/schedule` | Team schedule | — |
+
+**Key gotchas:**
+- v3 athlete endpoints do NOT include athlete name — must get from search results
+- v3 does NOT work for team stats (returns empty) — use v2 only
+- v2 does NOT work for individual athlete stats/gamelog — use v3 only
+- `results.stats` in v2 team stats is a dict `{id, name, abbreviation, categories: [...]}`, NOT a list
+- Gamelog v3 splits data: `seasonTypes[].categories[].events[]` has stats, `events{}` dict has game info, joined by eventId
