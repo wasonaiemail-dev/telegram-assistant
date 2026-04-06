@@ -337,6 +337,58 @@ async def handle_sports_intent(
                     parse_mode="HTML",
                 )
 
+        elif intent == "sports_leaders":
+            query = entities.get("query", intent_result.raw)
+            # Try to extract league from query
+            league = entities.get("league", "")
+            if not league:
+                # Attempt to find league name in query
+                query_lower = query.lower()
+                league_keywords = {
+                    "nba": "nba", "basketball": "nba",
+                    "nfl": "nfl", "football": "nfl",
+                    "mlb": "mlb", "baseball": "mlb",
+                    "nhl": "nhl", "hockey": "nhl",
+                    "epl": "epl", "premier league": "epl",
+                    "mls": "mls", "soccer": "epl",
+                    "bundesliga": "bundesliga", "la liga": "laliga",
+                }
+                for keyword, slug in league_keywords.items():
+                    if keyword in query_lower:
+                        league = slug
+                        break
+
+            if not league:
+                await _show_league_menu(update, "leaders")
+                return
+
+            league_slug = sports_config.normalize_league(league)
+            if not league_slug:
+                await _show_league_menu(update, "leaders")
+                return
+
+            league_info = sports_config.get_league_info(league_slug)
+            emoji = league_info.get("emoji", "🏆")
+            await update.message.reply_text(f"🔍 Fetching {league_info['name']} leaders...")
+            leaders = await stats_api.get_league_leaders(league_slug)
+            if leaders:
+                msg = formatting.format_leaders(leaders, emoji)
+                await update.message.reply_text(msg, parse_mode="HTML")
+            else:
+                await update.message.reply_text(
+                    f"❌ Could not fetch leaders for {league_info['name']}",
+                    parse_mode="HTML",
+                )
+
+        elif intent == "sports_compare":
+            query = entities.get("query", intent_result.raw)
+            await update.message.reply_text(
+                "For player comparison, use:\n"
+                "<code>/compare Player1 vs Player2</code>\n\n"
+                "Example: <code>/compare LeBron James vs Kevin Durant</code>",
+                parse_mode="HTML",
+            )
+
         elif intent == "sports_team_stats":
             query = entities.get("query", intent_result.raw)
             await update.message.reply_text(

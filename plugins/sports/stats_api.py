@@ -752,6 +752,150 @@ def _parse_team_stats(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# LEAGUE LEADERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def get_league_leaders(
+    league_slug: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Get league leaders / top performers.
+
+    For soccer leagues: Uses API-Sports /players/topscorers and /players/topassists
+    For NBA/NFL/MLB/NHL: Uses ESPN leaders endpoint
+
+    Returns dict with:
+        - league_name: str
+        - categories: [{"name": "Points", "leaders": [{"name", "team", "value"}]}]
+    """
+    league_info = LEAGUES.get(league_slug)
+    if not league_info:
+        return None
+
+    sport = league_info["sport"]
+    league = league_info["league"]
+
+    # ── Soccer: Use API-Sports top scorers / assists ─────────────────────
+    if sport == "soccer" and api_sports.is_available():
+        logger.info(f"Fetching soccer leaders from API-Sports for {league_slug}")
+        result = {"league_name": league_info["name"], "categories": []}
+
+        # Top scorers
+        scorers = await api_sports.get_top_scorers(league_slug)
+        if scorers:
+            scorer_list = []
+            for entry in scorers[:10]:
+                player = entry.get("player", {})
+                stats_list = entry.get("statistics", [])
+                goals = 0
+                team_name = ""
+                if stats_list:
+                    goals = stats_list[0].get("goals", {}).get("total", 0) or 0
+                    team_name = stats_list[0].get("team", {}).get("name", "")
+                scorer_list.append({
+                    "name": player.get("name", ""),
+                    "team": team_name,
+                    "value": str(goals),
+                    "stat_label": "Goals",
+                })
+            if scorer_list:
+                result["categories"].append({
+                    "name": "Top Scorers",
+                    "emoji": "⚽",
+                    "leaders": scorer_list,
+                })
+
+        # Top assists
+        assists = await api_sports.get_top_assists(league_slug)
+        if assists:
+            assist_list = []
+            for entry in assists[:10]:
+                player = entry.get("player", {})
+                stats_list = entry.get("statistics", [])
+                assist_count = 0
+                team_name = ""
+                if stats_list:
+                    assist_count = stats_list[0].get("goals", {}).get("assists", 0) or 0
+                    team_name = stats_list[0].get("team", {}).get("name", "")
+                assist_list.append({
+                    "name": player.get("name", ""),
+                    "team": team_name,
+                    "value": str(assist_count),
+                    "stat_label": "Assists",
+                })
+            if assist_list:
+                result["categories"].append({
+                    "name": "Top Assists",
+                    "emoji": "🅰️",
+                    "leaders": assist_list,
+                })
+
+        if result["categories"]:
+            return result
+
+    # ── NBA/NFL/MLB/NHL: Use ESPN leaders endpoint ───────────────────────
+    try:
+        url = f"{ESPN_SITE}/sports/{sport}/{league}/leaders"
+        logger.info(f"Fetching leaders from ESPN: {url}")
+        data = await _fetch_json(url)
+
+        if not data:
+            return None
+
+        result = {"league_name": league_info["name"], "categories": []}
+
+        # ESPN leaders format: {leaders: {categories: [{name, leaders: [{athlete, value}]}]}}
+        leaders_data = data.get("leaders", {})
+        categories = leaders_data.get("categories", [])
+
+        if not categories:
+            # Alternate format: root-level categories
+            categories = data.get("categories", [])
+
+        for cat in categories[:6]:  # Limit to 6 stat categories
+            cat_name = cat.get("displayName", "") or cat.get("name", "")
+            if not cat_name:
+                continue
+
+            leaders = cat.get("leaders", [])
+            leader_list = []
+
+            for leader in leaders[:10]:
+                athlete = leader.get("athlete", {})
+                if not athlete:
+                    continue
+
+                athlete_name = athlete.get("displayName", "")
+                team_info = athlete.get("team", {})
+                team_name = ""
+                if isinstance(team_info, dict):
+                    team_name = team_info.get("abbreviation", "") or team_info.get("displayName", "")
+
+                value = leader.get("displayValue", "") or str(leader.get("value", ""))
+
+                if athlete_name and value:
+                    leader_list.append({
+                        "name": athlete_name,
+                        "team": team_name,
+                        "value": value,
+                        "stat_label": cat_name,
+                    })
+
+            if leader_list:
+                result["categories"].append({
+                    "name": cat_name,
+                    "emoji": "🏆",
+                    "leaders": leader_list,
+                })
+
+        return result if result["categories"] else None
+
+    except Exception as e:
+        logger.error(f"Error fetching leaders for {league_slug}: {e}")
+        return None
+
+
 async def get_team_roster(
     team_id: str,
     sport: str,

@@ -143,6 +143,26 @@ def _stats_handler(m, t):
         )
 
 
+def _leaders_handler(m, t):
+    """League leaders query handler."""
+    return IntentResult(
+        intent="sports_leaders",
+        entities={"query": t},
+        confidence="keyword",
+        raw=t,
+    )
+
+
+def _compare_handler(m, t):
+    """Player comparison handler."""
+    return IntentResult(
+        intent="sports_compare",
+        entities={"query": t},
+        confidence="keyword",
+        raw=t,
+    )
+
+
 def _bet_handler(m, t):
     """Betting-related query handler — infers sub-intent from text."""
     tl = t.lower()
@@ -295,6 +315,40 @@ def build_rules() -> List[Tuple[object, Callable]]:
     rules.append((
         re.compile(r"\b(?:nhl|hockey)\s+(?:schedule|games|upcoming)", re.I),
         _make_schedule_handler("nhl"),
+    ))
+
+    # ── LEADERS ───────────────────────────────────────────────────────────
+
+    rules.append((
+        re.compile(r"\b(?:league|stat(?:istical)?|scoring)\s+leaders?\b", re.I),
+        _leaders_handler,
+    ))
+    rules.append((
+        re.compile(r"\btop\s+(?:scorers?|performers?|players?|assists?)\b", re.I),
+        _leaders_handler,
+    ))
+    rules.append((
+        re.compile(r"\b(?:who|what)\s+(?:is|are)\s+(?:the\s+)?(?:leading|top)\b", re.I),
+        _leaders_handler,
+    ))
+    rules.append((
+        re.compile(r"\b(?:mvp|scoring)\s+(?:race|leader|title)\b", re.I),
+        _leaders_handler,
+    ))
+
+    # ── COMPARE ──────────────────────────────────────────────────────────
+
+    rules.append((
+        re.compile(r"\bcompare\s+\w+\b.+\bvs\.?\b", re.I),
+        _compare_handler,
+    ))
+    rules.append((
+        re.compile(r"\b\w+\s+vs\.?\s+\w+\s+stats?\b", re.I),
+        _compare_handler,
+    ))
+    rules.append((
+        re.compile(r"\b(?:who(?:'s|s| is)\s+better)\b.+\bor\b", re.I),
+        _compare_handler,
     ))
 
     # ── BETTING ───────────────────────────────────────────────────────────

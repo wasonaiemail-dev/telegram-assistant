@@ -549,11 +549,14 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "<code>/stats gamelog &lt;name&gt;</code> — Recent game log\n"
             "<code>/stats team &lt;league&gt; &lt;name&gt;</code> — Team stats\n"
             "<code>/stats roster &lt;league&gt; &lt;name&gt;</code> — Team roster\n\n"
+            "<b>Also try:</b>\n"
+            "<code>/leaders &lt;league&gt;</code> — Top scorers & stat leaders\n"
+            "<code>/compare Player1 vs Player2</code> — Side-by-side comparison\n\n"
             "Examples:\n"
             "  /stats player LeBron James\n"
             "  /stats team nba lakers\n"
-            "  /stats gamelog lebron\n"
-            "  /stats roster nba celtics",
+            "  /leaders nba\n"
+            "  /compare LeBron vs Durant",
             parse_mode="HTML"
         )
         return
@@ -882,6 +885,194 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Use: /stats [player|gamelog|team|roster] ...",
             parse_mode="HTML"
         )
+
+
+async def cmd_leaders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /leaders [league]
+
+    View league leaders (top scorers, stat leaders).
+    Soccer: top scorers + assists from API-Sports.
+    NBA/NFL/MLB/NHL: stat leaders from ESPN.
+    """
+    if update.message.from_user.id != ALLOWED_USER_ID:
+        return
+
+    args = update.message.text.split()[1:] if len(update.message.text.split()) > 1 else []
+
+    if not args:
+        await _show_league_menu(update, "leaders")
+        return
+
+    league_input = args[0].lower()
+    league_slug = sports_config.normalize_league(league_input)
+
+    if not league_slug:
+        await update.message.reply_text(
+            f"❌ Unknown league: <b>{league_input}</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    league_info = sports_config.get_league_info(league_slug)
+    emoji = league_info.get("emoji", "🏆")
+
+    await update.message.reply_text(f"🔍 Fetching {league_info['name']} leaders...", parse_mode="HTML")
+
+    leaders = await stats_api.get_league_leaders(league_slug)
+    if not leaders:
+        await update.message.reply_text(
+            formatting.format_error("Could not fetch league leaders", league_info["name"]),
+            parse_mode="HTML"
+        )
+        return
+
+    message = formatting.format_leaders(leaders, emoji)
+    await update.message.reply_text(message, parse_mode="HTML")
+
+
+async def cmd_compare(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /compare [player1] vs [player2]
+
+    Compare two players' stats side by side.
+    """
+    if update.message.from_user.id != ALLOWED_USER_ID:
+        return
+
+    args = update.message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await update.message.reply_text(
+            "<b>⚔️ Player Comparison</b>\n\n"
+            "Usage: <code>/compare player1 vs player2</code>\n\n"
+            "Examples:\n"
+            "  /compare LeBron James vs Kevin Durant\n"
+            "  /compare Messi vs Ronaldo\n"
+            "  /compare Mahomes vs Allen",
+            parse_mode="HTML"
+        )
+        return
+
+    raw_query = args[1]
+
+    # Split on " vs " or " versus " or " v "
+    import re
+    parts = re.split(r'\s+(?:vs\.?|versus|v)\s+', raw_query, maxsplit=1, flags=re.I)
+
+    if len(parts) != 2:
+        await update.message.reply_text(
+            "❌ Please use 'vs' to separate two player names.\n\n"
+            "Example: <code>/compare LeBron James vs Kevin Durant</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    name1 = parts[0].strip()
+    name2 = parts[1].strip()
+
+    if not name1 or not name2:
+        await update.message.reply_text(
+            "❌ Both player names are required.\n\n"
+            "Example: <code>/compare LeBron James vs Kevin Durant</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    await update.message.reply_text(
+        f"🔍 Comparing {name1} vs {name2}...",
+        parse_mode="HTML"
+    )
+
+    # Search both players in parallel
+    import asyncio
+    results = await asyncio.gather(
+        stats_api.search_player(name1),
+        stats_api.search_player(name2),
+        return_exceptions=True,
+    )
+
+    search1 = results[0] if not isinstance(results[0], Exception) else None
+    search2 = results[1] if not isinstance(results[1], Exception) else None
+
+    if not search1:
+        await update.message.reply_text(
+            f"❌ Could not find player: <b>{name1}</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    if not search2:
+        await update.message.reply_text(
+            f"❌ Could not find player: <b>{name2}</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    player1 = search1[0]
+    player2 = search2[0]
+
+    # Get league info for both players
+    def _resolve_league(player):
+        league_raw = player.get("league") or ""
+        slug = _map_league_name_to_slug(league_raw) if league_raw else None
+        if not slug:
+            sport_val = (player.get("sport") or "").lower()
+            if "football" in sport_val:
+                slug = "nfl"
+            elif "baseball" in sport_val:
+                slug = "mlb"
+            elif "hockey" in sport_val:
+                slug = "nhl"
+            else:
+                slug = "nba"
+        return slug
+
+    slug1 = _resolve_league(player1)
+    slug2 = _resolve_league(player2)
+
+    info1 = sports_config.get_league_info(slug1)
+    info2 = sports_config.get_league_info(slug2)
+
+    if not info1 or not info2:
+        await update.message.reply_text(
+            "❌ Could not determine league for one or both players.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Fetch stats for both players in parallel
+    import asyncio
+    stat_results = await asyncio.gather(
+        stats_api.get_player_stats(
+            player1.get("id"), info1["sport"], info1["league"],
+            player_name=player1.get("name", name1),
+        ),
+        stats_api.get_player_stats(
+            player2.get("id"), info2["sport"], info2["league"],
+            player_name=player2.get("name", name2),
+        ),
+        return_exceptions=True,
+    )
+
+    stats1 = stat_results[0] if not isinstance(stat_results[0], Exception) else None
+    stats2 = stat_results[1] if not isinstance(stat_results[1], Exception) else None
+
+    if not stats1:
+        await update.message.reply_text(
+            f"❌ Could not fetch stats for {player1.get('name', name1)}",
+            parse_mode="HTML"
+        )
+        return
+
+    if not stats2:
+        await update.message.reply_text(
+            f"❌ Could not fetch stats for {player2.get('name', name2)}",
+            parse_mode="HTML"
+        )
+        return
+
+    message = formatting.format_player_comparison(stats1, stats2)
+    await update.message.reply_text(message, parse_mode="HTML")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

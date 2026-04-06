@@ -20,6 +20,8 @@ Commands:
   /sports [setup|config]       — Configure favorite teams and alerts
   /bets [view|add|stats]       — Manage sports betting records
   /stats [player|team|gamelog|roster] — Player and team statistics
+  /leaders [league]            — League leaders and top performers
+  /compare [player] vs [player] — Compare two players side by side
 
 Intents:
   sports_scores, sports_standings, sports_schedule, sports_setup,
@@ -66,6 +68,16 @@ PLUGIN_META = {
             "handler": "plugins.sports.commands.cmd_stats",
             "description": "Player and team statistics",
         },
+        {
+            "command": "leaders",
+            "handler": "plugins.sports.commands.cmd_leaders",
+            "description": "League leaders and top performers",
+        },
+        {
+            "command": "compare",
+            "handler": "plugins.sports.commands.cmd_compare",
+            "description": "Compare two players side by side",
+        },
     ],
 
     # ── Intent routing ──────────────────────────────────────────
@@ -83,6 +95,8 @@ PLUGIN_META = {
         "sports_player_gamelog",
         "sports_team_stats",
         "sports_roster",
+        "sports_leaders",
+        "sports_compare",
     ],
     "intent_handler": "plugins.sports.dispatch.handle_sports_intent",
 
@@ -104,6 +118,8 @@ sports_player_stats  Get player stats, averages, or season numbers by name
 sports_player_gamelog View a player's recent game log or performance history
 sports_team_stats    Get team-level statistics and record
 sports_roster        View a team's current roster
+sports_leaders       Get league leaders, top scorers, stat leaders, MVP race
+sports_compare       Compare two players' stats side by side
 """,
 
     # ── Background jobs ────────────────────────────────────────

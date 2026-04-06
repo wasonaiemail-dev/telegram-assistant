@@ -930,6 +930,37 @@ async def search_team(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# NBA / NFL LEAGUE LEADERS — API-Sports top players endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def get_nba_leaders(
+    league_slug: str = "nba",
+    stat_category: str = "points",
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Get NBA statistical leaders using the /players/statistics endpoint.
+
+    Since API-Sports NBA doesn't have a direct "top scorers" endpoint like
+    soccer, we use /players?search= or rely on ESPN for NBA leaders.
+
+    For now, this returns None to let ESPN handle NBA leaders.
+    """
+    return None
+
+
+async def get_nfl_leaders(
+    league_slug: str = "nfl",
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Get NFL statistical leaders.
+
+    Like NBA, NFL doesn't have a direct top-players endpoint on API-Sports.
+    Returns None to let ESPN handle NFL leaders.
+    """
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # UTILITY: Check if API-Sports is available
 # ═══════════════════════════════════════════════════════════════════════════════
 
