@@ -349,13 +349,18 @@ async def handle_sports_intent(
                 )
 
         elif intent == "sports_compare":
+            # Route through GPT function-calling so player names are extracted correctly.
+            # This works whether the message arrived via keyword rule or Layer 2 GPT.
             query = entities.get("query", intent_result.raw)
-            await update.message.reply_text(
-                "For player comparison, use:\n"
-                "<code>/compare Player1 vs Player2</code>\n\n"
-                "Example: <code>/compare LeBron James vs Kevin Durant</code>",
-                parse_mode="HTML",
-            )
+            from plugins.sports.gpt_nl import gpt_sports_dispatch
+            handled = await gpt_sports_dispatch(query, update, context)
+            if not handled:
+                await update.message.reply_text(
+                    "For player comparison, use:\n"
+                    "<code>/compare Player1 vs Player2</code>\n\n"
+                    "Example: <code>/compare LeBron James vs Kevin Durant</code>",
+                    parse_mode="HTML",
+                )
 
         elif intent == "sports_team_stats":
             query = entities.get("query", intent_result.raw)
