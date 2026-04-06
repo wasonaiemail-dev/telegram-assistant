@@ -154,9 +154,9 @@ def _leaders_handler(m, t):
 
 
 def _compare_handler(m, t):
-    """Player comparison handler."""
+    """Player comparison handler — routes to GPT NL so player names are extracted properly."""
     return IntentResult(
-        intent="sports_compare",
+        intent="sports_nl_query",
         entities={"query": t},
         confidence="keyword",
         raw=t,
