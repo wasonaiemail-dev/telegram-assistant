@@ -560,22 +560,39 @@ async def debug_team_stats(
         if data:
             lines.append(f"<b>{label}</b>: ✅")
             lines.append(f"  keys: {list(data.keys())}")
-            # Check for categories/statistics
-            for k in ["categories", "statistics", "splits", "results", "team", "teams"]:
+            # Dig into results.stats
+            results_obj = data.get("results", {})
+            if isinstance(results_obj, dict) and results_obj:
+                lines.append(f"  results: dict keys={list(results_obj.keys())}")
+                rs = results_obj.get("stats", [])
+                if isinstance(rs, list) and rs:
+                    lines.append(f"  results.stats: list[{len(rs)}]")
+                    first = rs[0]
+                    if isinstance(first, dict):
+                        lines.append(f"    [0] keys: {list(first.keys())}")
+                        lines.append(f"    [0] name={first.get('name','?')}")
+                        lines.append(f"    [0] value={first.get('value','?')}")
+                        lines.append(f"    [0] displayName={first.get('displayName','?')}")
+                    if len(rs) > 1:
+                        lines.append(f"    [1] name={rs[1].get('name','?')}, value={rs[1].get('value','?')}")
+                    if len(rs) > 2:
+                        lines.append(f"    [2] name={rs[2].get('name','?')}, value={rs[2].get('value','?')}")
+                elif isinstance(rs, dict):
+                    lines.append(f"  results.stats: dict keys={list(rs.keys())[:8]}")
+            # Check team info
+            team_obj = data.get("team", {})
+            if isinstance(team_obj, dict) and team_obj:
+                lines.append(f"  team: dict keys={list(team_obj.keys())[:10]}")
+            # Check for categories/statistics at root
+            for k in ["categories", "statistics", "splits"]:
                 if k in data:
                     val = data[k]
                     if isinstance(val, list):
                         lines.append(f"  {k}: list[{len(val)}]")
                         if val and isinstance(val[0], dict):
                             lines.append(f"    [0] keys: {list(val[0].keys())}")
-                            # Show labels/totals if present
-                            for sk in ["labels", "totals", "statistics", "stats", "displayNames"]:
-                                if sk in val[0]:
-                                    sv = val[0][sk]
-                                    if isinstance(sv, list):
-                                        lines.append(f"    [0].{sk}: list[{len(sv)}], first={sv[:3] if sv else '[]'}")
                     elif isinstance(val, dict):
-                        lines.append(f"  {k}: dict keys={list(val.keys())[:10]}")
+                        lines.append(f"  {k}: dict keys={list(val.keys())[:8]}")
         else:
             lines.append(f"<b>{label}</b>: ❌ no data")
         lines.append("")
