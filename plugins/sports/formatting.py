@@ -354,29 +354,58 @@ def format_team_stats(team_data: Dict[str, Any]) -> str:
     if abbrev:
         lines.append(f"<i>{abbrev}</i>")
 
-    # Record if available
-    record = team_data.get("record", {})
-    if record:
-        wins = record.get("wins", "")
-        losses = record.get("losses", "")
-        if wins and losses:
-            lines.append(f"<b>Record:</b> {wins}W-{losses}L")
+    # Record / standing info
+    record_summary = team_data.get("record_summary", "")
+    standing_summary = team_data.get("standing_summary", "")
+    if record_summary:
+        lines.append(f"<b>Record:</b> {record_summary}")
+    if standing_summary:
+        lines.append(f"<b>Standing:</b> {standing_summary}")
     lines.append("")
+
+    # Key stats to highlight (abbreviation -> display priority)
+    # Show the most useful per-game stats, skip raw totals
+    KEY_STATS = {
+        "avgPoints", "avgRebounds", "avgAssists", "avgSteals", "avgBlocks",
+        "avgTurnovers", "avgFouls", "fieldGoalPct", "threePointPct",
+        "freeThrowPct", "avgOffensiveRebounds", "avgDefensiveRebounds",
+        "assistTurnoverRatio", "twoPointFieldGoalPct",
+        "avgFieldGoalsMade", "avgFieldGoalsAttempted",
+        "avgThreePointFieldGoalsMade", "avgThreePointFieldGoalsAttempted",
+        "avgFreeThrowsMade", "avgFreeThrowsAttempted",
+        "gamesPlayed",
+    }
 
     # Stats by category
     stats = team_data.get("stats", {})
     if stats:
         for category, stat_list in stats.items():
-            lines.append(f"<b>{category}</b>")
+            category_display = category.replace("general", "General").replace("offensive", "Offensive").replace("defensive", "Defensive")
+            if category_display[0].islower():
+                category_display = category_display.capitalize()
+            lines.append(f"<b>{category_display}</b>")
             if isinstance(stat_list, list):
-                for stat in stat_list[:8]:  # Limit stats per category
-                    stat_name = stat.get("displayName") or stat.get("name", "")
-                    stat_value = stat.get("value", "-")
+                shown = 0
+                for stat in stat_list:
+                    stat_name_key = stat.get("name", "")
+                    # Filter to key stats only
+                    if stat_name_key not in KEY_STATS:
+                        continue
+                    display_name = stat.get("displayName") or stat_name_key
+                    stat_value = stat.get("displayValue") or stat.get("value", "-")
                     rank = stat.get("rank", "")
 
-                    if stat_name:
+                    if display_name:
                         rank_str = f" (#{rank})" if rank else ""
-                        lines.append(f"  <code>{stat_name:20} {stat_value:>10}{rank_str}</code>")
+                        lines.append(f"  <code>{display_name:28} {str(stat_value):>8}{rank_str}</code>")
+                        shown += 1
+                if shown == 0:
+                    # Show first 6 if no key stats matched
+                    for stat in stat_list[:6]:
+                        display_name = stat.get("displayName") or stat.get("name", "")
+                        stat_value = stat.get("displayValue") or stat.get("value", "-")
+                        if display_name:
+                            lines.append(f"  <code>{display_name:28} {str(stat_value):>8}</code>")
             lines.append("")
 
     return "\n".join(lines)

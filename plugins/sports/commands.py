@@ -875,39 +875,6 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             context.user_data["last_action"] = "roster"
             await update.message.reply_text(message, parse_mode="HTML")
 
-    # ─────────────────────────────────────────────────────────────────────────────
-    # DEBUG (temporary)
-    # ─────────────────────────────────────────────────────────────────────────────
-    elif subcommand == "debug":
-        # /stats debug nba lakers  — dump raw ESPN response structure
-        if len(args) < 3:
-            await update.message.reply_text("Usage: /stats debug &lt;league&gt; &lt;team&gt;", parse_mode="HTML")
-            return
-        league_input = args[1].lower()
-        team_name = " ".join(args[2:])
-        league_slug = sports_config.normalize_league(league_input)
-        if not league_slug:
-            await update.message.reply_text(f"❌ Unknown league: {league_input}", parse_mode="HTML")
-            return
-        await update.message.reply_text(f"🔧 Debug: searching {team_name}...", parse_mode="HTML")
-        team_results = await stats_api.search_team(team_name, league_slug)
-        if not team_results:
-            await update.message.reply_text(f"❌ No teams found: {team_name}", parse_mode="HTML")
-            return
-        team = team_results[0]
-        team_id = team.get("id")
-        league_info = sports_config.get_league_info(league_slug)
-        debug_msg = await stats_api.debug_team_stats(
-            team_id, league_info["sport"], league_info["league"]
-        )
-        # Truncate if too long for Telegram
-        if len(debug_msg) > 4000:
-            debug_msg = debug_msg[:4000] + "\n... (truncated)"
-        await update.message.reply_text(
-            f"<b>🔧 Debug: {team.get('name', team_name)} (ID={team_id})</b>\n\n{debug_msg}",
-            parse_mode="HTML",
-        )
-
     else:
         await update.message.reply_text(
             f"❌ Unknown subcommand: <b>{subcommand}</b>\n\n"

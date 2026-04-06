@@ -492,32 +492,10 @@ async def get_team_stats(
         return None
 
     try:
-        # Try endpoint 1: v3 web /stats (matches player stats pattern)
-        url1 = f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/stats?region=us&lang=en&contentorigin=espn"
+        # Primary: v2 statistics (confirmed working, has full stats)
+        url1 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}/statistics"
         logger.info(f"Fetching team stats from: {url1}")
         data = await _fetch_json(url1)
-
-        if data:
-            logger.info(f"Got team stats data (v3 /stats), top-level keys: {list(data.keys())}")
-            result = _parse_team_stats(data)
-            if result and result.get("stats"):
-                return result
-
-        # Try endpoint 2: v3 web /statistics
-        url2 = f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/statistics?region=us&lang=en&contentorigin=espn"
-        logger.info(f"Trying v3 /statistics: {url2}")
-        data = await _fetch_json(url2)
-
-        if data:
-            logger.info(f"Got team stats data (v3 /statistics), top-level keys: {list(data.keys())}")
-            result = _parse_team_stats(data)
-            if result and result.get("stats"):
-                return result
-
-        # Fallback to endpoint 3: v2 statistics
-        url3 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}/statistics"
-        logger.info(f"Trying v2 stats: {url3}")
-        data = await _fetch_json(url3)
 
         if data:
             logger.info(f"Got team stats data (v2), top-level keys: {list(data.keys())}")
@@ -525,10 +503,10 @@ async def get_team_stats(
             if result and result.get("stats"):
                 return result
 
-        # Fallback to endpoint 4: general team info (at least has name/record)
-        url4 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}"
-        logger.info(f"Trying team overview: {url4}")
-        data = await _fetch_json(url4)
+        # Fallback: general team info (at least has name/record)
+        url2 = f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}"
+        logger.info(f"Trying team overview: {url2}")
+        data = await _fetch_json(url2)
 
         if data:
             logger.info(f"Got team overview data, top-level keys: {list(data.keys())}")
@@ -541,62 +519,6 @@ async def get_team_stats(
     except Exception as e:
         logger.error(f"Error fetching team stats for {team_id}: {e}")
         return None
-
-
-async def debug_team_stats(
-    team_id: str, sport: str, league: str,
-) -> str:
-    """Debug: dump raw ESPN team stats response structure."""
-    import json
-    lines = []
-    endpoints = [
-        (f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/stats?region=us&lang=en&contentorigin=espn", "v3 /stats"),
-        (f"{ESPN_WEB}/sports/{sport}/{league}/teams/{team_id}/statistics?region=us&lang=en&contentorigin=espn", "v3 /statistics"),
-        (f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}/statistics", "v2 /statistics"),
-        (f"{ESPN_SITE}/sports/{sport}/{league}/teams/{team_id}", "v2 overview"),
-    ]
-    for url, label in endpoints:
-        data = await _fetch_json(url)
-        if data:
-            lines.append(f"<b>{label}</b>: ✅")
-            lines.append(f"  keys: {list(data.keys())}")
-            # Dig into results.stats
-            results_obj = data.get("results", {})
-            if isinstance(results_obj, dict) and results_obj:
-                lines.append(f"  results: dict keys={list(results_obj.keys())}")
-                rs = results_obj.get("stats", [])
-                if isinstance(rs, list) and rs:
-                    lines.append(f"  results.stats: list[{len(rs)}]")
-                    first = rs[0]
-                    if isinstance(first, dict):
-                        lines.append(f"    [0] keys: {list(first.keys())}")
-                        lines.append(f"    [0] name={first.get('name','?')}")
-                        lines.append(f"    [0] value={first.get('value','?')}")
-                        lines.append(f"    [0] displayName={first.get('displayName','?')}")
-                    if len(rs) > 1:
-                        lines.append(f"    [1] name={rs[1].get('name','?')}, value={rs[1].get('value','?')}")
-                    if len(rs) > 2:
-                        lines.append(f"    [2] name={rs[2].get('name','?')}, value={rs[2].get('value','?')}")
-                elif isinstance(rs, dict):
-                    lines.append(f"  results.stats: dict keys={list(rs.keys())[:8]}")
-            # Check team info
-            team_obj = data.get("team", {})
-            if isinstance(team_obj, dict) and team_obj:
-                lines.append(f"  team: dict keys={list(team_obj.keys())[:10]}")
-            # Check for categories/statistics at root
-            for k in ["categories", "statistics", "splits"]:
-                if k in data:
-                    val = data[k]
-                    if isinstance(val, list):
-                        lines.append(f"  {k}: list[{len(val)}]")
-                        if val and isinstance(val[0], dict):
-                            lines.append(f"    [0] keys: {list(val[0].keys())}")
-                    elif isinstance(val, dict):
-                        lines.append(f"  {k}: dict keys={list(val.keys())[:8]}")
-        else:
-            lines.append(f"<b>{label}</b>: ❌ no data")
-        lines.append("")
-    return "\n".join(lines) if lines else "No data from any endpoint"
 
 
 def _parse_team_stats(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -623,30 +545,43 @@ def _parse_team_stats(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "stats": {},
         }
 
-        # Extract record
-        record = team.get("record", {})
-        if record:
-            items = record.get("items", [])
-            if items:
-                first_item = items[0] if isinstance(items[0], dict) else {}
-                summary = first_item.get("summary", "")
-                if summary:
-                    result["record_summary"] = summary
-                result["record"] = {
-                    "wins": first_item.get("stats", [{}])[0].get("value", "") if first_item.get("stats") else "",
-                    "losses": first_item.get("stats", [{}])[1].get("value", "") if first_item.get("stats") and len(first_item.get("stats", [])) > 1 else "",
-                }
+        # Extract record — use recordSummary/standingSummary if available
+        record_summary = team.get("recordSummary", "")
+        standing_summary = team.get("standingSummary", "")
+        season_summary = team.get("seasonSummary", "")
+        if record_summary:
+            result["record_summary"] = record_summary
+        if standing_summary:
+            result["standing_summary"] = standing_summary
+        if season_summary:
+            result["season_summary"] = season_summary
+
+        # Fallback: nested record object
+        if not record_summary:
+            record = team.get("record", {})
+            if record:
+                items = record.get("items", [])
+                if items:
+                    first_item = items[0] if isinstance(items[0], dict) else {}
+                    summary = first_item.get("summary", "")
+                    if summary:
+                        result["record_summary"] = summary
 
         # ── Find statistics in multiple locations ─────────────────────────
         stats_list = []
 
-        # Location 1: root-level "results" -> "stats" (v2/statistics endpoint)
+        # Location 1: results.stats.categories (v2/statistics endpoint)
+        # ESPN v2 format: {results: {stats: {categories: [{name, stats: [...]}]}}}
         results_obj = data.get("results", {})
         if isinstance(results_obj, dict):
-            root_stats = results_obj.get("stats", [])
-            if root_stats:
-                # Flat list of stat objects — wrap in a single category
-                stats_list = [{"name": "Team Statistics", "stats": root_stats}]
+            stats_obj = results_obj.get("stats", {})
+            if isinstance(stats_obj, dict):
+                cats = stats_obj.get("categories", [])
+                if cats and isinstance(cats, list):
+                    stats_list = cats
+            elif isinstance(stats_obj, list) and stats_obj:
+                # If results.stats is already a flat list of stat objects
+                stats_list = [{"name": "Team Statistics", "stats": stats_obj}]
 
         # Location 2: root-level "splits" -> "categories"
         if not stats_list:
@@ -714,6 +649,7 @@ def _parse_team_stats(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                             "name": stat.get("name", "") or stat.get("abbreviation", ""),
                             "displayName": stat.get("displayName", "") or stat.get("name", ""),
                             "value": str(stat.get("value", "")),
+                            "displayValue": stat.get("displayValue", ""),
                             "rank": str(stat.get("rank", "")) if stat.get("rank") else "",
                         })
 
