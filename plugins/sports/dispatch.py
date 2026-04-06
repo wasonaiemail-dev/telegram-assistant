@@ -9,6 +9,7 @@ which is read-only in python-telegram-bot v22. Direct API calls are simpler
 and more reliable for NL-triggered intents.
 """
 
+import asyncio
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -371,6 +372,110 @@ async def handle_sports_intent(
                 "Specify the league and team name.",
                 parse_mode="HTML",
             )
+
+        elif intent == "sports_nl_query":
+            # ── Phase 2: GPT function-calling for natural-language sports queries ──
+            # Any message caught by the broad NL keyword rule lands here.
+            # GPT picks the right sports function and parameters.
+            # If GPT says not_sports, fall back to /ask.
+            from plugins.sports.gpt_nl import gpt_sports_dispatch
+            handled = await gpt_sports_dispatch(intent_result.raw, update, context)
+            if not handled:
+                from features.ask import handle_ask
+                await handle_ask(intent_result.raw, update, context)
+
+        elif intent == "sports_compare_nl":
+            # ── Phase 2: NL player compare — player names already extracted by GPT ──
+            player1 = entities.get("player1", "")
+            player2 = entities.get("player2", "")
+
+            if not player1 or not player2:
+                await update.message.reply_text(
+                    "❌ Could not identify two players to compare.\n\n"
+                    "Try: <code>/compare LeBron James vs Kevin Durant</code>",
+                    parse_mode="HTML",
+                )
+                return
+
+            await update.message.reply_text(
+                f"🔍 Comparing {player1} vs {player2}...",
+                parse_mode="HTML",
+            )
+
+            # Search both players in parallel with fuzzy fallback
+            results = await asyncio.gather(
+                search_with_fuzzy_fallback(player1),
+                search_with_fuzzy_fallback(player2),
+                return_exceptions=True,
+            )
+
+            r1 = results[0] if not isinstance(results[0], Exception) else (None, None, None, None)
+            r2 = results[1] if not isinstance(results[1], Exception) else (None, None, None, None)
+
+            p1, slug1, info1, resolved1 = r1
+            p2, slug2, info2, resolved2 = r2
+
+            if resolved1:
+                await update.message.reply_text(
+                    f"💡 Resolved: {player1} → <b>{resolved1}</b>",
+                    parse_mode="HTML",
+                )
+            if resolved2:
+                await update.message.reply_text(
+                    f"💡 Resolved: {player2} → <b>{resolved2}</b>",
+                    parse_mode="HTML",
+                )
+
+            if not p1:
+                await update.message.reply_text(
+                    f"❌ Could not find player: <b>{player1}</b>",
+                    parse_mode="HTML",
+                )
+                return
+            if not p2:
+                await update.message.reply_text(
+                    f"❌ Could not find player: <b>{player2}</b>",
+                    parse_mode="HTML",
+                )
+                return
+            if not info1 or not info2:
+                await update.message.reply_text(
+                    "❌ Could not determine league for one or both players.",
+                    parse_mode="HTML",
+                )
+                return
+
+            # Fetch stats for both players in parallel
+            stat_results = await asyncio.gather(
+                stats_api.get_player_stats(
+                    p1.get("id"), info1["sport"], info1["league"],
+                    player_name=p1.get("name", player1),
+                ),
+                stats_api.get_player_stats(
+                    p2.get("id"), info2["sport"], info2["league"],
+                    player_name=p2.get("name", player2),
+                ),
+                return_exceptions=True,
+            )
+
+            s1 = stat_results[0] if not isinstance(stat_results[0], Exception) else None
+            s2 = stat_results[1] if not isinstance(stat_results[1], Exception) else None
+
+            if not s1:
+                await update.message.reply_text(
+                    f"❌ Could not fetch stats for {p1.get('name', player1)}",
+                    parse_mode="HTML",
+                )
+                return
+            if not s2:
+                await update.message.reply_text(
+                    f"❌ Could not fetch stats for {p2.get('name', player2)}",
+                    parse_mode="HTML",
+                )
+                return
+
+            message = formatting.format_player_comparison(s1, s2)
+            await update.message.reply_text(message, parse_mode="HTML")
 
         else:
             logger.warning(f"Unknown sports intent: {intent}")

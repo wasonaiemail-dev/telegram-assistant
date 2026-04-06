@@ -97,6 +97,8 @@ PLUGIN_META = {
         "sports_roster",
         "sports_leaders",
         "sports_compare",
+        "sports_nl_query",    # Phase 2: broad NL catch-all → GPT function-calling
+        "sports_compare_nl",  # Phase 2: NL player compare with pre-extracted names
     ],
     "intent_handler": "plugins.sports.dispatch.handle_sports_intent",
 
@@ -120,6 +122,8 @@ sports_team_stats    Get team-level statistics and record
 sports_roster        View a team's current roster
 sports_leaders       Get league leaders, top scorers, stat leaders, MVP race
 sports_compare       Compare two players' stats side by side
+sports_nl_query      Any natural-language sports question not matched by specific rules — routes to GPT function-calling
+sports_compare_nl    Compare two players via natural language (names already extracted)
 """,
 
     # ── Background jobs ────────────────────────────────────────

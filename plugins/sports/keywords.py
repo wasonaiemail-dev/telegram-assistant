@@ -163,6 +163,23 @@ def _compare_handler(m, t):
     )
 
 
+def _sports_nl_handler(m, t):
+    """
+    Broad sports NL catch-all handler.
+
+    Routes to sports_nl_query intent for GPT function-calling dispatch.
+    This fires LAST — all specific rules above take priority.
+    If the message turns out not to be a sports question, gpt_nl.py's
+    not_sports() escape hatch falls back to /ask.
+    """
+    return IntentResult(
+        intent="sports_nl_query",
+        entities={"query": t},
+        confidence="keyword",
+        raw=t,
+    )
+
+
 def _bet_handler(m, t):
     """Betting-related query handler — infers sub-intent from text."""
     tl = t.lower()
@@ -434,6 +451,27 @@ def build_rules() -> List[Tuple[object, Callable]]:
     rules.append((
         re.compile(r"\bgame\s*log\b", re.I),
         _stats_handler,
+    ))
+
+    # ── SPORTS NL CATCH-ALL ────────────────────────────────────────────────
+    # Must be LAST — all specific rules above take priority.
+    # Catches any message containing a sports keyword that wasn't already
+    # routed by a specific rule. Routes to GPT function-calling.
+    # If GPT decides it's not actually a sports question, it returns False
+    # and the handler falls back to /ask.
+    rules.append((
+        re.compile(
+            r"\b(?:"
+            r"nba|nfl|mlb|nhl|mls|epl|premier\s+league|bundesliga|la\s+liga"
+            r"|basketball|football|baseball|hockey|soccer"
+            r"|ppg|apg|rpg|bpg|spg|fgp"
+            r"|mvp|dpoy|roty|cy\s+young|all[\s-]star"
+            r"|blocks?|assists?|rebounds?|touchdowns?|home\s+runs?|innings?"
+            r"|nba\s+finals?|super\s+bowl|world\s+series|stanley\s+cup|champions\s+league"
+            r")\b",
+            re.I,
+        ),
+        _sports_nl_handler,
     ))
 
     return rules
