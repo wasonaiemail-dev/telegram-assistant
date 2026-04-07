@@ -11,9 +11,8 @@ and more reliable for NL-triggered intents.
 
 import asyncio
 import logging
-from telegram import Update
-from telegram.ext import ContextTypes
 
+from core.alfred_context import AlfredContext
 from core.intent import IntentResult
 from plugins.sports import espn_api
 from plugins.sports import stats_api
@@ -41,10 +40,27 @@ logger = logging.getLogger(__name__)
 _extract_name_from_query = extract_name_from_query
 
 
+async def _show_league_menu_ctx(ctx: AlfredContext, action: str) -> None:
+    """
+    Show league selection menu via AlfredContext.
+
+    On Telegram: delegates to _show_league_menu (InlineKeyboardMarkup).
+    On Discord: sends a numbered list and instructs user to use !<action> <league>.
+    """
+    if ctx.is_telegram and ctx._update is not None:
+        await _show_league_menu(ctx._update, action)
+        return
+
+    # Discord / other: numbered text list
+    lines = [f"**Select a league for {action}:**\n"]
+    for i, (slug, info) in enumerate(sports_config.LEAGUES.items(), 1):
+        lines.append(f"{i}. {info['emoji']} {info['name']} (`!{action} {slug}`)")
+    await ctx.reply("\n".join(lines))
+
+
 async def handle_sports_intent(
     intent_result: IntentResult,
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    ctx: AlfredContext,
 ) -> None:
     """
     Main intent dispatcher for sports plugin.
@@ -60,20 +76,17 @@ async def handle_sports_intent(
         if intent == "sports_scores":
             league = entities.get("league", "")
             if not league:
-                await _show_league_menu(update, "scores")
+                await _show_league_menu_ctx(ctx, "scores")
                 return
             league_slug = sports_config.normalize_league(league)
             if not league_slug:
-                await _show_league_menu(update, "scores")
+                await _show_league_menu_ctx(ctx, "scores")
                 return
             league_info = sports_config.get_league_info(league_slug)
             emoji = league_info.get("emoji", "🏆")
             scores = await espn_api.get_scores(league_slug)
             if not scores:
-                await update.message.reply_text(
-                    f"{emoji} <b>{league_info['name']} Scores</b>\n\nCould not fetch scores.",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"{emoji} <b>{league_info['name']} Scores</b>\n\nCould not fetch scores.")
                 return
             games = scores.get("games", [])
             team = entities.get("team", "")
@@ -84,59 +97,53 @@ async def handle_sports_intent(
                     if team_lower in g["home_team"].lower() or team_lower in g["away_team"].lower()
                 ]
             message = formatting.format_scoreboard(games, league_info["name"], emoji)
-            await update.message.reply_text(message, parse_mode="HTML")
+            await ctx.reply_html(message)
 
         elif intent == "sports_standings":
             league = entities.get("league", "")
             if not league:
-                await _show_league_menu(update, "standings")
+                await _show_league_menu_ctx(ctx, "standings")
                 return
             league_slug = sports_config.normalize_league(league)
             if not league_slug:
-                await _show_league_menu(update, "standings")
+                await _show_league_menu_ctx(ctx, "standings")
                 return
             league_info = sports_config.get_league_info(league_slug)
             emoji = league_info.get("emoji", "🏆")
             standings = await espn_api.get_standings(league_slug)
             if not standings or not standings.get("standings"):
-                await update.message.reply_text(
-                    f"{emoji} <b>{league_info['name']} Standings</b>\n\nNo data available.",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"{emoji} <b>{league_info['name']} Standings</b>\n\nNo data available.")
                 return
             message = formatting.format_standings(
                 standings["standings"], league_info["name"], emoji
             )
-            await update.message.reply_text(message, parse_mode="HTML")
+            await ctx.reply_html(message)
 
         elif intent == "sports_schedule":
             league = entities.get("league", "")
             if not league:
-                await _show_league_menu(update, "schedule")
+                await _show_league_menu_ctx(ctx, "schedule")
                 return
             league_slug = sports_config.normalize_league(league)
             if not league_slug:
-                await _show_league_menu(update, "schedule")
+                await _show_league_menu_ctx(ctx, "schedule")
                 return
             league_info = sports_config.get_league_info(league_slug)
             emoji = league_info.get("emoji", "🏆")
             schedule = await espn_api.get_schedule(league_slug)
             if not schedule or not schedule.get("games"):
-                await update.message.reply_text(
-                    f"{emoji} <b>{league_info['name']} Schedule</b>\n\nNo upcoming games.",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"{emoji} <b>{league_info['name']} Schedule</b>\n\nNo upcoming games.")
                 return
             message = formatting.format_schedule(
                 schedule["games"], league_info["name"], emoji
             )
-            await update.message.reply_text(message, parse_mode="HTML")
+            await ctx.reply_html(message)
 
         elif intent == "sports_setup":
-            await _show_league_menu(update, "setup")
+            await _show_league_menu_ctx(ctx, "setup")
 
         elif intent == "sports_alert_toggle":
-            await _show_league_menu(update, "setup")
+            await _show_league_menu_ctx(ctx, "setup")
 
         elif intent == "sports_bet_add":
             desc = entities.get("bet_description", intent_result.raw)
@@ -144,17 +151,11 @@ async def handle_sports_intent(
             settings = sports_config.load_sports_settings()
             result = await log_bet_from_text(desc, settings)
             if result and result.get("success"):
-                await update.message.reply_text(
-                    f"✅ <b>Bet Logged</b>\n\n{result.get('summary', 'Bet recorded.')}",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"✅ <b>Bet Logged</b>\n\n{result.get('summary', 'Bet recorded.')}")
             else:
-                await update.message.reply_text(
-                    "📝 To log a bet, try:\n"
+                await ctx.reply_html("📝 To log a bet, try:\n"
                     "<code>/bets add $50 on Chiefs -3 at DraftKings</code>\n\n"
-                    "Or send a screenshot of your bet slip.",
-                    parse_mode="HTML",
-                )
+                    "Or send a screenshot of your bet slip.")
 
         elif intent == "sports_bet_view":
             view = entities.get("view", "")
@@ -163,7 +164,7 @@ async def handle_sports_intent(
                 from plugins.sports.betting import calculate_stats
                 bets = load_bet_history()
                 if not bets:
-                    await update.message.reply_text("No bets tracked yet. Use /bets add to log one.")
+                    await ctx.reply("No bets tracked yet. Use /bets add to log one.")
                     return
                 stats = calculate_stats(bets)
                 msg = (
@@ -174,13 +175,12 @@ async def handle_sports_intent(
                     f"Net P&L: ${stats.get('net_pnl', 0):+.2f}\n"
                     f"ROI: {stats.get('roi', 0):+.1%}"
                 )
-                await update.message.reply_text(msg, parse_mode="HTML")
+                await ctx.reply_html(msg)
             else:
                 from plugins.sports.data import load_bet_history
                 bets = load_bet_history()
                 if not bets:
-                    await update.message.reply_text(
-                        "No bets tracked yet.\n\nUse /bets add or send a bet slip screenshot."
+                    await ctx.reply_html("No bets tracked yet.\n\nUse /bets add or send a bet slip screenshot."
                     )
                 else:
                     recent = bets[-5:]
@@ -192,52 +192,38 @@ async def handle_sports_intent(
                             f"{icon} {b.get('pick', 'Unknown')} @ {b.get('odds', '')}"
                             f" — ${b.get('stake', 0)}"
                         )
-                    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+                    await ctx.reply_html("\n".join(lines))
 
         elif intent == "sports_bet_compare":
-            await update.message.reply_text(
+            await ctx.reply(
                 "📸 Send a screenshot of sportsbook odds and I'll compare lines across books.\n\n"
-                "Supported: DraftKings, FanDuel, BetMGM, Caesars, ESPN Bet, Fanatics, Bovada, MyBookie",
-                parse_mode="HTML",
-            )
+                "Supported: DraftKings, FanDuel, BetMGM, Caesars, ESPN Bet, Fanatics, Bovada, MyBookie")
 
         elif intent == "sports_bet_calculate":
-            await update.message.reply_text(
-                "📊 <b>Bet Sizing Calculator</b>\n\n"
+            await ctx.reply_html("📊 <b>Bet Sizing Calculator</b>\n\n"
                 "Use /bets bankroll to set your unit size, then:\n"
                 "• <b>Fixed Unit:</b> Bet a set multiple of your unit\n"
                 "• <b>Percentage:</b> Risk a % of bankroll\n"
                 "• <b>Kelly Criterion:</b> Optimal sizing based on edge\n\n"
-                "Use /bets stats for full analysis.",
-                parse_mode="HTML",
-            )
+                "Use /bets stats for full analysis.")
 
         elif intent == "sports_player_stats":
             query = entities.get("query", intent_result.raw)
             player_name = extract_name_from_query(query)
             if not player_name:
-                await update.message.reply_text(
-                    "Who would you like stats for? Try: <code>LeBron stats</code>",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html("Who would you like stats for? Try: <code>LeBron stats</code>")
                 return
-            await update.message.reply_text(f"🔍 Looking up {player_name}...")
+            await ctx.reply(f"🔍 Looking up {player_name}...")
 
             # Use fuzzy fallback: direct ESPN search → GPT name resolve → retry
             player, league_slug, league_info, resolved_name = await search_with_fuzzy_fallback(player_name)
 
             if not player:
-                await update.message.reply_text(
-                    f"❌ No players found matching: <b>{player_name}</b>",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"❌ No players found matching: <b>{player_name}</b>")
                 return
 
             if resolved_name:
-                await update.message.reply_text(
-                    f"💡 Showing results for <b>{resolved_name}</b>",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"💡 Showing results for <b>{resolved_name}</b>")
 
             sport = league_info["sport"] if league_info else "basketball"
             league = league_info["league"] if league_info else "nba"
@@ -247,39 +233,27 @@ async def handle_sports_intent(
             )
             if player_stats:
                 msg = formatting.format_player_stats(player_stats)
-                await update.message.reply_text(msg, parse_mode="HTML")
+                await ctx.reply_html(msg)
             else:
-                await update.message.reply_text(
-                    f"❌ Could not fetch stats for {player.get('name', player_name)}",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"❌ Could not fetch stats for {player.get('name', player_name)}")
 
         elif intent == "sports_player_gamelog":
             query = entities.get("query", intent_result.raw)
             player_name = extract_name_from_query(query)
             if not player_name:
-                await update.message.reply_text(
-                    "Whose game log? Try: <code>LeBron game log</code>",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html("Whose game log? Try: <code>LeBron game log</code>")
                 return
-            await update.message.reply_text(f"🔍 Looking up {player_name}...")
+            await ctx.reply(f"🔍 Looking up {player_name}...")
 
             # Use fuzzy fallback: direct ESPN search → GPT name resolve → retry
             player, league_slug, league_info, resolved_name = await search_with_fuzzy_fallback(player_name)
 
             if not player:
-                await update.message.reply_text(
-                    f"❌ No players found matching: <b>{player_name}</b>",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"❌ No players found matching: <b>{player_name}</b>")
                 return
 
             if resolved_name:
-                await update.message.reply_text(
-                    f"💡 Showing results for <b>{resolved_name}</b>",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"💡 Showing results for <b>{resolved_name}</b>")
 
             sport = league_info["sport"] if league_info else "basketball"
             league = league_info["league"] if league_info else "nba"
@@ -289,12 +263,9 @@ async def handle_sports_intent(
             )
             if gamelog:
                 msg = formatting.format_player_gamelog(gamelog)
-                await update.message.reply_text(msg, parse_mode="HTML")
+                await ctx.reply_html(msg)
             else:
-                await update.message.reply_text(
-                    f"❌ Could not fetch game log for {player.get('name', player_name)}",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"❌ Could not fetch game log for {player.get('name', player_name)}")
 
         elif intent == "sports_leaders":
             query = entities.get("query", intent_result.raw)
@@ -318,12 +289,12 @@ async def handle_sports_intent(
                         break
 
             if not league:
-                await _show_league_menu(update, "leaders")
+                await _show_league_menu_ctx(ctx, "leaders")
                 return
 
             league_slug = sports_config.normalize_league(league)
             if not league_slug:
-                await _show_league_menu(update, "leaders")
+                await _show_league_menu_ctx(ctx, "leaders")
                 return
 
             # Extract specific stat category from query (e.g., "blocks", "assists")
@@ -334,35 +305,26 @@ async def handle_sports_intent(
             league_info = sports_config.get_league_info(league_slug)
             emoji = league_info.get("emoji", "🏆")
             cat_label = f" {stat_filter}" if stat_filter else ""
-            await update.message.reply_text(f"🔍 Fetching {league_info['name']}{cat_label} leaders...")
+            await ctx.reply(f"🔍 Fetching {league_info['name']}{cat_label} leaders...")
             leaders = await stats_api.get_league_leaders(league_slug)
             if leaders:
                 # Filter to specific category if requested
                 if stat_filter:
                     leaders = _filter_leaders_category(leaders, stat_filter)
                 msg = formatting.format_leaders(leaders, emoji)
-                await update.message.reply_text(msg, parse_mode="HTML")
+                await ctx.reply_html(msg)
             else:
-                await update.message.reply_text(
-                    f"❌ Could not fetch leaders for {league_info['name']}",
-                    parse_mode="HTML",
-                )
+                await ctx.reply_html(f"❌ Could not fetch leaders for {league_info['name']}")
 
         elif intent == "sports_team_stats":
             query = entities.get("query", intent_result.raw)
-            await update.message.reply_text(
-                "For team stats, use: <code>/stats team nba lakers</code>\n"
-                "Specify the league and team name.",
-                parse_mode="HTML",
-            )
+            await ctx.reply_html("For team stats, use: <code>/stats team nba lakers</code>\n"
+                "Specify the league and team name.")
 
         elif intent == "sports_roster":
             query = entities.get("query", intent_result.raw)
-            await update.message.reply_text(
-                "For a roster, use: <code>/stats roster nba lakers</code>\n"
-                "Specify the league and team name.",
-                parse_mode="HTML",
-            )
+            await ctx.reply_html("For a roster, use: <code>/stats roster nba lakers</code>\n"
+                "Specify the league and team name.")
 
         elif intent == "sports_nl_query":
             # ── Phase 2: GPT function-calling for natural-language sports queries ──
@@ -370,25 +332,22 @@ async def handle_sports_intent(
             # GPT picks the right sports function and parameters.
             # If GPT says not_sports, fall back to /ask.
             from plugins.sports.gpt_nl import gpt_sports_dispatch
-            handled = await gpt_sports_dispatch(intent_result.raw, update, context)
+            if ctx.is_telegram and ctx._update is not None:
+                handled = await gpt_sports_dispatch(intent_result.raw, ctx._update, ctx._context)
+            else:
+                handled = False  # GPT NL not yet ctx-aware for Discord
             if not handled:
                 from features.ask import handle_ask
-                await handle_ask(intent_result.raw, update, context)
+                await handle_ask(intent_result.raw, ctx)
 
         else:
             logger.warning(f"Unknown sports intent: {intent}")
-            await update.message.reply_text(
-                "Try /scores, /standings, /schedule, /stats, or /bets",
-                parse_mode="HTML",
-            )
+            await ctx.reply_html("Try /scores, /standings, /schedule, /stats, or /bets")
 
     except Exception as e:
         logger.error(f"Sports dispatch error for {intent}: {e}", exc_info=True)
-        await update.message.reply_text(
-            "Something went wrong. Try the command directly:\n"
-            "/scores, /standings, /schedule, or /bets",
-            parse_mode="HTML",
-        )
+        await ctx.reply_html("Something went wrong. Try the command directly:\n"
+            "/scores, /standings, /schedule, or /bets")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

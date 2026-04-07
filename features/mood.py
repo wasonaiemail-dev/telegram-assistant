@@ -28,6 +28,7 @@ import re
 from zoneinfo import ZoneInfo
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME, TIMEZONE
@@ -277,11 +278,8 @@ async def handle_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_mood_intent(intent: str, entities: dict, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_mood_intent(intent: str, entities: dict, ctx: AlfredContext) -> None:
     """Route MOOD_LOG and MOOD_VIEW intents."""
-    if not update.message:
-        return
-
     data = load_data()
 
     if intent == MOOD_LOG:
@@ -291,22 +289,22 @@ async def handle_mood_intent(intent: str, entities: dict, update: Update, contex
 
         if rating is None:
             # Try to extract from text
-            text = update.message.text or ""
+            text = ctx.text or ""
             match = re.search(r'(\d+)\s*(?:/10)?', text)
             if match:
                 rating = int(match.group(1))
             else:
-                await update.message.reply_text("Please include a rating (1–10) like '8/10' or just '8'.")
+                await ctx.reply("Please include a rating (1–10) like '8/10' or just '8'.")
                 return
 
         msg = log_mood(rating, note, data)
-        await update.message.reply_text(msg)
+        await ctx.reply(msg)
 
     elif intent == MOOD_VIEW:
         days = entities.get("days", 7)
         entries = get_mood_trend(days, data)
         if not entries:
-            await update.message.reply_text(f"No mood entries in the last {days} days.")
+            await ctx.reply(f"No mood entries in the last {days} days.")
             return
 
         lines = [f"📊 *Mood History (Last {days} Days)*\n"]
@@ -316,4 +314,4 @@ async def handle_mood_intent(intent: str, entities: dict, update: Update, contex
             note = e.get("note", "")
             lines.append(f"{e.get('date')} • {rating}/10 {emoji}" + (f" • {note}" if note else ""))
 
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        await ctx.reply("\n".join(lines), parse_mode="Markdown")

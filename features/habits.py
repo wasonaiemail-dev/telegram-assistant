@@ -42,6 +42,8 @@ import datetime
 from zoneinfo import ZoneInfo
 
 from telegram import Update
+
+from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import (
@@ -303,8 +305,7 @@ async def cmd_habits(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def handle_habit_intent(
     intent:   str,
     entities: dict,
-    update:   Update,
-    context:  ContextTypes.DEFAULT_TYPE,
+    ctx:      AlfredContext,
 ) -> None:
     """Dispatch HABIT_LOG and HABIT_VIEW intents."""
 
@@ -315,17 +316,14 @@ async def handle_habit_intent(
         habit_id = entities.get("habit_id", "")
         if not habit_id or habit_id not in HABITS:
             # Shouldn't happen (keyword rules only fire for known habits)
-            await update.message.reply_text(
-                "I didn't catch which habit that was. Try /habits log [habit]."
-            )
+            await ctx.reply("I didn't catch which habit that was. Try /habits log [habit].")
             return
 
         today = _today_str()
         done  = _logged_today(habit_log)
 
         if habit_id in done:
-            await update.message.reply_text(
-                f"✅ *{_label(habit_id)}* already logged for today.",
+            await ctx.reply(f"✅ *{_label(habit_id)}* already logged for today.",
                 parse_mode="Markdown",
             )
             return
@@ -347,13 +345,12 @@ async def handle_habit_intent(
         else:
             msg = f"✅ *{_label(habit_id)}* logged! _{done_count}/{total} today._"
 
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await ctx.reply_markdown(msg)
         return
 
     # ── HABIT_VIEW ────────────────────────────────────────────────────────────
     if intent == HABIT_VIEW:
-        await update.message.reply_text(
-            _format_today_status(habit_log),
+        await ctx.reply(_format_today_status(habit_log),
             parse_mode="Markdown",
         )
         return

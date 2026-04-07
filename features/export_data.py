@@ -24,6 +24,8 @@ import datetime
 from io import BytesIO
 
 from telegram import Update
+
+from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import EXPORT_DIR
@@ -295,7 +297,10 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_export_intent(intent: str, entities: dict, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_export_intent(intent: str, entities: dict, ctx: AlfredContext) -> None:
     """Handle EXPORT_DATA intent."""
     if intent == EXPORT_DATA:
-        await cmd_export(update, context)
+        if ctx.is_telegram and ctx._update is not None:
+            await cmd_export(ctx._update, ctx._context)
+        else:
+            await ctx.reply("Data export is available on Telegram. Use /export there.")

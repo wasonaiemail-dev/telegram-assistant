@@ -40,6 +40,8 @@ CONTEXT INJECTION
 
 import logging
 from telegram import Update
+
+from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME
@@ -204,8 +206,7 @@ async def cmd_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_contact_intent(
     intent:   str,
     entities: dict,
-    update:   Update,
-    context:  ContextTypes.DEFAULT_TYPE,
+    ctx:      AlfredContext,
 ) -> None:
     """Dispatch all CONTACT_* intents."""
 
@@ -215,19 +216,15 @@ async def handle_contact_intent(
     if intent == CONTACT_VIEW:
         name = (entities.get("name") or "").strip()
         if not name:
-            await update.message.reply_text(
-                _format_contacts_list(contacts),
+            await ctx.reply(_format_contacts_list(contacts),
                 parse_mode="Markdown",
             )
             return
         canon, notes = _find_contact(contacts, name)
         if not canon:
-            await update.message.reply_text(
-                f"No contact found matching \"{name}\". Run /contacts to see your list."
-            )
+            await ctx.reply(f"No contact found matching \"{name}\". Run /contacts to see your list.")
             return
-        await update.message.reply_text(
-            _format_contact(canon, notes or []),
+        await ctx.reply(_format_contact(canon, notes or []),
             parse_mode="Markdown",
         )
         return
@@ -238,9 +235,7 @@ async def handle_contact_intent(
         note = (entities.get("note") or "").strip()
 
         if not name:
-            await update.message.reply_text(
-                "Who should I add? Try: \"add a note about [name]: [detail]\""
-            )
+            await ctx.reply("Who should I add? Try: \"add a note about [name]: [detail]\"")
             return
 
         # Normalize name
@@ -253,30 +248,18 @@ async def handle_contact_intent(
             if note:
                 contacts[canon].append(note)
                 _save(contacts)
-                await update.message.reply_text(
-                    f"✓ Added note to *{canon}*: _{note}_",
-                    parse_mode="Markdown",
-                )
+                await ctx.reply_markdown(f"✓ Added note to *{canon}*: _{note}_")
             else:
-                await update.message.reply_text(
-                    f"*{canon}* already exists. What note should I add?\n"
-                    f"Try: \"add note about {canon}: [detail]\"",
-                    parse_mode="Markdown",
-                )
+                await ctx.reply_markdown(f"*{canon}* already exists. What note should I add?\n"
+                    f"Try: \"add note about {canon}: [detail]\"")
         else:
             # New contact
             contacts[name_title] = [note] if note else []
             _save(contacts)
             if note:
-                await update.message.reply_text(
-                    f"✓ Added *{name_title}* with note: _{note}_",
-                    parse_mode="Markdown",
-                )
+                await ctx.reply_markdown(f"✓ Added *{name_title}* with note: _{note}_")
             else:
-                await update.message.reply_text(
-                    f"✓ Added *{name_title}* to contacts.",
-                    parse_mode="Markdown",
-                )
+                await ctx.reply_markdown(f"✓ Added *{name_title}* to contacts.")
         return
 
     # ── CONTACT_UPDATE ────────────────────────────────────────────────────────
@@ -285,9 +268,7 @@ async def handle_contact_intent(
         note = (entities.get("note") or "").strip()
 
         if not name:
-            await update.message.reply_text(
-                "Who should I update? Try: \"update [name]: [new note]\""
-            )
+            await ctx.reply("Who should I update? Try: \"update [name]: [new note]\"")
             return
 
         canon, existing_notes = _find_contact(contacts, name)
@@ -296,24 +277,15 @@ async def handle_contact_intent(
             name_title = name.title()
             contacts[name_title] = [note] if note else []
             _save(contacts)
-            await update.message.reply_text(
-                f"✓ Added *{name_title}* with note: _{note}_",
-                parse_mode="Markdown",
-            )
+            await ctx.reply_markdown(f"✓ Added *{name_title}* with note: _{note}_")
             return
 
         if not note:
-            await update.message.reply_text(
-                f"What should I add for *{canon}*? "
-                f"Try: \"update {canon}: [note]\"",
-                parse_mode="Markdown",
-            )
+            await ctx.reply_markdown(f"What should I add for *{canon}*? "
+                f"Try: \"update {canon}: [note]\"")
             return
 
         contacts[canon].append(note)
         _save(contacts)
-        await update.message.reply_text(
-            f"✓ Updated *{canon}*: _{note}_",
-            parse_mode="Markdown",
-        )
+        await ctx.reply_markdown(f"✓ Updated *{canon}*: _{note}_")
         return

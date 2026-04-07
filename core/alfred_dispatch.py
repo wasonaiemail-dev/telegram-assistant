@@ -136,15 +136,111 @@ async def alfred_dispatch(
             from features.reminders import handle_reminder_intent
             await handle_reminder_intent(intent, ents, ctx)
 
+        # -- SHOPPING ---------------------------------------------------------
+        elif intent in (SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR):
+            from features.shopping import handle_shopping_intent
+            await handle_shopping_intent(intent, ents, ctx)
+
+        # -- CALENDAR ---------------------------------------------------------
+        elif intent in (CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE):
+            from features.calendar import handle_calendar_intent
+            await handle_calendar_intent(intent, ents, ctx)
+
+        # -- HABITS -----------------------------------------------------------
+        elif intent in (HABIT_LOG, HABIT_VIEW):
+            from features.habits import handle_habit_intent
+            await handle_habit_intent(intent, ents, ctx)
+
+        # -- GIFTS ------------------------------------------------------------
+        elif intent in (GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE):
+            from features.gifts import handle_gift_intent
+            await handle_gift_intent(intent, ents, ctx)
+
+        # -- CONTACTS ---------------------------------------------------------
+        elif intent in (CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE):
+            from features.contacts import handle_contact_intent
+            await handle_contact_intent(intent, ents, ctx)
+
+        # -- MOOD -------------------------------------------------------------
+        elif intent in (MOOD_LOG, MOOD_VIEW):
+            from features.mood import handle_mood_intent
+            await handle_mood_intent(intent, ents, ctx)
+
+        # -- LINKS (READ-LATER) -----------------------------------------------
+        elif intent in (LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE):
+            from features.links import handle_link_intent
+            await handle_link_intent(intent, ents, ctx)
+
+        # -- EXPORT -----------------------------------------------------------
+        elif intent == EXPORT_DATA:
+            from features.export_data import handle_export_intent
+            await handle_export_intent(intent, ents, ctx)
+
+        # -- BRIEFING ---------------------------------------------------------
+        elif intent == BRIEFING:
+            from features.briefing import send_briefing_ctx
+            await send_briefing_ctx(ctx)
+
+        # -- WEATHER ----------------------------------------------------------
+        elif intent == WEATHER:
+            from features.briefing import send_weather_ctx
+            location = ents.get("location")
+            await send_weather_ctx(ctx, location=location)
+
+        # -- MEMORY -----------------------------------------------------------
+        elif intent == MEMORY_ADD:
+            cat  = ents.get("category", "")
+            fact = ents.get("fact", "")
+            if cat and fact:
+                from core.data import add_memory_fact
+                ok, err = add_memory_fact(cat, fact)
+                if ok:
+                    await ctx.reply_markdown(f"Remembered under *{cat}*: _{fact}_")
+                else:
+                    await ctx.reply(f"Couldn't save that: {err}")
+            else:
+                await ctx.reply(
+                    "Use `/memory add [category] [fact]` to save a memory."
+                )
+
+        elif intent == MEMORY_REMOVE:
+            await ctx.reply(
+                "To remove a specific fact, use `/memory remove [category] [number]`."
+            )
+
+        elif intent == MEMORY_VIEW:
+            if ctx.is_telegram and ctx._update is not None:
+                ctx._context.args = [ents.get("category", "")] if ents.get("category") else []
+                from features.memory import cmd_memory
+                await cmd_memory(ctx._update, ctx._context)
+            else:
+                # Discord: plain-text memory dump
+                cat = ents.get("category", "")
+                from core.data import load_data
+                data = load_data()
+                memories = data.get("memories", {})
+                if cat:
+                    memories = {cat: memories.get(cat, [])}
+                if not memories or not any(memories.values()):
+                    await ctx.reply("No memories saved yet.")
+                else:
+                    lines = ["🧠 *Memories*\n"]
+                    for category, facts in memories.items():
+                        if facts:
+                            lines.append(f"*{category}*")
+                            for i, f in enumerate(facts, 1):
+                                lines.append(f"  {i}. {f}")
+                    await ctx.reply_markdown("\n".join(lines))
+
         # -- ASK / UNKNOWN ----------------------------------------------------
         elif intent in (ASK, UNKNOWN):
             from features.ask import handle_ask
             await handle_ask(ctx.text, ctx)
 
         # ─────────────────────────────────────────────────────────────────────
-        # UNMIGRATED FEATURES
-        # Telegram: pass through via ctx._update / ctx._context (unchanged).
-        # Discord: return "coming soon" message.
+        # UNMIGRATED FEATURES (Telegram pass-through only)
+        # Discord: returns "coming soon" message.
+        # Phase 4C: migrate meals, workout, journal, reply_assist, weekly_summary
         # ─────────────────────────────────────────────────────────────────────
 
         elif ctx.is_discord:
@@ -152,7 +248,7 @@ async def alfred_dispatch(
             return
 
         else:
-            # Telegram pass-through for all unmigrated handlers
+            # Telegram pass-through for remaining unmigrated handlers
             update  = ctx._update
             context = ctx._context
 
@@ -162,75 +258,8 @@ async def alfred_dispatch(
 
             from telegram.constants import ParseMode
 
-            # -- SHOPPING ---------------------------------------------------------
-            if intent in (SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR):
-                from features.shopping import handle_shopping_intent
-                await handle_shopping_intent(intent, ents, update, context)
-
-            # -- CALENDAR ---------------------------------------------------------
-            elif intent in (CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE):
-                from features.calendar import handle_calendar_intent
-                await handle_calendar_intent(intent, ents, update, context)
-
-            # -- HABITS -----------------------------------------------------------
-            elif intent in (HABIT_LOG, HABIT_VIEW):
-                from features.habits import handle_habit_intent
-                await handle_habit_intent(intent, ents, update, context)
-
-            # -- GIFTS ------------------------------------------------------------
-            elif intent in (GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE):
-                from features.gifts import handle_gift_intent
-                await handle_gift_intent(intent, ents, update, context)
-
-            # -- MEMORY -----------------------------------------------------------
-            elif intent == MEMORY_ADD:
-                cat  = ents.get("category", "")
-                fact = ents.get("fact", "")
-                if cat and fact:
-                    from core.data import add_memory_fact
-                    ok, err = add_memory_fact(cat, fact)
-                    if ok:
-                        await update.message.reply_text(
-                            f"Remembered under *{cat}*: _{fact}_",
-                            parse_mode=ParseMode.MARKDOWN,
-                        )
-                    else:
-                        await update.message.reply_text(f"Couldn't save that: {err}")
-                else:
-                    await update.message.reply_text(
-                        "Use `/memory add [category] [fact]` to save a memory.",
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
-
-            elif intent == MEMORY_VIEW:
-                context.args = [ents.get("category", "")] if ents.get("category") else []
-                from features.memory import cmd_memory
-                await cmd_memory(update, context)
-
-            elif intent == MEMORY_REMOVE:
-                await update.message.reply_text(
-                    "To remove a specific fact, use `/memory remove [category] [number]`.",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-
-            # -- CONTACTS ---------------------------------------------------------
-            elif intent in (CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE):
-                from features.contacts import handle_contact_intent
-                await handle_contact_intent(intent, ents, update, context)
-
-            # -- BRIEFING ---------------------------------------------------------
-            elif intent == BRIEFING:
-                from features.briefing import send_briefing
-                await send_briefing(context, update.effective_chat.id)
-
-            # -- WEATHER ----------------------------------------------------------
-            elif intent == WEATHER:
-                from features.briefing import send_weather
-                location = ents.get("location")
-                await send_weather(context, update.effective_chat.id, location=location)
-
             # -- WEEKLY SUMMARY ---------------------------------------------------
-            elif intent == WEEKLY_SUMMARY:
+            if intent == WEEKLY_SUMMARY:
                 from features.summary import send_weekly_summary
                 await send_weekly_summary(context, update.effective_chat.id)
 
@@ -256,21 +285,6 @@ async def alfred_dispatch(
             elif intent in (REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD):
                 from features.reply_assist import handle_reply_intent
                 await handle_reply_intent(intent, ents, update, context)
-
-            # -- MOOD -------------------------------------------------------------
-            elif intent in (MOOD_LOG, MOOD_VIEW):
-                from features.mood import handle_mood_intent
-                await handle_mood_intent(intent, ents, update, context)
-
-            # -- LINKS (READ-LATER) -----------------------------------------------
-            elif intent in (LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE):
-                from features.links import handle_link_intent
-                await handle_link_intent(intent, ents, update, context)
-
-            # -- EXPORT -----------------------------------------------------------
-            elif intent == EXPORT_DATA:
-                from features.export_data import handle_export_intent
-                await handle_export_intent(intent, ents, update, context)
 
             # -- PLUGIN INTENTS (fallback) ----------------------------------------
             else:
@@ -320,15 +334,9 @@ async def _dispatch_plugin_with_ctx(
     for plugin in plugins:
         if intent in plugin.intents and plugin.intent_handler:
             try:
-                if ctx.is_telegram and ctx._update is not None:
-                    # Telegram: use existing handler signature
-                    await plugin.intent_handler(
-                        intent_result, ctx._update, ctx._context
-                    )
-                else:
-                    # Discord or other: pass ctx if handler supports it
-                    # Future: all plugin handlers will accept ctx
-                    await ctx.reply(_DISCORD_COMING_SOON)
+                # Phase 4: all plugin intent handlers accept ctx (AlfredContext).
+                # Sports plugin migrated in Phase 4B. Future plugins should follow suit.
+                await plugin.intent_handler(intent_result, ctx)
                 return True
             except Exception as e:
                 logger.error(

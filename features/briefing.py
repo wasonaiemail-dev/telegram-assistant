@@ -595,6 +595,91 @@ async def send_weather(context, chat_id: int, location: str | None = None) -> No
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# AlfredContext wrappers — for user-triggered /briefing and WEATHER intent
+# Background job path (send_briefing / send_weather) remains unchanged.
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def send_briefing_ctx(ctx) -> None:
+    """
+    Send the morning briefing via AlfredContext.
+
+    Composes sections and sends them using ctx.reply().
+    Background job still calls send_briefing(context, chat_id) directly.
+    """
+    from core.data import load_data, get_briefing_settings
+    try:
+        data = load_data()
+        bs   = get_briefing_settings(data)
+    except Exception as e:
+        logger.error(f"send_briefing_ctx: failed to load data: {e}", exc_info=True)
+        await ctx.reply("⚠️ Briefing unavailable — data load failed.")
+        return
+
+    import asyncio
+    enabled = bs.get("enabled", list(_SECTION_BUILDERS.keys()))
+    order   = [s for s in bs.get("order", list(_SECTION_BUILDERS.keys())) if s in enabled]
+
+    now = _now_local()
+
+    tasks = {key: asyncio.create_task(_SECTION_BUILDERS[key](now))
+             for key in order if key in _SECTION_BUILDERS}
+    results = {}
+    for key, task in tasks.items():
+        try:
+            results[key] = await task
+        except Exception:
+            results[key] = ""
+
+    sections = [f"☀️ *{_greeting(now)}, {_fmt_date(now)}*"]
+    for key in order:
+        val = results.get(key, "")
+        if val:
+            sections.append(val)
+
+    full_text = "\n\n".join(s for s in sections if s)
+
+    # Split long briefings (ctx.reply handles Discord 2000-char limit internally)
+    if len(full_text) <= 4000:
+        await ctx.reply_markdown(full_text)
+    else:
+        # Chunk on double newlines to respect section boundaries
+        chunks = []
+        current = ""
+        for section in sections:
+            candidate = current + ("\n\n" if current else "") + section
+            if len(candidate) > 3800 and current:
+                chunks.append(current)
+                current = section
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
+        for chunk in chunks:
+            await ctx.reply_markdown(chunk)
+
+
+async def send_weather_ctx(ctx, location: str | None = None) -> None:
+    """Send a weather report via AlfredContext."""
+    if location:
+        coords = await _geocode_city(location)
+        if not coords:
+            await ctx.reply(f"Sorry, I couldn't find weather data for '{location}'.")
+            return
+        lat, lon = coords
+        city = location.title()
+    else:
+        lat, lon = WEATHER_LAT, WEATHER_LON
+        city = HOME_CITY.title()
+
+    w = await _get_weather(lat, lon)
+    if not w:
+        await ctx.reply("Sorry, weather data is unavailable right now.")
+        return
+
+    await ctx.reply_markdown(_format_weather(w, city=city))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PUBLIC: send_travel_weather
 # ─────────────────────────────────────────────────────────────────────────────
 

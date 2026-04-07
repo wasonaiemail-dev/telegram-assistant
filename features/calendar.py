@@ -37,6 +37,8 @@ import datetime
 from zoneinfo import ZoneInfo
 
 from telegram import Update
+
+from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME, TIMEZONE
@@ -164,14 +166,13 @@ async def _send_calendar_view(reply_fn, svc, raw_range: str) -> None:
 async def handle_calendar_intent(
     intent:   str,
     entities: dict,
-    update:   Update,
-    context:  ContextTypes.DEFAULT_TYPE,
+    ctx:      AlfredContext,
 ) -> None:
     """Dispatch all CAL_* intents."""
 
     svc = _get_service()
     if not svc:
-        await update.message.reply_text(_auth_error_msg())
+        await ctx.reply(_auth_error_msg())
         return
 
     # ── CAL_VIEW ──────────────────────────────────────────────────────────────
@@ -190,9 +191,7 @@ async def handle_calendar_intent(
         recur       = entities.get("recur", "")
 
         if not title:
-            await update.message.reply_text(
-                "What's the event title? Try: \"add [title] on [date] at [time]\""
-            )
+            await ctx.reply("What's the event title? Try: \"add [title] on [date] at [time]\"")
             return
 
         # Use Quick Add if we don't have a clean start time
@@ -201,15 +200,12 @@ async def handle_calendar_intent(
             result = quick_add_event(svc, title)
             if result:
                 from adapters.google_calendar import format_event_brief
-                await update.message.reply_text(
-                    f"✅ Added: *{format_event_brief(result)}*",
+                await ctx.reply(f"✅ Added: *{format_event_brief(result)}*",
                     parse_mode="Markdown",
                 )
             else:
-                await update.message.reply_text(
-                    f"Sorry, I couldn't add that event. Try being more specific:\n"
-                    f"\"add [title] on [date] at [time]\""
-                )
+                await ctx.reply(f"Sorry, I couldn't add that event. Try being more specific:\n"
+                    f"\"add [title] on [date] at [time]\"")
             return
 
         # We have a start time — use create_event
@@ -228,9 +224,7 @@ async def handle_calendar_intent(
                 end_dt = start_dt + datetime.timedelta(hours=1)  # default 1h
 
         except ValueError as e:
-            await update.message.reply_text(
-                f"I couldn't parse that date/time. Try: \"[title] on March 15 at 2pm\""
-            )
+            await ctx.reply(f"I couldn't parse that date/time. Try: \"[title] on March 15 at 2pm\"")
             return
 
         kwargs = {"location": location, "description": description}
@@ -245,12 +239,11 @@ async def handle_calendar_intent(
 
         if result:
             from adapters.google_calendar import format_event_brief
-            await update.message.reply_text(
-                f"✅ Added: *{format_event_brief(result)}*",
+            await ctx.reply(f"✅ Added: *{format_event_brief(result)}*",
                 parse_mode="Markdown",
             )
         else:
-            await update.message.reply_text("Couldn't create that event. Please try again.")
+            await ctx.reply("Couldn't create that event. Please try again.")
         return
 
     # ── CAL_DELETE ────────────────────────────────────────────────────────────
@@ -259,9 +252,7 @@ async def handle_calendar_intent(
         date_str  = entities.get("date", "")
 
         if not title:
-            await update.message.reply_text(
-                "Which event should I cancel? Try: \"cancel my 3pm meeting\""
-            )
+            await ctx.reply("Which event should I cancel? Try: \"cancel my 3pm meeting\"")
             return
 
         from adapters.google_calendar import find_event_by_title, delete_event, format_event_brief
@@ -273,21 +264,16 @@ async def handle_calendar_intent(
 
         match = find_event_by_title(svc, title, start=start, end=end)
         if not match:
-            await update.message.reply_text(
-                f"I couldn't find an event matching \"{title}\". "
-                f"Run /cal week to see upcoming events."
-            )
+            await ctx.reply(f"I couldn't find an event matching \"{title}\". "
+                f"Run /cal week to see upcoming events.")
             return
 
         brief  = format_event_brief(match)
         cal_id = match.get("_calendar_id", "primary")
         if delete_event(svc, match["id"], calendar_id=cal_id):
-            await update.message.reply_text(
-                f"✅ Cancelled: *{brief}*",
-                parse_mode="Markdown",
-            )
+            await ctx.reply_markdown(f"✅ Cancelled: *{brief}*")
         else:
-            await update.message.reply_text("Couldn't cancel that event. Try again.")
+            await ctx.reply("Couldn't cancel that event. Try again.")
         return
 
     # ── CAL_UPDATE ────────────────────────────────────────────────────────────
@@ -297,9 +283,7 @@ async def handle_calendar_intent(
         new_end   = entities.get("new_end", "").strip()
 
         if not title:
-            await update.message.reply_text(
-                "Which event should I update? Try: \"move my 3pm meeting to 4pm\""
-            )
+            await ctx.reply("Which event should I update? Try: \"move my 3pm meeting to 4pm\"")
             return
 
         from adapters.google_calendar import find_event_by_title, update_event, format_event_brief
@@ -310,10 +294,8 @@ async def handle_calendar_intent(
 
         match = find_event_by_title(svc, title, start=start, end=end)
         if not match:
-            await update.message.reply_text(
-                f"I couldn't find an event matching \"{title}\". "
-                f"Run /cal week to see upcoming events."
-            )
+            await ctx.reply(f"I couldn't find an event matching \"{title}\". "
+                f"Run /cal week to see upcoming events.")
             return
 
         update_fields: dict = {}
@@ -331,25 +313,20 @@ async def handle_calendar_intent(
                     ne = tz.localize(ne)
                 update_fields["end"] = ne
         except ValueError:
-            await update.message.reply_text(
-                "I couldn't parse the new time. Try: \"move [title] to [time]\""
-            )
+            await ctx.reply("I couldn't parse the new time. Try: \"move [title] to [time]\"")
             return
 
         if not update_fields:
-            await update.message.reply_text(
-                "What should I change? I can update the start time, end time, "
-                "title, or location. Try: \"move [event] to [new time]\""
-            )
+            await ctx.reply("What should I change? I can update the start time, end time, "
+                "title, or location. Try: \"move [event] to [new time]\"")
             return
 
         cal_id = match.get("_calendar_id", "primary")
         result = update_event(svc, match["id"], calendar_id=cal_id, **update_fields)
         if result:
-            await update.message.reply_text(
-                f"✅ Updated: *{format_event_brief(result)}*",
+            await ctx.reply(f"✅ Updated: *{format_event_brief(result)}*",
                 parse_mode="Markdown",
             )
         else:
-            await update.message.reply_text("Couldn't update that event. Try again.")
+            await ctx.reply("Couldn't update that event. Try again.")
         return

@@ -36,7 +36,7 @@ Alfred has **two simultaneous goals:**
 
 ---
 
-## Current Status: ✅ Phase 4A Complete — Committed & Pushed April 6, 2026. Pick up Phase 4B tomorrow.
+## Current Status: ✅ Phase 4B Complete — All feature handlers migrated to AlfredContext. April 7, 2026.
 
 - Core bot: Deployed and running on Railway, all 20+ commands working
 - Sports Pack: **Phases 1, 1.5, 2, and 3 complete. Full regression tested April 6, 2026.**
@@ -525,11 +525,33 @@ telegram-assistant/
 
 ---
 
-*Last updated: April 6, 2026 (Session 15 — Phase 4B in progress. ask/todos/reminders/notes migrated to AlfredContext — all work on Discord now. Next: briefing, sports commands, then remaining features.)*
+*Last updated: April 7, 2026 (Session 16 — Phase 4B complete. All feature handlers migrated to AlfredContext. Discord now supports: todos, notes, reminders, shopping, calendar, habits, gifts, contacts, mood, links, export, briefing, weather, memory, sports NL. Remaining pass-through (Telegram only): meals, workout, journal, reply_assist, weekly_summary — deferred to Phase 4C.)*
 
 ---
 
 ## Session History (newest first)
+
+**Session 16 — Phase 4B Complete: All Core Handlers Migrated to AlfredContext (April 7, 2026)**
+
+Completed the Phase 4B migration. Discord now supports the vast majority of Alfred's features.
+
+*Migrated to AlfredContext (work on Telegram + Discord):*
+- `features/todos.py`, `features/notes.py`, `features/reminders.py`, `features/ask.py` — done in Session 15
+- `features/shopping.py`, `features/calendar.py`, `features/habits.py`, `features/gifts.py`, `features/contacts.py` — fully migrated
+- `features/mood.py`, `features/links.py`, `features/export_data.py` — fixed signatures + ctx.text refs
+- `features/briefing.py` — added `send_briefing_ctx(ctx)` and `send_weather_ctx(ctx)` wrappers (background jobs unchanged)
+- `plugins/sports/dispatch.py` — fully migrated to `handle_sports_intent(intent_result, ctx)`; `_show_league_menu_ctx(ctx, action)` shows numbered list on Discord, inline keyboard on Telegram
+- `core/alfred_dispatch.py` — restructured: all migrated handlers at top with ctx; `_dispatch_plugin_with_ctx` now passes ctx directly to all plugin intent handlers; pass-through section reduced to 4 remaining handlers
+
+*Remaining Telegram-only (Phase 4C):*
+- `features/meals.py`, `features/workout.py`, `features/journal.py`, `features/reply_assist.py` — 26-34 reply_text calls each; stable pass-through, Discord gets "coming soon"
+- `features/memory.py` cmd (MEMORY_VIEW on Telegram uses inline keyboard; MEMORY_VIEW on Discord uses plain-text list — already handled inline in alfred_dispatch.py)
+- `features/summary.py` (WEEKLY_SUMMARY)
+
+*Plugin dispatch update:*
+- `_dispatch_plugin_with_ctx` now calls `plugin.intent_handler(intent_result, ctx)` directly. All future plugins should accept ctx.
+
+---
 
 **Session 14 — Phase 4A: Cross-Platform Architecture (April 6, 2026)**
 

@@ -34,6 +34,8 @@ AUTO-ROUTING
 
 import logging
 from telegram import Update
+
+from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME, SHOPPING_KEYWORDS
@@ -208,23 +210,20 @@ async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_shopping_intent(
     intent:   str,
     entities: dict,
-    update:   Update,
-    context:  ContextTypes.DEFAULT_TYPE,
+    ctx:      AlfredContext,
 ) -> None:
     """Dispatch all SHOP_* intents."""
 
     svc = _get_service()
     if not svc:
-        await update.message.reply_text(_auth_error_msg())
+        await ctx.reply(_auth_error_msg())
         return
 
     # ── SHOP_ADD ──────────────────────────────────────────────────────────────
     if intent == SHOP_ADD:
         item_text = entities.get("item", "").strip()
         if not item_text:
-            await update.message.reply_text(
-                "What should I add? Try: \"add milk to the grocery list\""
-            )
+            await ctx.reply("What should I add? Try: \"add milk to the grocery list\"")
             return
 
         list_key = _normalize_list_key(entities.get("list", "")) or _auto_route_list(item_text)
@@ -233,12 +232,9 @@ async def handle_shopping_intent(
         from adapters.google_tasks import add_shopping_item
         result = add_shopping_item(svc, list_key, item_text)
         if result:
-            await update.message.reply_text(
-                f"✓ Added *{item_text}* to *{label}*.",
-                parse_mode="Markdown",
-            )
+            await ctx.reply_markdown(f"✓ Added *{item_text}* to *{label}*.")
         else:
-            await update.message.reply_text(f"Couldn't add that to {label}. Try again.")
+            await ctx.reply(f"Couldn't add that to {label}. Try again.")
         return
 
     # ── SHOP_LIST ─────────────────────────────────────────────────────────────
@@ -247,21 +243,19 @@ async def handle_shopping_intent(
         if raw_list in ("all", "", None):
             from adapters.google_tasks import list_all_shopping
             all_items = list_all_shopping(svc)
-            await update.message.reply_text(
-                _format_all_lists(all_items),
+            await ctx.reply(_format_all_lists(all_items),
                 parse_mode="Markdown",
             )
         else:
             list_key = _normalize_list_key(raw_list)
             if not list_key:
                 keys_str = ", ".join(_get_lists().keys())
-                await update.message.reply_text(f"Unknown list. Options: {keys_str}")
+                await ctx.reply(f"Unknown list. Options: {keys_str}")
                 return
             from adapters.google_tasks import list_shopping
             items = list_shopping(svc, list_key, include_done=False)
             label = _get_lists()[list_key]
-            await update.message.reply_text(
-                _format_list(items, label),
+            await ctx.reply(_format_list(items, label),
                 parse_mode="Markdown",
             )
         return
@@ -281,17 +275,12 @@ async def handle_shopping_intent(
             if match:
                 label = _get_lists()[key]
                 if complete_shopping_item(svc, key, match["id"]):
-                    await update.message.reply_text(
-                        f"✓ Checked off *{match['title']}* from *{label}*.",
-                        parse_mode="Markdown",
-                    )
+                    await ctx.reply_markdown(f"✓ Checked off *{match['title']}* from *{label}*.")
                 else:
-                    await update.message.reply_text("Couldn't check that off. Try again.")
+                    await ctx.reply("Couldn't check that off. Try again.")
                 return
 
-        await update.message.reply_text(
-            f"I couldn't find \"{item_query}\" on any shopping list."
-        )
+        await ctx.reply(f"I couldn't find \"{item_query}\" on any shopping list.")
         return
 
     # ── SHOP_DELETE ───────────────────────────────────────────────────────────
@@ -308,17 +297,12 @@ async def handle_shopping_intent(
             if match:
                 label = _get_lists()[key]
                 if delete_shopping_item(svc, key, match["id"]):
-                    await update.message.reply_text(
-                        f"✓ Removed *{match['title']}* from *{label}*.",
-                        parse_mode="Markdown",
-                    )
+                    await ctx.reply_markdown(f"✓ Removed *{match['title']}* from *{label}*.")
                 else:
-                    await update.message.reply_text("Couldn't remove that. Try again.")
+                    await ctx.reply("Couldn't remove that. Try again.")
                 return
 
-        await update.message.reply_text(
-            f"I couldn't find \"{item_query}\" on any shopping list."
-        )
+        await ctx.reply(f"I couldn't find \"{item_query}\" on any shopping list.")
         return
 
     # ── SHOP_CLEAR ────────────────────────────────────────────────────────────
@@ -332,15 +316,13 @@ async def handle_shopping_intent(
             total = 0
             for key in _get_lists():
                 total += clear_completed_shopping(svc, key)
-            await update.message.reply_text(
-                f"✓ Cleared {total} checked item(s) from all shopping lists.",
+            await ctx.reply(f"✓ Cleared {total} checked item(s) from all shopping lists.",
             )
         else:
             from adapters.google_tasks import clear_completed_shopping
             removed = clear_completed_shopping(svc, list_key)
             label   = _get_lists()[list_key]
-            await update.message.reply_text(
-                f"✓ Cleared {removed} checked item(s) from *{label}*.",
+            await ctx.reply(f"✓ Cleared {removed} checked item(s) from *{label}*.",
                 parse_mode="Markdown",
             )
         return

@@ -35,6 +35,7 @@ import re
 import requests
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import LINKS_FILE, OPENAI_API_KEY, GPT_CHAT_MODEL
@@ -294,47 +295,53 @@ async def handle_link_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_link_intent(intent: str, entities: dict, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_link_intent(intent: str, entities: dict, ctx: AlfredContext) -> None:
     """Route LINK_* intents."""
-    if not update.message:
-        return
-
     if intent == LINK_SAVE:
         url = entities.get("url", "")
         if not url:
             # Try to extract from text
-            text = update.message.text or ""
+            text = ctx.text or ""
             url_match = re.search(r'https?://[^\s]+', text)
             if not url_match:
-                await update.message.reply_text("Please include a URL (starting with http:// or https://)")
+                await ctx.reply("Please include a URL (starting with http:// or https://)")
                 return
             url = url_match.group(0)
 
         note = entities.get("note", "")
 
-        await update.message.reply_text("📚 Saving and extracting…")
+        await ctx.reply("📚 Saving and extracting…")
         try:
             entry = await save_link(url, note)
-            await update.message.reply_text(
-                f"✓ Saved: *{entry.get('title')}*\n\n_{entry.get('summary', '')}_",
+            await ctx.reply(f"✓ Saved: *{entry.get('title')}*\n\n_{entry.get('summary', '')}_",
                 parse_mode="Markdown",
             )
         except Exception as e:
             logger.error(f"links: save error: {e}")
-            await update.message.reply_text(f"❌ Failed to save link: {e}")
+            await ctx.reply(f"❌ Failed to save link: {e}")
 
     elif intent == LINK_VIEW:
-        await cmd_readlater(update, context)
+        if ctx.is_telegram and ctx._update is not None:
+            await cmd_readlater(ctx._update, ctx._context)
+        else:
+            links = search_links("")
+            if not links:
+                await ctx.reply("No saved links yet.")
+            else:
+                lines = ["📚 *Saved Links*\n"]
+                for i, link in enumerate(links[:10], 1):
+                    lines.append(f"{i}. {link.get('title', link.get('url', 'Unknown'))[:60]}")
+                await ctx.reply_markdown("\n".join(lines))
 
     elif intent == LINK_SEARCH:
         query = entities.get("query", "")
         if not query:
-            await update.message.reply_text("What would you like to search for?")
+            await ctx.reply("What would you like to search for?")
             return
 
         results = search_links(query)
         if not results:
-            await update.message.reply_text(f"No links found matching '{query}'")
+            await ctx.reply(f"No links found matching '{query}'")
             return
 
         lines = [f"🔍 *Search Results for '{query}'* ({len(results)} found)\n"]
@@ -343,12 +350,12 @@ async def handle_link_intent(intent: str, entities: dict, update: Update, contex
             if link.get("tags"):
                 lines.append(f"  `{', '.join(link.get('tags', [])[:2])}`")
 
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        await ctx.reply("\n".join(lines), parse_mode="Markdown")
 
     elif intent == LINK_MARK_READ:
         # User said "mark that as read" — not fully implemented without context tracking
-        await update.message.reply_text("Use the buttons in /readlater to mark links as read.")
+        await ctx.reply("Use the buttons in /readlater to mark links as read.")
 
     elif intent == LINK_SNOOZE:
         # Similarly incomplete without context
-        await update.message.reply_text("Use the buttons in /readlater to snooze links.")
+        await ctx.reply("Use the buttons in /readlater to snooze links.")
