@@ -40,6 +40,9 @@ Supported leagues: **NFL, NBA, MLB, NHL, NCAAF, NCAAB, EPL, MLS, Bundesliga, La 
 - Add favorite teams for monitoring
 - Enable/disable game day alerts
 - Set betting bankroll and unit size
+- **📊 Briefing Settings** — in-app toggle menu for Reddit highlights, YouTube top plays, player tracking
+- `/sports addplayer <name>` — add a player to your morning briefing tracker
+- `/sports removeplayer <name>` — remove a tracked player
 
 ### Betting Tracker (`/bets`)
 - Log bets with odds and stake
@@ -51,21 +54,30 @@ Supported leagues: **NFL, NBA, MLB, NHL, NCAAF, NCAAB, EPL, MLS, Bundesliga, La 
 Injected automatically into the daily briefing if the buyer has favorite teams/leagues configured.
 
 - **Yesterday's results** for all favorite leagues — every game, not just favorites
-- **Top 3 performers per game** — ranked by composite score (PTS + REB×0.5 + AST×0.5) from ESPN box score API. Each player shows pts/reb/ast (+ STL/BLK if non-zero)
+- **Top 3 performers per game** — ranked by PTS + REB×0.5 + AST×0.5 composite from ESPN box score API
+  - Core stats always shown: pts, reb, ast
+  - **3PT:** shown as `X/Y 3PT` if ≥4 attempts + ≥35% efficiency + ≥2 made (e.g. `5/11 3PT`)
+  - **STL / BLK:** shown if ≥2 (1 is routine; 2+ is a standout defensive night)
 - **Favorite team games** highlighted with ⭐
 - **Reddit highlights** (default ON) — top Highlight-flair posts per league from `r/<sub>/top.json` (free, no key, rate-limited ~60 req/min). Filters to video posts (Streamable, v.redd.it, YouTube, etc.)
 - **YouTube top plays** (default OFF) — if `YOUTUBE_API_KEY` is set, fetches the actual top-play video from the official league channel. Without the key, generates a YouTube search URL (no API cost, always works)
+- **Tracked player stat lines** (default OFF) — add players with `/sports addplayer <name>`. Stats pulled from already-fetched box scores — zero extra API calls. Shows "did not play yesterday" if player wasn't in any box score.
+
+**Configuring via Telegram:**
+- `/sports` → tap **📊 Briefing Settings** to toggle Reddit/YouTube/player tracking on/off
+- `/sports addplayer LeBron James` — add a tracked player
+- `/sports removeplayer LeBron James` — remove a tracked player
+- Turning player tracking ON shows a one-time API quota warning popup
 
 **API cost summary:**
 | Source | Cost | Notes |
 |---|---|---|
-| ESPN box score | Free, no key | ~2 calls/league/day |
+| ESPN scoreboard + box score | Free, no key | ~2 calls/league/day |
 | Reddit highlights | Free, no key | ~1 call/subreddit/day |
 | YouTube (no key) | Free | Search URL, no API call |
 | YouTube (with key) | Free tier: 10K units/day | ~2 units per query |
-| API-Sports (player tracking) | 100 req/day free tier | ~3-5 calls/player/day — opt-in |
+| Player tracking | Free | Scanned from box scores already fetched |
 
-Configurable via `/sports` → Briefing Settings (toggle reddit, youtube, player tracking on/off).
 Section silently skipped if no favorite teams/leagues are set.
 
 **Buyer settings (in `settings.json`):**
@@ -183,4 +195,4 @@ No authentication required.
 - GPT function-calling has `not_sports` escape hatch: non-sports NL queries fall back to `/ask`
 - Never crashes the bot; always sends a response to the user
 
-*Last updated: April 6, 2026 (Session 13 — Phase 3 morning briefing complete)*
+*Last updated: April 6, 2026 (Session 13 — Phase 3 fully complete + deployed)*

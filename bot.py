@@ -96,6 +96,8 @@ from core.plugin_loader import (
     get_all_plugin_intents,
     list_plugins,
 )
+from adapters.telegram_adapter import make_context as _make_telegram_ctx
+from core.alfred_dispatch import alfred_dispatch
 
 logger = logging.getLogger(__name__)
 
@@ -476,7 +478,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
     intent_result = await classify(text)
-    await _dispatch(intent_result, update, context)
+    # Build platform context and dispatch through the platform-agnostic dispatcher.
+    # _dispatch() is kept for backward compat but alfred_dispatch() is the future path.
+    ctx = _make_telegram_ctx(update, context)
+    await alfred_dispatch(intent_result, ctx, _loaded_plugins)
 
 
 # =============================================================================

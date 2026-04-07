@@ -1,0 +1,433 @@
+"""
+alfred/core/alfred_dispatch.py
+================================
+Platform-agnostic intent dispatcher.
+
+USAGE
+-----
+Both bot.py (Telegram) and discord_bot.py (Discord) call this:
+
+    from core.alfred_dispatch import alfred_dispatch
+    await alfred_dispatch(intent_result, ctx, loaded_plugins)
+
+HOW MIGRATION WORKS
+-------------------
+Each feature handler is either:
+
+  MIGRATED    — accepts (intent, ents, ctx: AlfredContext)
+                Works on all platforms.
+
+  UNMIGRATED  — accepts (intent, ents, update, context)
+                On Telegram: works via ctx._update / ctx._context pass-through.
+                On Discord:  returns a friendly "coming soon" message.
+
+As we migrate features file by file, move them from the UNMIGRATED
+section to the MIGRATED section of this dispatcher. Eventually the
+UNMIGRATED section will be empty.
+
+MIGRATION CHECKLIST
+-------------------
+  MIGRATED (Phase 4):
+    [x] Sports plugin (via plugin_loader dispatch)
+    [ ] ask / unknown
+    [ ] todos
+    [ ] notes
+    [ ] reminders
+    [ ] shopping
+    [ ] calendar
+    [ ] habits
+    [ ] gifts
+    [ ] contacts
+    [ ] meals
+    [ ] workout
+    [ ] journal
+    [ ] reply_assist
+    [ ] mood
+    [ ] links
+    [ ] export
+    [ ] memory
+    [ ] briefing
+    [ ] weather
+    [ ] weekly_summary
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import traceback
+
+from core.alfred_context import AlfredContext
+
+logger = logging.getLogger(__name__)
+
+# Message shown on Discord for features not yet migrated to AlfredContext
+_DISCORD_COMING_SOON = (
+    "⚙️ This feature isn't available on Discord yet — it's being migrated. "
+    "Use the Telegram bot in the meantime."
+)
+
+
+async def alfred_dispatch(
+    intent_result,
+    ctx: AlfredContext,
+    loaded_plugins: list,
+) -> None:
+    """
+    Dispatch a classified intent to the appropriate feature handler.
+
+    For MIGRATED features: passes ctx (works on all platforms).
+    For UNMIGRATED features on Telegram: uses ctx._update / ctx._context.
+    For UNMIGRATED features on Discord: sends a friendly "coming soon" message.
+    """
+    from core.intent import (
+        TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
+        SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
+        NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND,
+        CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
+        HABIT_LOG, HABIT_VIEW,
+        REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
+        GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE,
+        MEMORY_ADD, MEMORY_VIEW, MEMORY_REMOVE,
+        CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE,
+        MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
+        MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS,
+        WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN, WORKOUT_REBUILD,
+        WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY,
+        JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH, JOURNAL_MONTH, JOURNAL_WINS,
+        REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD,
+        MOOD_LOG, MOOD_VIEW,
+        LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
+        EXPORT_DATA,
+        BRIEFING, WEATHER, WEEKLY_SUMMARY,
+        ASK, UNKNOWN,
+    )
+
+    from core.plugin_loader import dispatch_plugin_intent
+
+    intent = intent_result.intent
+    ents   = intent_result.entities
+
+    try:
+        # ── PLUGIN INTENTS (migrated — plugin handlers support ctx) ──────────
+        # Try plugins first for sports, betting, etc.
+        if intent not in _CORE_INTENTS:
+            handled = await _dispatch_plugin_with_ctx(
+                intent_result, ctx, loaded_plugins
+            )
+            if handled:
+                return
+
+        # ─────────────────────────────────────────────────────────────────────
+        # UNMIGRATED FEATURES
+        # These use ctx._update / ctx._context for Telegram.
+        # On Discord they return a "coming soon" message.
+        # ─────────────────────────────────────────────────────────────────────
+
+        # For unmigrated features on Discord, show coming soon
+        if ctx.is_discord and intent not in _DISCORD_SUPPORTED_INTENTS:
+            await ctx.reply(_DISCORD_COMING_SOON)
+            return
+
+        # Pass-through for Telegram (unchanged behavior)
+        update  = ctx._update
+        context = ctx._context
+
+        if update is None:
+            # Should not happen on Telegram, safety check
+            await ctx.reply("Platform error: no update context available.")
+            return
+
+        # Re-import parse mode for Telegram
+        from telegram.constants import ParseMode
+
+        # -- TODOS ------------------------------------------------------------
+        if intent in (TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE):
+            from features.todos import handle_todo_intent
+            await handle_todo_intent(intent, ents, update, context)
+
+        # -- SHOPPING ---------------------------------------------------------
+        elif intent in (SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR):
+            from features.shopping import handle_shopping_intent
+            await handle_shopping_intent(intent, ents, update, context)
+
+        # -- NOTES ------------------------------------------------------------
+        elif intent in (NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND):
+            from features.notes import handle_note_intent
+            await handle_note_intent(intent, ents, update, context)
+
+        # -- CALENDAR ---------------------------------------------------------
+        elif intent in (CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE):
+            from features.calendar import handle_calendar_intent
+            await handle_calendar_intent(intent, ents, update, context)
+
+        # -- HABITS -----------------------------------------------------------
+        elif intent in (HABIT_LOG, HABIT_VIEW):
+            from features.habits import handle_habit_intent
+            await handle_habit_intent(intent, ents, update, context)
+
+        # -- REMINDERS --------------------------------------------------------
+        elif intent in (REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE):
+            from features.reminders import handle_reminder_intent
+            await handle_reminder_intent(intent, ents, update, context)
+
+        # -- GIFTS ------------------------------------------------------------
+        elif intent in (GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE):
+            from features.gifts import handle_gift_intent
+            await handle_gift_intent(intent, ents, update, context)
+
+        # -- MEMORY -----------------------------------------------------------
+        elif intent == MEMORY_ADD:
+            cat  = ents.get("category", "")
+            fact = ents.get("fact", "")
+            if cat and fact:
+                from core.data import add_memory_fact
+                ok, err = add_memory_fact(cat, fact)
+                if ok:
+                    await update.message.reply_text(
+                        f"Remembered under *{cat}*: _{fact}_",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                else:
+                    await update.message.reply_text(f"Couldn't save that: {err}")
+            else:
+                await update.message.reply_text(
+                    "Use `/memory add [category] [fact]` to save a memory.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+
+        elif intent == MEMORY_VIEW:
+            context.args = [ents.get("category", "")] if ents.get("category") else []
+            from features.memory import cmd_memory
+            await cmd_memory(update, context)
+
+        elif intent == MEMORY_REMOVE:
+            await update.message.reply_text(
+                "To remove a specific fact, use `/memory remove [category] [number]`.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+
+        # -- CONTACTS ---------------------------------------------------------
+        elif intent in (CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE):
+            from features.contacts import handle_contact_intent
+            await handle_contact_intent(intent, ents, update, context)
+
+        # -- BRIEFING ---------------------------------------------------------
+        elif intent == BRIEFING:
+            from features.briefing import send_briefing
+            await send_briefing(context, update.effective_chat.id)
+
+        # -- WEATHER ----------------------------------------------------------
+        elif intent == WEATHER:
+            from features.briefing import send_weather
+            location = ents.get("location")
+            await send_weather(context, update.effective_chat.id, location=location)
+
+        # -- WEEKLY SUMMARY ---------------------------------------------------
+        elif intent == WEEKLY_SUMMARY:
+            from features.summary import send_weekly_summary
+            await send_weekly_summary(context, update.effective_chat.id)
+
+        # -- MEALS -----------------------------------------------------------
+        elif intent in (MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
+                        MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS):
+            from features.meals import handle_meal_intent
+            await handle_meal_intent(intent, ents, update, context)
+
+        # -- WORKOUT ----------------------------------------------------------
+        elif intent in (WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN,
+                        WORKOUT_REBUILD, WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY):
+            from features.workout import handle_workout_intent
+            await handle_workout_intent(intent, ents, update, context)
+
+        # -- JOURNAL ----------------------------------------------------------
+        elif intent in (JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH,
+                        JOURNAL_MONTH, JOURNAL_WINS):
+            from features.journal import handle_journal_intent
+            await handle_journal_intent(intent, ents, update, context)
+
+        # -- REPLY / EMAIL ASSIST ---------------------------------------------
+        elif intent in (REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD):
+            from features.reply_assist import handle_reply_intent
+            await handle_reply_intent(intent, ents, update, context)
+
+        # -- MOOD -------------------------------------------------------------
+        elif intent in (MOOD_LOG, MOOD_VIEW):
+            from features.mood import handle_mood_intent
+            await handle_mood_intent(intent, ents, update, context)
+
+        # -- LINKS (READ-LATER) -----------------------------------------------
+        elif intent in (LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE):
+            from features.links import handle_link_intent
+            await handle_link_intent(intent, ents, update, context)
+
+        # -- EXPORT -----------------------------------------------------------
+        elif intent == EXPORT_DATA:
+            from features.export_data import handle_export_intent
+            await handle_export_intent(intent, ents, update, context)
+
+        # -- ASK / UNKNOWN ----------------------------------------------------
+        elif intent in (ASK, UNKNOWN):
+            from features.ask import handle_ask
+            from features.memory import suggest_memory_fact
+            response_text = await handle_ask(
+                update.message.text or "",
+                update,
+                context,
+            )
+            if response_text:
+                asyncio.create_task(
+                    suggest_memory_fact(
+                        user_text=update.message.text or "",
+                        assistant_text=response_text,
+                        update=update,
+                        context=context,
+                    )
+                )
+
+        # -- PLUGIN INTENTS (fallback for unhandled intents) -------------------
+        else:
+            handled = await dispatch_plugin_intent(
+                intent_result, update, context, loaded_plugins
+            )
+            if not handled:
+                await update.message.reply_text(
+                    "I'm not sure how to handle that. Try `/help` to see what I can do.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+
+    except ImportError as e:
+        logger.warning(f"alfred_dispatch: feature not yet built for intent '{intent}': {e}")
+        await ctx.reply("That feature is coming soon. Try `/help` to see what's available.")
+
+    except Exception as e:
+        logger.error(
+            f"alfred_dispatch: unhandled error for intent '{intent}': {e}\n"
+            f"{traceback.format_exc()}"
+        )
+        await ctx.reply("Something went wrong. Try again, or use a specific command.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PLUGIN DISPATCH WITH CTX
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _dispatch_plugin_with_ctx(
+    intent_result,
+    ctx: AlfredContext,
+    plugins: list,
+) -> bool:
+    """
+    Dispatch a plugin intent.
+
+    Phase 4 transition: plugin handlers still use Telegram (update, context)
+    for their command handlers, but the NL intent dispatch is routed here.
+
+    On Telegram: uses ctx._update / ctx._context pass-through (unchanged behavior).
+    On Discord: returns False for unmigrated plugins (handled by caller).
+
+    Returns True if handled, False if no plugin claimed this intent.
+    """
+    intent = intent_result.intent
+
+    for plugin in plugins:
+        if intent in plugin.intents and plugin.intent_handler:
+            try:
+                if ctx.is_telegram and ctx._update is not None:
+                    # Telegram: use existing handler signature
+                    await plugin.intent_handler(
+                        intent_result, ctx._update, ctx._context
+                    )
+                else:
+                    # Discord or other: pass ctx if handler supports it
+                    # Future: all plugin handlers will accept ctx
+                    await ctx.reply(_DISCORD_COMING_SOON)
+                return True
+            except Exception as e:
+                logger.error(
+                    f"alfred_dispatch: plugin {plugin.name} handler error "
+                    f"for '{intent}': {e}"
+                )
+                await ctx.reply(
+                    f"Something went wrong with the {plugin.name} plugin. "
+                    "Try again or use the command directly."
+                )
+                return True
+
+    return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTENT SETS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_core_intents():
+    """Build the set of all core (non-plugin) intent strings."""
+    try:
+        from core.intent import (
+            TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
+            SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
+            NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND,
+            CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
+            HABIT_LOG, HABIT_VIEW,
+            REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
+            GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE,
+            MEMORY_ADD, MEMORY_VIEW, MEMORY_REMOVE,
+            CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE,
+            MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
+            MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS,
+            WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN, WORKOUT_REBUILD,
+            WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY,
+            JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH, JOURNAL_MONTH, JOURNAL_WINS,
+            REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD,
+            MOOD_LOG, MOOD_VIEW,
+            LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
+            EXPORT_DATA,
+            BRIEFING, WEATHER, WEEKLY_SUMMARY,
+            ASK, UNKNOWN,
+        )
+        return {
+            TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
+            SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
+            NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND,
+            CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
+            HABIT_LOG, HABIT_VIEW,
+            REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
+            GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE,
+            MEMORY_ADD, MEMORY_VIEW, MEMORY_REMOVE,
+            CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE,
+            MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
+            MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS,
+            WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN, WORKOUT_REBUILD,
+            WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY,
+            JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH, JOURNAL_MONTH, JOURNAL_WINS,
+            REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD,
+            MOOD_LOG, MOOD_VIEW,
+            LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
+            EXPORT_DATA,
+            BRIEFING, WEATHER, WEEKLY_SUMMARY,
+            ASK, UNKNOWN,
+        }
+    except ImportError:
+        return set()
+
+
+# Intent sets — populated lazily
+_CORE_INTENTS: set = set()  # populated on first import
+
+# Intents that work on Discord (Phase 4)
+# Expand this as more features are migrated to AlfredContext.
+_DISCORD_SUPPORTED_INTENTS: set = set()  # all plugin intents + ASK/UNKNOWN once migrated
+
+
+def _init_intent_sets():
+    """Initialize intent sets. Called by discord_bot.py on startup."""
+    global _CORE_INTENTS
+    _CORE_INTENTS = _build_core_intents()
+
+
+# Auto-init on import
+try:
+    _init_intent_sets()
+except Exception:
+    pass  # Graceful — will retry when first message is dispatched

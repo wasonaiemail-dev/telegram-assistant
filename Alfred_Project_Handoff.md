@@ -36,7 +36,7 @@ Alfred has **two simultaneous goals:**
 
 ---
 
-## Current Status: ✅ LIVE — Phase 3 (Sports Morning Briefing) Complete
+## Current Status: 🔨 IN PROGRESS — Phase 4A (Cross-Platform Architecture) — April 6, 2026
 
 - Core bot: Deployed and running on Railway, all 20+ commands working
 - Sports Pack: **Phases 1, 1.5, 2, and 3 complete. Full regression tested April 6, 2026.**
@@ -45,7 +45,12 @@ Alfred has **two simultaneous goals:**
   - Working (confirmed): NL sports queries via GPT function-calling — "who leads the NBA in blocks", "how many ppg is Jokic averaging", "NBA scores", "show me Jokic stats", "NBA standings", etc.
   - **Removed:** Player compare (`/compare`) — feature was unreliable across sports due to cross-sport API incompatibilities. Removed entirely April 6, 2026.
   - Rate limit concern: Multi-league soccer fallback can burn ~10-20 API-Sports requests per failed player lookup (100/day free tier)
-- Sports Morning Briefing: **Phase 3 built April 6, 2026.** New file `plugins/sports/briefing.py` — daily sports recap section in `/briefing`. Shows yesterday's results for favorite leagues, top 3 performers per game (PTS+REB+AST composite), optional Reddit highlights (default ON), optional YouTube top plays (default OFF). Hooked into `features/briefing.py` and configurable via setup wizard. Buyers must set favorite teams/leagues first or section is silently skipped.
+- Sports Morning Briefing: **Phase 3 fully complete + deployed April 6, 2026.**
+  - `plugins/sports/briefing.py` — daily recap in `/briefing`: yesterday's results for favorite leagues, top 3 performers per game (PTS + REB×0.5 + AST×0.5), ⭐ favorite team callout, 3PT% shown as X/Y if ≥4 attempts + ≥35%, STL/BLK shown if ≥2
+  - `/sports → 📊 Briefing Settings` — in-app toggle menu for Reddit highlights, YouTube top plays, player tracking on/off; add/clear tracked players
+  - `/sports addplayer <name>` / `/sports removeplayer <name>` — manage tracked players
+  - Tracked player stat lines appear in briefing pulled from already-fetched box scores (zero extra API calls)
+  - Configurable via setup wizard; section silently skipped if no favorite teams/leagues set
 
 ---
 
@@ -126,7 +131,8 @@ All 22 variables are configured in Railway. They are:
 | Player/Team Stats | `/stats` | ✅ Tested (ESPN + API-Sports fallback) |
 | Leaders | `/leaders` | ✅ Tested |
 | Sports NL queries | natural language | ✅ Phase 2 complete — GPT function-calling dispatches all NL sports queries |
-| Sports Morning Briefing | via `/briefing` | ✅ Phase 3 complete — yesterday's results, top 3 performers, Reddit highlights, YouTube links |
+| Sports Morning Briefing | via `/briefing` | ✅ Phase 3 complete — scores, top 3 performers (3PT%/STL/BLK thresholds), Reddit highlights, YouTube, player tracking |
+| Sports Briefing Settings | `/sports` → 📊 | ✅ In-app toggle menu for Reddit/YouTube/player tracking; addplayer/removeplayer commands |
 
 ---
 
@@ -281,17 +287,79 @@ The current ESPN scraping + keyword regex approach has been identified as fragil
 - [x] Hooked into `features/briefing.py` `_SECTION_BUILDERS["sports"]`
 - [x] Added `"sports"` to `_BRIEFING_DEFAULT_ORDER` and `_BRIEFING_ALL_SECTIONS` in `core/data.py`
 - [x] Added `sports` to setup wizard prompt with cost warnings in `features/setup.py`
-- [x] `/sports → Briefing Settings` in-app toggle menu — reddit/youtube/player tracking on/off, add/clear players
+- [x] 3PT displayed as `X/Y 3PT` format — threshold ≥4 attempts + ≥35% efficiency + ≥2 made
+- [x] STL/BLK threshold raised to ≥2 (filters routine single-steal/block noise)
+- [x] `/sports → 📊 Briefing Settings` in-app toggle menu — reddit/youtube/player tracking on/off, add/clear players; cost warning popup on player tracking enable
 - [x] `/sports addplayer <name>` and `/sports removeplayer <name>` text commands
-- [x] Favorite player stat lines — scanned from already-fetched box scores (zero extra API calls)
-- [x] Deployed April 6, 2026
+- [x] Tracked player stat lines — scanned from already-fetched box scores (zero extra API calls); shows "did not play yesterday" if not found
+- [x] Deployed April 6, 2026 — fully confirmed live
 
-**Phase 4 — Cross-Platform Adapters (Next)**
-Rationale: Many bettors are already heavily integrated with Discord. Build platform abstraction before betting so the betting plugin works cross-platform from day 1.
-- [ ] Design abstraction layer separating content generation from platform delivery
-- [ ] Discord adapter (discord.py) — inline YouTube embeds work natively
-- [ ] WhatsApp adapter (Twilio Business API)
-- [ ] Test: briefing, scores, NL queries via Discord and WhatsApp
+**Phase 4 — Cross-Platform Adapters (🔨 IN PROGRESS — Phase 4A complete April 6, 2026)**
+Goal: Support Discord (and optionally WhatsApp) as entirely separate platform alternatives to Telegram. Same bot, same plugins, buyer chooses platform. Betting plugin will be built cross-platform from day 1.
+
+**ARCHITECTURE DECISION (April 6, 2026):**
+Platform adapters live in `core/` and `adapters/`. The key abstraction is `AlfredContext` — a thin wrapper passed to all feature handlers instead of Telegram's (Update, context). Both Telegram and Discord build an AlfredContext from their platform-specific event objects, then route through the same `alfred_dispatch()`.
+
+**New files (Phase 4A):**
+- `core/alfred_context.py` — AlfredContext dataclass: `reply()`, `reply_html()`, `reply_menu()`, `reply_document()`, `send_typing()`, `args`, `user_id`, `chat_id`, `platform`
+- `core/html_utils.py` — `html_to_discord()` converter (Telegram HTML → Discord Markdown)
+- `core/alfred_dispatch.py` — platform-agnostic intent dispatcher (called by both bot.py and discord_bot.py)
+- `adapters/telegram_adapter.py` — `make_context(update, context)` → AlfredContext
+- `adapters/discord_adapter.py` — `make_context(message)` → AlfredContext (auto-splits 2000-char Discord limit)
+- `discord_bot.py` — full Discord entry point: listens for messages, classifies intent, dispatches to alfred_dispatch; direct command routing for !scores, !standings, !schedule, !stats, !leaders, !ask, !help
+
+**Phase 4A Checklist:**
+- [x] AlfredContext abstraction layer built
+- [x] HTML → Discord Markdown converter
+- [x] Telegram adapter (backward compat — wraps existing Telegram update)
+- [x] Discord adapter (auto message splitting, numbered menus for Phase 4 MVP)
+- [x] `core/alfred_dispatch.py` — shared dispatcher for all platforms
+- [x] bot.py updated to build AlfredContext and use alfred_dispatch (fully backward compatible)
+- [x] discord_bot.py — Discord entry point with sports commands + NL routing
+- [x] requirements.txt updated (discord.py commented — uncomment for Discord service)
+- [x] Procfile comment added for running both Telegram + Discord services on Railway
+
+**Phase 4B — Feature Handler Migration (Next):**
+The platform abstraction is built. Each feature handler currently uses (update, context) Telegram types. On Discord, unmigrated features return "coming soon." Migrate in this order (most impactful first):
+- [ ] `features/ask.py` → `handle_ask(text, ctx)` — NL chat on Discord
+- [ ] `features/todos.py` → `handle_todo_intent(intent, ents, ctx)`
+- [ ] `features/reminders.py` → `handle_reminder_intent(intent, ents, ctx)`
+- [ ] `features/notes.py` → `handle_note_intent(intent, ents, ctx)`
+- [ ] `features/briefing.py` → `send_briefing(ctx)` — full briefing on Discord
+- [ ] `plugins/sports/commands.py` → `cmd_scores(ctx)`, `cmd_standings(ctx)`, etc. — use AlfredContext directly
+- [ ] All remaining features
+- [ ] Discord button menus (discord.ui.View) — replace numbered text menus
+- [ ] WhatsApp adapter (Twilio or Meta Cloud API)
+
+**Migration pattern for each handler:**
+```python
+# OLD (Telegram-only):
+async def handle_todo_intent(intent, ents, update: Update, context):
+    await update.message.reply_text(text, parse_mode="HTML")
+
+# NEW (any platform):
+async def handle_todo_intent(intent, ents, ctx: AlfredContext):
+    await ctx.reply_html(text)
+```
+
+**Discord setup for buyers:**
+1. discord.com/developers → New Application → Bot → copy token
+2. Add DISCORD_TOKEN + DISCORD_ALLOWED_USER_ID to Railway env vars
+3. Enable "Message Content Intent" in Bot settings
+4. Add `discord.py>=2.3.2` to requirements.txt (uncomment the line)
+5. Create a second Railway service running `python discord_bot.py`
+6. Invite bot to server with OAuth2 "bot" scope + "Send Messages" permission
+
+**Discord vs Telegram differences (documented):**
+- Discord: `!command` or `/command` prefix (configurable via DISCORD_COMMAND_PREFIX)
+- Discord: no HTML — auto-converted to Markdown by html_to_discord()
+- Discord: no inline keyboards (Phase 4 MVP shows numbered text menus)
+- Discord: 2000-char message limit (auto-split by adapter)
+- Discord: voice transcription not supported (Phase 5 roadmap)
+
+**Phase 4B — WhatsApp adapter (TBD)**
+- Twilio or Meta Cloud API — to be decided
+- [ ] WhatsApp adapter (platform TBD)
 
 **Phase 5 — Betting Plugin (After Cross-Platform)**
 - [ ] Sign up for The-Odds-API free tier, get API key
@@ -457,18 +525,51 @@ telegram-assistant/
 
 ---
 
-*Last updated: April 6, 2026 (Session 13 — Phase 3 fully complete, all features built + deployed)*
+*Last updated: April 6, 2026 (Session 14 — Phase 4A complete. Cross-platform adapter layer built. Discord bot entry point live. Phase 4B: migrate feature handlers to AlfredContext)*
 
 ---
 
 ## Session History (newest first)
 
-**Session 13 — Phase 3: Sports Morning Briefing (April 6, 2026)**
-Built `plugins/sports/briefing.py` (new file, ~310 lines): async sports section builder hooked into the daily `/briefing`. Shows yesterday's completed results for all of the buyer's favorite leagues, with top 3 performers per game ranked by PTS + REB×0.5 + AST×0.5 composite from ESPN box score API. Favorite team games get a ⭐ callout. Optional Reddit highlights section fetches top Highlight-flair posts from each league's subreddit via the free `top.json` API (default ON, togglable). Optional YouTube top plays section returns a direct video link via YouTube Data API v3 if `YOUTUBE_API_KEY` is set, or falls back to a YouTube search URL at no cost (default OFF). All settings stored in existing `settings.json` via `config.py`. Section silently skipped if buyer has no favorite teams/leagues configured.
+**Session 14 — Phase 4A: Cross-Platform Architecture (April 6, 2026)**
 
-Modified files: `plugins/sports/config.py` (+4 briefing settings fields), `features/briefing.py` (+`_section_sports` builder + dict entry), `core/data.py` (+`"sports"` to both default order lists), `features/setup.py` (+`sports` to `_ALL_BRIEFING_SECTIONS` + updated prompt with cost warnings).
+Built the full platform abstraction layer so Alfred can run on Discord (or any future platform) with the same codebase.
 
-Build order decided: Phase 4 = Cross-platform adapters (Discord first, WhatsApp second) → Phase 5 = Betting plugin (built cross-platform from day 1). Rationale: bettors are already heavily integrated with Discord.
+*New files:*
+- `core/alfred_context.py` — AlfredContext: platform-agnostic message/reply wrapper
+- `core/html_utils.py` — html_to_discord() converts Telegram HTML → Discord Markdown
+- `core/alfred_dispatch.py` — platform-agnostic dispatcher (replaces bot.py's _dispatch)
+- `adapters/telegram_adapter.py` — builds AlfredContext from Telegram (update, context)
+- `adapters/discord_adapter.py` — builds AlfredContext from Discord message (auto-splits 2000 chars)
+- `discord_bot.py` — full Discord entry point: on_message → classify → alfred_dispatch; direct command routing for !scores, !standings, !schedule, !stats, !leaders, !ask, !help
+
+*Modified files:*
+- `bot.py` — added AlfredContext build + alfred_dispatch (2 lines; fully backward compatible)
+- `requirements.txt` — added discord.py comment (uncomment to enable)
+- `Procfile` — added comment for running Telegram + Discord as separate Railway services
+
+*Architecture notes:*
+- Discord bot is a SEPARATE platform alternative, not a plugin
+- Unmigrated features on Discord return "coming soon" — migrate one by one in Phase 4B
+- Migration pattern: change handler signature from `(intent, ents, update, context)` to `(intent, ents, ctx: AlfredContext)` and replace `update.message.reply_text(...)` with `await ctx.reply_html(...)`
+- Telegram continues working 100% unchanged via ctx._update pass-through
+
+**Session 13 — Phase 3: Sports Morning Briefing — fully complete (April 6, 2026)**
+
+*Part 1 — Core briefing section:*
+Built `plugins/sports/briefing.py` (~330 lines): async sports section hooked into daily `/briefing`. Fetches yesterday's scoreboard per favorite league, then concurrently hits ESPN box score API for every game. Top 3 performers ranked by PTS + REB×0.5 + AST×0.5. Favorite team games get ⭐. Optional Reddit highlights (Highlight-flair posts from league subreddits, default ON). Optional YouTube top plays — direct video via YouTube Data API v3 if `YOUTUBE_API_KEY` set, otherwise YouTube search URL at no cost (default OFF). Section silently skipped if no favorite teams/leagues configured.
+
+Modified: `plugins/sports/config.py` (+4 briefing setting defaults), `features/briefing.py` (`_SECTION_BUILDERS["sports"]`), `core/data.py` (`"sports"` added to both default order lists), `features/setup.py` (`sports` in `_ALL_BRIEFING_SECTIONS` + cost-warning prompt text).
+
+*Part 2 — Stat thresholds refinement:*
+3PT display changed from "N made" to "X/Y 3PT" format. Threshold: ≥4 attempts + ≥35% efficiency + ≥2 made (filters small-sample noise). STL/BLK raised to ≥2. ESPN box score 3PT parsed as made/attempted from "5-12" style strings.
+
+*Part 3 — Briefing Settings UI + player tracking:*
+Added `📊 Briefing Settings` button to `/sports` menu showing current on/off state for all 3 settings. Full in-app toggle menu in `callbacks.py` — one tap flips reddit/youtube/player tracking; turning player tracking ON shows API quota cost warning popup. Added `/sports addplayer <name>` and `/sports removeplayer <name>` text commands. Tracked player stat lines appended to briefing by scanning box scores already in memory — zero extra API calls.
+
+Modified: `commands.py` (menu status display + addplayer/removeplayer subcommands), `callbacks.py` (`sports_briefing_*` handlers + full menu), `briefing.py` (`all_players_seen` dict + tracked players section).
+
+Build order confirmed: Phase 4 = Cross-platform adapters (Discord first) → Phase 5 = Betting plugin cross-platform from day 1.
 
 **Session 12 — Remove Player Compare Feature (April 6, 2026)**
 Removed the `/compare` player comparison feature entirely. Cross-sport API incompatibility (ESPN returns different stat shapes for NBA vs soccer) made it unreliable. Removed from 6 files: keywords.py (handler + 3 rules), gpt_nl.py (function schema + elif), dispatch.py (sports_compare + sports_compare_nl handlers), commands.py (cmd_compare function), `__init__.py` (command registration + intent list), formatting.py (format_player_comparison + _flatten_stats). Net: -405 lines.
