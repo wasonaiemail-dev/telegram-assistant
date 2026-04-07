@@ -292,8 +292,9 @@ def _build_keyword_rules() -> list:
     # ── SHOPPING — ADD ────────────────────────────────────────────────────────
     # "add almond milk to grocery list"
     # "add 2 avocados to the shopping list"
+    # "add milk to my shopping list"
     _list_names = "|".join(re.escape(k) for k in SHOPPING_LISTS) + "|shopping"
-    p = _r(rf"^add\s+(.+?)\s+to\s+(?:the\s+)?(?:{_list_names})\s*(?:list)?$")
+    p = _r(rf"^add\s+(.+?)\s+to\s+(?:(?:the|my)\s+)?(?:{_list_names})\s*(?:list)?$")
 
     def _shop_add(m, t):
         item     = m.group(1).strip()
