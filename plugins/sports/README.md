@@ -5,7 +5,7 @@ A comprehensive sports plugin providing live scores, standings, schedules, playe
 ## Overview
 
 The Sports Pack uses two data sources:
-- **ESPN public API** (free, no key) — scores, standings, schedules across 10 leagues
+- **ESPN public API** (free, no key) — scores, standings, schedules, box scores across 10 leagues
 - **API-Sports** (free 100 req/day, `API_SPORTS_KEY` required) — player/team stats, league leaders
 
 Supported leagues: **NFL, NBA, MLB, NHL, NCAAF, NCAAB, EPL, MLS, Bundesliga, La Liga**
@@ -47,6 +47,35 @@ Supported leagues: **NFL, NBA, MLB, NHL, NCAAF, NCAAB, EPL, MLS, Bundesliga, La 
 - P&L, ROI, win rate statistics
 - Parlay odds calculator and Kelly Criterion bet sizing
 
+### Morning Briefing Sports Section (`/briefing`) — Phase 3
+Injected automatically into the daily briefing if the buyer has favorite teams/leagues configured.
+
+- **Yesterday's results** for all favorite leagues — every game, not just favorites
+- **Top 3 performers per game** — ranked by composite score (PTS + REB×0.5 + AST×0.5) from ESPN box score API. Each player shows pts/reb/ast (+ STL/BLK if non-zero)
+- **Favorite team games** highlighted with ⭐
+- **Reddit highlights** (default ON) — top Highlight-flair posts per league from `r/<sub>/top.json` (free, no key, rate-limited ~60 req/min). Filters to video posts (Streamable, v.redd.it, YouTube, etc.)
+- **YouTube top plays** (default OFF) — if `YOUTUBE_API_KEY` is set, fetches the actual top-play video from the official league channel. Without the key, generates a YouTube search URL (no API cost, always works)
+
+**API cost summary:**
+| Source | Cost | Notes |
+|---|---|---|
+| ESPN box score | Free, no key | ~2 calls/league/day |
+| Reddit highlights | Free, no key | ~1 call/subreddit/day |
+| YouTube (no key) | Free | Search URL, no API call |
+| YouTube (with key) | Free tier: 10K units/day | ~2 units per query |
+| API-Sports (player tracking) | 100 req/day free tier | ~3-5 calls/player/day — opt-in |
+
+Configurable via `/sports` → Briefing Settings (toggle reddit, youtube, player tracking on/off).
+Section silently skipped if no favorite teams/leagues are set.
+
+**Buyer settings (in `settings.json`):**
+```
+briefing_reddit_highlights   bool   default True   — Reddit highlight posts
+briefing_youtube_top_plays   bool   default False  — YouTube top plays links
+briefing_track_fav_players   bool   default False  — Favorite player stat lines
+briefing_favorite_players    list   default []     — Player display names to track
+```
+
 ### Natural Language Sports Queries (Phase 2)
 Any sports-related message that doesn't match a specific command is routed through GPT function-calling. GPT picks the correct function and parameters.
 
@@ -71,6 +100,7 @@ plugins/sports/
 ├── api_sports.py        # Async API-Sports client (player/team stats, leaders, search)
 ├── stats_api.py         # Unified stats layer: ESPN-first → API-Sports fallback
 ├── gpt_nl.py            # Phase 2: GPT function-calling dispatcher for NL sports queries
+├── briefing.py          # Phase 3: Morning briefing section (scores + top performers + Reddit/YouTube)
 ├── commands.py          # Command handlers: /scores, /standings, /schedule, /sports, /bets, /stats, /leaders
 ├── dispatch.py          # Intent → command routing, stat category filtering
 ├── keywords.py          # Layer 1 regex rules (fast-path); NL catch-all routes to gpt_nl.py
@@ -153,4 +183,4 @@ No authentication required.
 - GPT function-calling has `not_sports` escape hatch: non-sports NL queries fall back to `/ask`
 - Never crashes the bot; always sends a response to the user
 
-*Last updated: April 6, 2026*
+*Last updated: April 6, 2026 (Session 13 — Phase 3 morning briefing complete)*

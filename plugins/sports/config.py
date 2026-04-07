@@ -175,6 +175,19 @@ def get_default_settings() -> Dict[str, Any]:
         "unit_size": 0.0,
         "kelly_fraction": 0.25,
         "min_odds": -110,  # Minimum acceptable odds
+        # ── Morning briefing settings ──────────────────────────────────────
+        # reddit highlights: free, rate-limited (~60 req/min). Fetches top
+        # Highlight-flair posts from each league's subreddit. Default ON.
+        "briefing_reddit_highlights": True,
+        # YouTube top plays: OFF by default. Without YOUTUBE_API_KEY, falls
+        # back to a YouTube search URL (no API cost). With the key, fetches
+        # the actual video from the official channel.
+        "briefing_youtube_top_plays": False,
+        # Favorite player tracking: uses API-Sports (~3-5 calls/player/day).
+        # Free tier = 100 req/day total. With 2+ players this can exhaust the
+        # quota before afternoon. Upgrade at api-sports.io from $10/mo.
+        "briefing_track_fav_players": False,
+        "briefing_favorite_players": [],  # List of player display names
     }
 
 

@@ -1002,10 +1002,10 @@ def save_style_library(lib: dict) -> None:
 
 _BRIEFING_ALL_SECTIONS = [
     "weather", "calendar", "todos", "habits", "meals",
-    "journal_highlight", "workout_stats", "quote", "word_of_day",
+    "journal_highlight", "workout_stats", "quote", "word_of_day", "sports",
 ]
 _BRIEFING_DEFAULT_ORDER = [
-    "weather", "calendar", "todos", "habits", "quote", "word_of_day",
+    "weather", "calendar", "todos", "habits", "quote", "word_of_day", "sports",
 ]
 
 

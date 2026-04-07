@@ -492,6 +492,15 @@ async def _section_workout_stats(_now):
     except Exception:
         return ""
 
+
+async def _section_sports(_now):
+    try:
+        from plugins.sports.briefing import section_sports_briefing
+        return await section_sports_briefing(_now)
+    except Exception:
+        return ""
+
+
 _SECTION_BUILDERS = {
     "weather":           _section_weather,
     "calendar":          _section_calendar,
@@ -503,6 +512,7 @@ _SECTION_BUILDERS = {
     "workout_stats":     _section_workout_stats,
     "quote":             _section_quote,
     "word_of_day":       _section_word_of_day,
+    "sports":            _section_sports,
 }
 
 

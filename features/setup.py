@@ -639,7 +639,7 @@ import re as _re
 
 _ALL_BRIEFING_SECTIONS = [
     "weather", "calendar", "todos", "habits", "quote",
-    "word_of_day", "meals", "journal_highlight", "workout_stats",
+    "word_of_day", "meals", "journal_highlight", "workout_stats", "sports",
 ]
 
 _WEEKDAY_MAP = {
@@ -681,8 +681,16 @@ _PREFS_PROMPTS = {
     "briefing_sections": (
         "Which sections do you want in your morning briefing, and in what order?\n\n"
         "Available: `weather`, `calendar`, `todos`, `habits`, `quote`, `word_of_day`, "
-        "`meals`, `journal_highlight`, `workout_stats`\n\n"
-        "Type as a comma-separated list — e.g. *weather, calendar, todos, habits, quote*\n"
+        "`meals`, `journal_highlight`, `workout_stats`, `sports`\n\n"
+        "The `sports` section shows yesterday's scores, top 3 performers per game, "
+        "and optional Reddit highlights — for your favorite leagues only. "
+        "It appears at the end by default. To enable Reddit highlights or YouTube "
+        "top plays, use /sports → Briefing Settings after setup.\n\n"
+        "⚠️ Note: `sports` uses the free ESPN API (no limits). Reddit highlights add "
+        "~1 request/league/day (free, rate-limited). Favorite player tracking uses "
+        "API-Sports (100 req/day free — see /sports for upgrade options).\n\n"
+        "Type as a comma-separated list in your preferred order.\n"
+        "Example: *weather, calendar, todos, habits, quote, sports*\n"
         "Type *skip* to keep defaults."
     ),
     "shopping_lists": (

@@ -36,15 +36,16 @@ Alfred has **two simultaneous goals:**
 
 ---
 
-## Current Status: ✅ LIVE — Phase 2 (GPT Function-Calling NL) Complete
+## Current Status: ✅ LIVE — Phase 3 (Sports Morning Briefing) Complete
 
 - Core bot: Deployed and running on Railway, all 20+ commands working
-- Sports Pack: **Phases 1, 1.5, and 2 complete. Full regression tested April 6, 2026.**
+- Sports Pack: **Phases 1, 1.5, 2, and 3 complete. Full regression tested April 6, 2026.**
   - Working (confirmed via Telegram): `/scores` (yesterday's results), `/standings` (sorted by wins), `/schedule`, `/sports`, `/bets`, `/stats player`, `/stats team`, `/stats gamelog`, `/stats roster`, `/leaders`
   - Working (confirmed): GPT date awareness, GPT fuzzy player name resolution (nicknames/misspellings → full names)
   - Working (confirmed): NL sports queries via GPT function-calling — "who leads the NBA in blocks", "how many ppg is Jokic averaging", "NBA scores", "show me Jokic stats", "NBA standings", etc.
   - **Removed:** Player compare (`/compare`) — feature was unreliable across sports due to cross-sport API incompatibilities. Removed entirely April 6, 2026.
   - Rate limit concern: Multi-league soccer fallback can burn ~10-20 API-Sports requests per failed player lookup (100/day free tier)
+- Sports Morning Briefing: **Phase 3 built April 6, 2026.** New file `plugins/sports/briefing.py` — daily sports recap section in `/briefing`. Shows yesterday's results for favorite leagues, top 3 performers per game (PTS+REB+AST composite), optional Reddit highlights (default ON), optional YouTube top plays (default OFF). Hooked into `features/briefing.py` and configurable via setup wizard. Buyers must set favorite teams/leagues first or section is silently skipped.
 
 ---
 
@@ -125,6 +126,7 @@ All 22 variables are configured in Railway. They are:
 | Player/Team Stats | `/stats` | ✅ Tested (ESPN + API-Sports fallback) |
 | Leaders | `/leaders` | ✅ Tested |
 | Sports NL queries | natural language | ✅ Phase 2 complete — GPT function-calling dispatches all NL sports queries |
+| Sports Morning Briefing | via `/briefing` | ✅ Phase 3 complete — yesterday's results, top 3 performers, Reddit highlights, YouTube links |
 
 ---
 
@@ -269,15 +271,37 @@ The current ESPN scraping + keyword regex approach has been identified as fragil
 - [x] Regression tested: all 8 NL query types passing
 - [x] Removed player compare feature (unreliable cross-sport API mismatch)
 
-**Phase 3 — Betting Plugin (Session 10 or 11)**
+**Phase 3 — Sports Morning Briefing (April 6, 2026) — ✅ COMPLETE**
+- [x] Created `plugins/sports/briefing.py` — async sports section builder
+- [x] Per-game top 3 performers (PTS + REB×0.5 + AST×0.5 composite) via ESPN box score API
+- [x] Favorite team games highlighted with ⭐
+- [x] Optional Reddit highlights (top Highlight-flair posts via `r/<league>/top.json`, default ON)
+- [x] Optional YouTube top plays link (API key → direct video; no key → search URL fallback, default OFF)
+- [x] 4 new briefing settings added to `plugins/sports/config.py` defaults
+- [x] Hooked into `features/briefing.py` `_SECTION_BUILDERS["sports"]`
+- [x] Added `"sports"` to `_BRIEFING_DEFAULT_ORDER` and `_BRIEFING_ALL_SECTIONS` in `core/data.py`
+- [x] Added `sports` to setup wizard prompt with cost warnings in `features/setup.py`
+- [ ] **Still needed:** `/sports` Briefing Settings sub-menu (toggle reddit/youtube/player tracking in-app)
+- [ ] **Still needed:** Favorite player stat line tracking (requires API-Sports, buyer cost warning)
+- [ ] **Still needed:** Deploy + regression test
+
+**Phase 4 — Cross-Platform Adapters (Next)**
+Rationale: Many bettors are already heavily integrated with Discord. Build platform abstraction before betting so the betting plugin works cross-platform from day 1.
+- [ ] Design abstraction layer separating content generation from platform delivery
+- [ ] Discord adapter (discord.py) — inline YouTube embeds work natively
+- [ ] WhatsApp adapter (Twilio Business API)
+- [ ] Test: briefing, scores, NL queries via Discord and WhatsApp
+
+**Phase 5 — Betting Plugin (After Cross-Platform)**
 - [ ] Sign up for The-Odds-API free tier, get API key
 - [ ] Create `plugins/betting/` as a separate plugin with its own PLUGIN_META
 - [ ] Import from `plugins/shared/player_search.py` for lookups
 - [ ] Implement: game odds (spreads, moneylines), player props, futures
 - [ ] Move existing bet tracker/screenshot features from `plugins/sports/betting.py` to new plugin
+- [ ] Built cross-platform from day 1 (uses Phase 4 adapter layer)
 - [ ] Test: "what are the odds on the Nuggets game?", "show me Jokic rebound props", "World Cup futures"
 
-**Phase 4 — Polish & Sell-Ready (Session 11 or 12)**
+**Phase 6 — Polish & Sell-Ready**
 - [ ] Add API key setup instructions to SETUP_COMPANION.md
 - [ ] Audit all files for hardcoded personal data
 - [ ] Error handling: graceful messages when API keys are missing or rate-limited
@@ -403,6 +427,7 @@ telegram-assistant/
 │       ├── commands.py     # /scores, /standings, /schedule, /sports, /bets, /stats, /leaders
 │       ├── dispatch.py     # Intent → command routing, stat category filtering, fuzzy name fallback
 │       ├── gpt_nl.py       # ★ Phase 2: GPT function-calling dispatcher for NL sports queries
+│       ├── briefing.py     # ★ Phase 3: Morning briefing section (scores + top performers + Reddit/YouTube)
 │       ├── keywords.py     # Layer 1 fast regex rules for sports queries (includes NL catch-all)
 │       ├── formatting.py   # Telegram HTML message formatters
 │       ├── data.py         # Bet tracking, settings persistence
@@ -431,11 +456,18 @@ telegram-assistant/
 
 ---
 
-*Last updated: April 6, 2026 (Session 12 — Phase 2 complete, compare removed)*
+*Last updated: April 6, 2026 (Session 13 — Phase 3 complete, sports morning briefing built)*
 
 ---
 
 ## Session History (newest first)
+
+**Session 13 — Phase 3: Sports Morning Briefing (April 6, 2026)**
+Built `plugins/sports/briefing.py` (new file, ~310 lines): async sports section builder hooked into the daily `/briefing`. Shows yesterday's completed results for all of the buyer's favorite leagues, with top 3 performers per game ranked by PTS + REB×0.5 + AST×0.5 composite from ESPN box score API. Favorite team games get a ⭐ callout. Optional Reddit highlights section fetches top Highlight-flair posts from each league's subreddit via the free `top.json` API (default ON, togglable). Optional YouTube top plays section returns a direct video link via YouTube Data API v3 if `YOUTUBE_API_KEY` is set, or falls back to a YouTube search URL at no cost (default OFF). All settings stored in existing `settings.json` via `config.py`. Section silently skipped if buyer has no favorite teams/leagues configured.
+
+Modified files: `plugins/sports/config.py` (+4 briefing settings fields), `features/briefing.py` (+`_section_sports` builder + dict entry), `core/data.py` (+`"sports"` to both default order lists), `features/setup.py` (+`sports` to `_ALL_BRIEFING_SECTIONS` + updated prompt with cost warnings).
+
+Build order decided: Phase 4 = Cross-platform adapters (Discord first, WhatsApp second) → Phase 5 = Betting plugin (built cross-platform from day 1). Rationale: bettors are already heavily integrated with Discord.
 
 **Session 12 — Remove Player Compare Feature (April 6, 2026)**
 Removed the `/compare` player comparison feature entirely. Cross-sport API incompatibility (ESPN returns different stat shapes for NBA vs soccer) made it unreliable. Removed from 6 files: keywords.py (handler + 3 rules), gpt_nl.py (function schema + elif), dispatch.py (sports_compare + sports_compare_nl handlers), commands.py (cmd_compare function), `__init__.py` (command registration + intent list), formatting.py (format_player_comparison + _flatten_stats). Net: -405 lines.
