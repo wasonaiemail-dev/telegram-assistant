@@ -55,6 +55,7 @@ from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from core.alfred_context import AlfredContext
 from core.config import BOT_NAME, TIMEZONE, RECUR_LABELS
 from core.intent import (
     REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
@@ -360,8 +361,7 @@ async def check_and_fire_reminders(context, chat_id: int) -> None:
 async def handle_reminder_intent(
     intent:   str,
     entities: dict,
-    update:   Update,
-    context:  ContextTypes.DEFAULT_TYPE,
+    ctx:      AlfredContext,
 ) -> None:
     """Dispatch all REMINDER_* intents."""
 
@@ -371,9 +371,7 @@ async def handle_reminder_intent(
     if intent == REMINDER_ADD:
         text  = entities.get("text", "").strip()
         if not text:
-            await update.message.reply_text(
-                "What should I remind you about? Try: \"remind me to call mom tomorrow at 3pm\""
-            )
+            await ctx.reply('What should I remind you about? Try: "remind me to call mom tomorrow at 3pm"')
             return
 
         raw_due = entities.get("due", "")
@@ -403,18 +401,12 @@ async def handle_reminder_intent(
             extras.append(f"🔁 {RECUR_LABELS.get(recur, recur)}")
 
         suffix = f" _({', '.join(extras)})_" if extras else ""
-        await update.message.reply_text(
-            f"⏰ Reminder set: *{text}*{suffix}",
-            parse_mode="Markdown",
-        )
+        await ctx.reply_markdown(f"⏰ Reminder set: *{text}*{suffix}")
         return
 
     # ── REMINDER_LIST ─────────────────────────────────────────────────────────
     if intent == REMINDER_LIST:
-        await update.message.reply_text(
-            _format_reminder_list(reminders),
-            parse_mode="Markdown",
-        )
+        await ctx.reply_markdown(_format_reminder_list(reminders))
         return
 
     # ── REMINDER_DONE ─────────────────────────────────────────────────────────
@@ -426,20 +418,14 @@ async def handle_reminder_intent(
         if not r:
             active = [x for x in reminders if not x.get("done")]
             if not active:
-                await update.message.reply_text("No active reminders.")
+                await ctx.reply("No active reminders.")
                 return
-            await update.message.reply_text(
-                "Which reminder is done? Try: \"done with reminder 2\"\n"
-                "Run /reminders to see your list."
-            )
+            await ctx.reply('Which reminder is done? Try: "done with reminder 2"\nRun /reminders to see your list.')
             return
 
         r["done"] = True
         _save_reminders(data)
-        await update.message.reply_text(
-            f"✓ Done: _{r['text']}_",
-            parse_mode="Markdown",
-        )
+        await ctx.reply_markdown(f"✓ Done: _{r['text']}_")
         return
 
     # ── REMINDER_DELETE ────────────────────────────────────────────────────────
@@ -449,16 +435,10 @@ async def handle_reminder_intent(
         r      = _find_reminder(reminders, text or None, number)
 
         if not r:
-            await update.message.reply_text(
-                "Which reminder should I delete? "
-                "Try: \"delete reminder 2\" or run /reminders to see your list."
-            )
+            await ctx.reply('Which reminder should I delete? Try: "delete reminder 2" or run /reminders to see your list.')
             return
 
         data["reminders"] = [x for x in reminders if x.get("id") != r.get("id")]
         _save_reminders(data)
-        await update.message.reply_text(
-            f"✓ Deleted: _{r['text']}_",
-            parse_mode="Markdown",
-        )
+        await ctx.reply_markdown(f"✓ Deleted: _{r['text']}_")
         return

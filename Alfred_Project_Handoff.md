@@ -36,7 +36,7 @@ Alfred has **two simultaneous goals:**
 
 ---
 
-## Current Status: 🔨 IN PROGRESS — Phase 4A (Cross-Platform Architecture) — April 6, 2026
+## Current Status: ✅ Phase 4A Complete — Committed & Pushed April 6, 2026. Pick up Phase 4B tomorrow.
 
 - Core bot: Deployed and running on Railway, all 20+ commands working
 - Sports Pack: **Phases 1, 1.5, 2, and 3 complete. Full regression tested April 6, 2026.**
@@ -319,17 +319,17 @@ Platform adapters live in `core/` and `adapters/`. The key abstraction is `Alfre
 - [x] requirements.txt updated (discord.py commented — uncomment for Discord service)
 - [x] Procfile comment added for running both Telegram + Discord services on Railway
 
-**Phase 4B — Feature Handler Migration (Next):**
-The platform abstraction is built. Each feature handler currently uses (update, context) Telegram types. On Discord, unmigrated features return "coming soon." Migrate in this order (most impactful first):
-- [ ] `features/ask.py` → `handle_ask(text, ctx)` — NL chat on Discord
-- [ ] `features/todos.py` → `handle_todo_intent(intent, ents, ctx)`
-- [ ] `features/reminders.py` → `handle_reminder_intent(intent, ents, ctx)`
-- [ ] `features/notes.py` → `handle_note_intent(intent, ents, ctx)`
-- [ ] `features/briefing.py` → `send_briefing(ctx)` — full briefing on Discord
-- [ ] `plugins/sports/commands.py` → `cmd_scores(ctx)`, `cmd_standings(ctx)`, etc. — use AlfredContext directly
-- [ ] All remaining features
-- [ ] Discord button menus (discord.ui.View) — replace numbered text menus
-- [ ] WhatsApp adapter (Twilio or Meta Cloud API)
+**Phase 4B — Feature Handler Migration:**
+- [x] `features/ask.py` → `handle_ask(text, ctx)` — NL chat works on Discord ✅
+- [x] `features/todos.py` → `handle_todo_intent(intent, ents, ctx)` ✅
+- [x] `features/reminders.py` → `handle_reminder_intent(intent, ents, ctx)` ✅
+- [x] `features/notes.py` → `handle_note_intent(intent, ents, ctx)` ✅
+- [x] `core/alfred_dispatch.py` restructured — migrated handlers at top, Telegram-only pass-through at bottom, Discord "coming soon" for unmigrated
+- [ ] `features/briefing.py` → `send_briefing(ctx)` — full briefing on Discord (next)
+- [ ] `plugins/sports/commands.py` → sports commands use AlfredContext natively
+- [ ] `features/shopping.py`, `calendar.py`, `habits.py`, `gifts.py`, `contacts.py`, `meals.py`, `workout.py`, `journal.py`, `reply_assist.py`, `mood.py`, `links.py`, `export_data.py`, `memory.py`
+- [ ] Discord button menus (discord.ui.View) — replace numbered text menus (Phase 6)
+- [ ] WhatsApp adapter (Twilio or Meta Cloud API — TBD)
 
 **Migration pattern for each handler:**
 ```python
@@ -525,7 +525,7 @@ telegram-assistant/
 
 ---
 
-*Last updated: April 6, 2026 (Session 14 — Phase 4A complete. Cross-platform adapter layer built. Discord bot entry point live. Phase 4B: migrate feature handlers to AlfredContext)*
+*Last updated: April 6, 2026 (Session 15 — Phase 4B in progress. ask/todos/reminders/notes migrated to AlfredContext — all work on Discord now. Next: briefing, sports commands, then remaining features.)*
 
 ---
 

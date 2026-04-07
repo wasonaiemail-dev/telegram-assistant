@@ -810,16 +810,8 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode=ParseMode.MARKDOWN,
         )
         return
-    response_text = await handle_ask(text, update, context)
-    if response_text:
-        asyncio.create_task(
-            suggest_memory_fact(
-                user_text=text,
-                assistant_text=response_text,
-                update=update,
-                context=context,
-            )
-        )
+    ctx = _make_telegram_ctx(update, context)
+    await handle_ask(text, ctx)
 
 
 # =============================================================================

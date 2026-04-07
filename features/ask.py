@@ -47,9 +47,7 @@ TOPIC SHIFT DETECTION
 import asyncio
 import logging
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
+from core.alfred_context import AlfredContext
 from core.config import (
     BOT_NAME,
     OPENAI_API_KEY,
@@ -187,12 +185,11 @@ async def _summarize_topic(text: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_ask(
-    text:    str,
-    update:  Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    text:         str,
+    ctx:          AlfredContext,
     *,
     force_search: bool = False,
-) -> None:
+) -> str | None:
     """
     Handle a general question or conversation message.
 
@@ -202,6 +199,8 @@ async def handle_ask(
     4. Call GPT and send response.
     5. Persist updated thread.
     6. Non-blocking: auto-suggest memorable facts.
+
+    Returns the assistant's answer text (for memory auto-suggest in caller).
     """
     from openai import AsyncOpenAI
     from core.data import load_ask_history, save_ask_history, clear_ask_history
@@ -273,13 +272,11 @@ async def handle_ask(
         answer = resp.choices[0].message.content.strip()
     except Exception as e:
         logger.error(f"handle_ask GPT error: {e}")
-        await update.message.reply_text(
-            "Sorry, I couldn't get a response right now. Please try again."
-        )
-        return
+        await ctx.reply("Sorry, I couldn't get a response right now. Please try again.")
+        return None
 
     # ── Send reply ────────────────────────────────────────────────────────────
-    await update.message.reply_text(answer)
+    await ctx.reply(answer)
 
     # ── Persist thread ────────────────────────────────────────────────────────
     messages.append({"role": "user",      "content": text})
@@ -294,9 +291,14 @@ async def handle_ask(
     save_ask_history(hist)
 
     # ── Auto-suggest memorable fact (non-blocking) ────────────────────────────
-    asyncio.create_task(
-        suggest_memory_fact(text, answer, update, context)
-    )
+    # Pass Telegram update/context via pass-through for memory suggestion.
+    # This is a best-effort side-effect — safe to be None on Discord.
+    if ctx._update is not None and ctx._context is not None:
+        asyncio.create_task(
+            suggest_memory_fact(text, answer, ctx._update, ctx._context)
+        )
+
+    return answer
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -323,12 +325,11 @@ def _looks_like_search_query(text: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_text_message(
-    text:    str,
-    update:  Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    ctx:  AlfredContext,
 ) -> None:
     """
     Handle free-text messages that fall through the intent classifier.
     Routes to handle_ask() so nothing gets dropped silently.
     """
-    await handle_ask(text, update, context)
+    await handle_ask(text, ctx)

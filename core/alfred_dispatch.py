@@ -109,8 +109,7 @@ async def alfred_dispatch(
     ents   = intent_result.entities
 
     try:
-        # ── PLUGIN INTENTS (migrated — plugin handlers support ctx) ──────────
-        # Try plugins first for sports, betting, etc.
+        # ── PLUGIN INTENTS (try plugins first for sports, betting, etc.) ────────
         if intent not in _CORE_INTENTS:
             handled = await _dispatch_plugin_with_ctx(
                 intent_result, ctx, loaded_plugins
@@ -119,182 +118,170 @@ async def alfred_dispatch(
                 return
 
         # ─────────────────────────────────────────────────────────────────────
-        # UNMIGRATED FEATURES
-        # These use ctx._update / ctx._context for Telegram.
-        # On Discord they return a "coming soon" message.
+        # MIGRATED FEATURES — accept AlfredContext, work on all platforms
         # ─────────────────────────────────────────────────────────────────────
-
-        # For unmigrated features on Discord, show coming soon
-        if ctx.is_discord and intent not in _DISCORD_SUPPORTED_INTENTS:
-            await ctx.reply(_DISCORD_COMING_SOON)
-            return
-
-        # Pass-through for Telegram (unchanged behavior)
-        update  = ctx._update
-        context = ctx._context
-
-        if update is None:
-            # Should not happen on Telegram, safety check
-            await ctx.reply("Platform error: no update context available.")
-            return
-
-        # Re-import parse mode for Telegram
-        from telegram.constants import ParseMode
 
         # -- TODOS ------------------------------------------------------------
         if intent in (TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE):
             from features.todos import handle_todo_intent
-            await handle_todo_intent(intent, ents, update, context)
-
-        # -- SHOPPING ---------------------------------------------------------
-        elif intent in (SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR):
-            from features.shopping import handle_shopping_intent
-            await handle_shopping_intent(intent, ents, update, context)
+            await handle_todo_intent(intent, ents, ctx)
 
         # -- NOTES ------------------------------------------------------------
         elif intent in (NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND):
             from features.notes import handle_note_intent
-            await handle_note_intent(intent, ents, update, context)
-
-        # -- CALENDAR ---------------------------------------------------------
-        elif intent in (CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE):
-            from features.calendar import handle_calendar_intent
-            await handle_calendar_intent(intent, ents, update, context)
-
-        # -- HABITS -----------------------------------------------------------
-        elif intent in (HABIT_LOG, HABIT_VIEW):
-            from features.habits import handle_habit_intent
-            await handle_habit_intent(intent, ents, update, context)
+            await handle_note_intent(intent, ents, ctx)
 
         # -- REMINDERS --------------------------------------------------------
         elif intent in (REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE):
             from features.reminders import handle_reminder_intent
-            await handle_reminder_intent(intent, ents, update, context)
-
-        # -- GIFTS ------------------------------------------------------------
-        elif intent in (GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE):
-            from features.gifts import handle_gift_intent
-            await handle_gift_intent(intent, ents, update, context)
-
-        # -- MEMORY -----------------------------------------------------------
-        elif intent == MEMORY_ADD:
-            cat  = ents.get("category", "")
-            fact = ents.get("fact", "")
-            if cat and fact:
-                from core.data import add_memory_fact
-                ok, err = add_memory_fact(cat, fact)
-                if ok:
-                    await update.message.reply_text(
-                        f"Remembered under *{cat}*: _{fact}_",
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
-                else:
-                    await update.message.reply_text(f"Couldn't save that: {err}")
-            else:
-                await update.message.reply_text(
-                    "Use `/memory add [category] [fact]` to save a memory.",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-
-        elif intent == MEMORY_VIEW:
-            context.args = [ents.get("category", "")] if ents.get("category") else []
-            from features.memory import cmd_memory
-            await cmd_memory(update, context)
-
-        elif intent == MEMORY_REMOVE:
-            await update.message.reply_text(
-                "To remove a specific fact, use `/memory remove [category] [number]`.",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-
-        # -- CONTACTS ---------------------------------------------------------
-        elif intent in (CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE):
-            from features.contacts import handle_contact_intent
-            await handle_contact_intent(intent, ents, update, context)
-
-        # -- BRIEFING ---------------------------------------------------------
-        elif intent == BRIEFING:
-            from features.briefing import send_briefing
-            await send_briefing(context, update.effective_chat.id)
-
-        # -- WEATHER ----------------------------------------------------------
-        elif intent == WEATHER:
-            from features.briefing import send_weather
-            location = ents.get("location")
-            await send_weather(context, update.effective_chat.id, location=location)
-
-        # -- WEEKLY SUMMARY ---------------------------------------------------
-        elif intent == WEEKLY_SUMMARY:
-            from features.summary import send_weekly_summary
-            await send_weekly_summary(context, update.effective_chat.id)
-
-        # -- MEALS -----------------------------------------------------------
-        elif intent in (MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
-                        MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS):
-            from features.meals import handle_meal_intent
-            await handle_meal_intent(intent, ents, update, context)
-
-        # -- WORKOUT ----------------------------------------------------------
-        elif intent in (WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN,
-                        WORKOUT_REBUILD, WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY):
-            from features.workout import handle_workout_intent
-            await handle_workout_intent(intent, ents, update, context)
-
-        # -- JOURNAL ----------------------------------------------------------
-        elif intent in (JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH,
-                        JOURNAL_MONTH, JOURNAL_WINS):
-            from features.journal import handle_journal_intent
-            await handle_journal_intent(intent, ents, update, context)
-
-        # -- REPLY / EMAIL ASSIST ---------------------------------------------
-        elif intent in (REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD):
-            from features.reply_assist import handle_reply_intent
-            await handle_reply_intent(intent, ents, update, context)
-
-        # -- MOOD -------------------------------------------------------------
-        elif intent in (MOOD_LOG, MOOD_VIEW):
-            from features.mood import handle_mood_intent
-            await handle_mood_intent(intent, ents, update, context)
-
-        # -- LINKS (READ-LATER) -----------------------------------------------
-        elif intent in (LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE):
-            from features.links import handle_link_intent
-            await handle_link_intent(intent, ents, update, context)
-
-        # -- EXPORT -----------------------------------------------------------
-        elif intent == EXPORT_DATA:
-            from features.export_data import handle_export_intent
-            await handle_export_intent(intent, ents, update, context)
+            await handle_reminder_intent(intent, ents, ctx)
 
         # -- ASK / UNKNOWN ----------------------------------------------------
         elif intent in (ASK, UNKNOWN):
             from features.ask import handle_ask
-            from features.memory import suggest_memory_fact
-            response_text = await handle_ask(
-                update.message.text or "",
-                update,
-                context,
-            )
-            if response_text:
-                asyncio.create_task(
-                    suggest_memory_fact(
-                        user_text=update.message.text or "",
-                        assistant_text=response_text,
-                        update=update,
-                        context=context,
-                    )
-                )
+            await handle_ask(ctx.text, ctx)
 
-        # -- PLUGIN INTENTS (fallback for unhandled intents) -------------------
+        # ─────────────────────────────────────────────────────────────────────
+        # UNMIGRATED FEATURES
+        # Telegram: pass through via ctx._update / ctx._context (unchanged).
+        # Discord: return "coming soon" message.
+        # ─────────────────────────────────────────────────────────────────────
+
+        elif ctx.is_discord:
+            await ctx.reply(_DISCORD_COMING_SOON)
+            return
+
         else:
-            handled = await dispatch_plugin_intent(
-                intent_result, update, context, loaded_plugins
-            )
-            if not handled:
+            # Telegram pass-through for all unmigrated handlers
+            update  = ctx._update
+            context = ctx._context
+
+            if update is None:
+                await ctx.reply("Platform error: no update context available.")
+                return
+
+            from telegram.constants import ParseMode
+
+            # -- SHOPPING ---------------------------------------------------------
+            if intent in (SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR):
+                from features.shopping import handle_shopping_intent
+                await handle_shopping_intent(intent, ents, update, context)
+
+            # -- CALENDAR ---------------------------------------------------------
+            elif intent in (CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE):
+                from features.calendar import handle_calendar_intent
+                await handle_calendar_intent(intent, ents, update, context)
+
+            # -- HABITS -----------------------------------------------------------
+            elif intent in (HABIT_LOG, HABIT_VIEW):
+                from features.habits import handle_habit_intent
+                await handle_habit_intent(intent, ents, update, context)
+
+            # -- GIFTS ------------------------------------------------------------
+            elif intent in (GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE):
+                from features.gifts import handle_gift_intent
+                await handle_gift_intent(intent, ents, update, context)
+
+            # -- MEMORY -----------------------------------------------------------
+            elif intent == MEMORY_ADD:
+                cat  = ents.get("category", "")
+                fact = ents.get("fact", "")
+                if cat and fact:
+                    from core.data import add_memory_fact
+                    ok, err = add_memory_fact(cat, fact)
+                    if ok:
+                        await update.message.reply_text(
+                            f"Remembered under *{cat}*: _{fact}_",
+                            parse_mode=ParseMode.MARKDOWN,
+                        )
+                    else:
+                        await update.message.reply_text(f"Couldn't save that: {err}")
+                else:
+                    await update.message.reply_text(
+                        "Use `/memory add [category] [fact]` to save a memory.",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+
+            elif intent == MEMORY_VIEW:
+                context.args = [ents.get("category", "")] if ents.get("category") else []
+                from features.memory import cmd_memory
+                await cmd_memory(update, context)
+
+            elif intent == MEMORY_REMOVE:
                 await update.message.reply_text(
-                    "I'm not sure how to handle that. Try `/help` to see what I can do.",
+                    "To remove a specific fact, use `/memory remove [category] [number]`.",
                     parse_mode=ParseMode.MARKDOWN,
                 )
+
+            # -- CONTACTS ---------------------------------------------------------
+            elif intent in (CONTACT_VIEW, CONTACT_ADD, CONTACT_UPDATE):
+                from features.contacts import handle_contact_intent
+                await handle_contact_intent(intent, ents, update, context)
+
+            # -- BRIEFING ---------------------------------------------------------
+            elif intent == BRIEFING:
+                from features.briefing import send_briefing
+                await send_briefing(context, update.effective_chat.id)
+
+            # -- WEATHER ----------------------------------------------------------
+            elif intent == WEATHER:
+                from features.briefing import send_weather
+                location = ents.get("location")
+                await send_weather(context, update.effective_chat.id, location=location)
+
+            # -- WEEKLY SUMMARY ---------------------------------------------------
+            elif intent == WEEKLY_SUMMARY:
+                from features.summary import send_weekly_summary
+                await send_weekly_summary(context, update.effective_chat.id)
+
+            # -- MEALS -----------------------------------------------------------
+            elif intent in (MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
+                            MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS):
+                from features.meals import handle_meal_intent
+                await handle_meal_intent(intent, ents, update, context)
+
+            # -- WORKOUT ----------------------------------------------------------
+            elif intent in (WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN,
+                            WORKOUT_REBUILD, WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY):
+                from features.workout import handle_workout_intent
+                await handle_workout_intent(intent, ents, update, context)
+
+            # -- JOURNAL ----------------------------------------------------------
+            elif intent in (JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH,
+                            JOURNAL_MONTH, JOURNAL_WINS):
+                from features.journal import handle_journal_intent
+                await handle_journal_intent(intent, ents, update, context)
+
+            # -- REPLY / EMAIL ASSIST ---------------------------------------------
+            elif intent in (REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD):
+                from features.reply_assist import handle_reply_intent
+                await handle_reply_intent(intent, ents, update, context)
+
+            # -- MOOD -------------------------------------------------------------
+            elif intent in (MOOD_LOG, MOOD_VIEW):
+                from features.mood import handle_mood_intent
+                await handle_mood_intent(intent, ents, update, context)
+
+            # -- LINKS (READ-LATER) -----------------------------------------------
+            elif intent in (LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE):
+                from features.links import handle_link_intent
+                await handle_link_intent(intent, ents, update, context)
+
+            # -- EXPORT -----------------------------------------------------------
+            elif intent == EXPORT_DATA:
+                from features.export_data import handle_export_intent
+                await handle_export_intent(intent, ents, update, context)
+
+            # -- PLUGIN INTENTS (fallback) ----------------------------------------
+            else:
+                handled = await dispatch_plugin_intent(
+                    intent_result, update, context, loaded_plugins
+                )
+                if not handled:
+                    await update.message.reply_text(
+                        "I'm not sure how to handle that. Try `/help` to see what I can do.",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
 
     except ImportError as e:
         logger.warning(f"alfred_dispatch: feature not yet built for intent '{intent}': {e}")
