@@ -210,11 +210,12 @@ async def _gpt_refine_reply(original_draft: str, instruction: str, tone: str) ->
 # PHOTO HANDLER (called from bot.py on every photo message)
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_photo_for_reply(photo_file_path: str, update, context,
+async def handle_photo_for_reply(photo_file_path: str, ctx,
                                   is_email: bool = False) -> None:
     """
     Main entry point for screenshot-based reply drafting.
     Called from bot.py when user sends a photo.
+    ctx: AlfredContext
     """
     import base64
     data = load_data()
@@ -245,10 +246,10 @@ async def handle_photo_for_reply(photo_file_path: str, update, context,
             image_b64 = base64.b64encode(f.read()).decode("utf-8")
     except Exception as e:
         logger.error(f"Failed to read photo: {e}")
-        await update.message.reply_text("Couldn't read that image. Try again.")
+        await ctx.reply("Couldn't read that image. Try again.")
         return
 
-    await update.message.reply_text("⏳ Reading screenshot and drafting replies...")
+    await ctx.reply("⏳ Reading screenshot and drafting replies...")
 
     draft = await _gpt_reply_from_image(
         image_b64   = image_b64,
@@ -265,14 +266,13 @@ async def handle_photo_for_reply(photo_file_path: str, update, context,
         # Store that we're waiting for context to re-try
         data["settings"]["_pending_reply_context"] = f"[awaiting clarification: {question}]"
         save_data(data)
-        await update.message.reply_text(
-            f"❓ {question}\n\n_(Answer this then send the screenshot again.)_",
-            parse_mode="Markdown",
+        await ctx.reply_markdown(
+            f"❓ {question}\n\n_(Answer this then send the screenshot again.)_"
         )
         return
 
     set_last_draft(draft)
-    await update.message.reply_text(draft, parse_mode="Markdown")
+    await ctx.reply_markdown(draft)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -294,30 +294,31 @@ def looks_like_refinement(text: str) -> bool:
     return any(kw in lower for kw in _REFINE_KEYWORDS)
 
 
-async def handle_refinement(text: str, update, context) -> None:
+async def handle_refinement(text: str, ctx) -> None:
+    """ctx: AlfredContext"""
     data       = load_data()
     tone       = get_reply_settings(data).get("default_tone", "warm")
     last_draft = get_last_draft()
     if not last_draft:
-        await update.message.reply_text("No recent reply draft to refine. Send a screenshot first.")
+        await ctx.reply("No recent reply draft to refine. Send a screenshot first.")
         return
-    await update.message.reply_text("⏳ Refining...")
+    await ctx.reply("⏳ Refining...")
     refined = await _gpt_refine_reply(last_draft, text, tone)
     set_last_draft(refined)
-    await update.message.reply_text(refined, parse_mode="Markdown")
+    await ctx.reply_markdown(refined)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_reply_intent(intent: str, entities: dict, update, context) -> None:
-    msg = update.message
+async def handle_reply_intent(intent: str, entities: dict, ctx) -> None:
+    """ctx: AlfredContext"""
 
     if intent == REPLY_STYLE_ADD:
         example = entities.get("example", "").strip()
         if not example:
-            await msg.reply_text(
+            await ctx.reply(
                 "What example message should I save? Try: \"save this as my style: [message]\""
             )
             return
@@ -326,7 +327,7 @@ async def handle_reply_intent(intent: str, entities: dict, update, context) -> N
         if len(lib["examples"]) > 20:
             lib["examples"] = lib["examples"][-20:]
         save_style_library(lib)
-        await msg.reply_text(
+        await ctx.reply(
             f"✓ Style example saved. I'll use it when drafting replies.\n"
             f"You have {len(lib['examples'])} example{'s' if len(lib['examples'])!=1 else ''} saved."
         )
@@ -343,7 +344,7 @@ async def handle_reply_intent(intent: str, entities: dict, update, context) -> N
             tone           = get_reply_settings(data).get("default_tone", "warm")
             lib            = load_style_library()
             style_examples = lib.get("examples", [])
-            await msg.reply_text("⏳ Drafting email reply...")
+            await ctx.reply("⏳ Drafting email reply...")
             draft = await _gpt_reply_from_text(
                 email_text     = email_text,
                 context_hint   = context_hint,
@@ -352,13 +353,13 @@ async def handle_reply_intent(intent: str, entities: dict, update, context) -> N
                 contact_ctx    = "",
             )
             set_last_draft(draft)
-            await msg.reply_text(draft, parse_mode="Markdown")
+            await ctx.reply_markdown(draft)
         else:
             # Store context for when the photo arrives
             if context_hint:
                 set_pending_context(context_hint)
             label = "email" if is_email else "text message"
-            await msg.reply_text(
+            await ctx.reply(
                 f"Got it. Now send me a screenshot of the {label} you want to reply to."
             )
         return

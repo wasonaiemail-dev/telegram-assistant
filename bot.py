@@ -96,7 +96,7 @@ from core.plugin_loader import (
     get_all_plugin_intents,
     list_plugins,
 )
-from adapters.telegram_adapter import make_context as _make_telegram_ctx
+from adapters.telegram_adapter import make_context as _make_telegram_ctx, make_bg_ctx as _make_bg_ctx
 from core.alfred_dispatch import alfred_dispatch
 
 logger = logging.getLogger(__name__)
@@ -371,6 +371,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await handle_setup_message(update, context)
         return
 
+    # Build ctx early — used by all interceptors and final dispatch
+    ctx = _make_telegram_ctx(update, context)
+
     # Voice messages — check if journal session wants voice first
     if update.message.voice or update.message.audio:
         from features.journal import is_journal_session_active, handle_voice_journal
@@ -387,17 +390,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         try:
             # Journal session takes priority
             if is_journal_session_active():
-                await handle_voice_journal(tmp_path, update, context)
+                await handle_voice_journal(tmp_path, ctx)
                 return
 
             # General voice: transcribe and route as text
             text = await _transcribe_voice_file(tmp_path)
             if not text:
-                await update.message.reply_text("Sorry, I couldn't understand that audio.")
+                await ctx.reply("Sorry, I couldn't understand that audio.")
                 return
 
             # Acknowledge transcription
-            await update.message.reply_text(f"🎙️ _{text}_", parse_mode="Markdown")
+            await ctx.reply_markdown(f"🎙️ _{text}_")
 
             # Now treat `text` as the user's message and continue to intent classification
             # Fall through with text set
@@ -427,12 +430,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 from features.shopping import handle_receipt_photo
                 await handle_receipt_photo(tmp_path, update, context)
             elif photo_type == "screenshot":
-                await handle_photo_for_reply(tmp_path, update, context, is_email=False)
+                await handle_photo_for_reply(tmp_path, ctx, is_email=False)
             else:
                 # General photo — existing analysis
                 description = await _analyse_photo_file(tmp_path)
                 if description:
-                    await update.message.reply_text(description)
+                    await ctx.reply(description)
         finally:
             try:
                 os.unlink(tmp_path)
@@ -454,13 +457,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             handle_voice_confirm,
         )
         if is_journal_session_active():
-            consumed = await handle_journal_session_reply(text, update, context)
+            consumed = await handle_journal_session_reply(text, ctx)
             if consumed:
                 return
-        consumed = await handle_journal_freeform_reply(text, update, context)
+        consumed = await handle_journal_freeform_reply(text, ctx)
         if consumed:
             return
-        consumed = await handle_voice_confirm(text, update, context)
+        consumed = await handle_voice_confirm(text, ctx)
         if consumed:
             return
 
@@ -474,13 +477,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Reply refinement intercept
         from features.reply_assist import looks_like_refinement, handle_refinement
         if looks_like_refinement(text):
-            await handle_refinement(text, update, context)
+            await handle_refinement(text, ctx)
             return
 
     intent_result = await classify(text)
-    # Build platform context and dispatch through the platform-agnostic dispatcher.
-    # _dispatch() is kept for backward compat but alfred_dispatch() is the future path.
-    ctx = _make_telegram_ctx(update, context)
     await alfred_dispatch(intent_result, ctx, _loaded_plugins)
 
 
@@ -772,21 +772,24 @@ async def cmd_meals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update):
         return
     from features.meals import cmd_meals as _f
-    await _f(update, context)
+    ctx = _make_telegram_ctx(update, context)
+    await _f(ctx)
 
 
 async def cmd_workout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update):
         return
     from features.workout import cmd_workout as _f
-    await _f(update, context)
+    ctx = _make_telegram_ctx(update, context)
+    await _f(ctx)
 
 
 async def cmd_journal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update):
         return
     from features.journal import cmd_journal as _f
-    await _f(update, context)
+    ctx = _make_telegram_ctx(update, context)
+    await _f(ctx)
 
 
 async def cmd_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -888,19 +891,17 @@ async def _job_weekly_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
         if now.weekday() != WEEKLY_SUMMARY_WEEKDAY:
             return
         from features.summary import send_weekly_summary
-        await send_weekly_summary(context, ALLOWED_USER_ID)
+        ctx = _make_bg_ctx(context, ALLOWED_USER_ID)
+        await send_weekly_summary(ctx)
     except Exception as e:
         logger.error(f"job_weekly_summary error: {e}")
 
 
 async def _job_journal_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        from core.data import load_data, get_journal_settings
         from features.journal import send_journal_reminder
-        data     = load_data()
-        js       = get_journal_settings(data)
-        # First reminder fires at configured times — this job runs at reminder_times[0]
-        await send_journal_reminder(context, ALLOWED_USER_ID, is_followup=False)
+        ctx = _make_bg_ctx(context, ALLOWED_USER_ID)
+        await send_journal_reminder(ctx, is_followup=False)
     except Exception as e:
         logger.error(f"job_journal_reminder error: {e}")
 
@@ -908,7 +909,8 @@ async def _job_journal_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def _job_journal_followup(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         from features.journal import send_journal_reminder
-        await send_journal_reminder(context, ALLOWED_USER_ID, is_followup=True)
+        ctx = _make_bg_ctx(context, ALLOWED_USER_ID)
+        await send_journal_reminder(ctx, is_followup=True)
     except Exception as e:
         logger.error(f"job_journal_followup error: {e}")
 
@@ -916,7 +918,8 @@ async def _job_journal_followup(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def _job_meal_adherence_check(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         from features.meals import send_meal_adherence_check
-        await send_meal_adherence_check(context, ALLOWED_USER_ID)
+        ctx = _make_bg_ctx(context, ALLOWED_USER_ID)
+        await send_meal_adherence_check(ctx)
     except Exception as e:
         logger.error(f"job_meal_adherence error: {e}")
 

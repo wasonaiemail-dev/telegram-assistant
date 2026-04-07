@@ -305,8 +305,8 @@ def get_briefing_line() -> str:
 # /workout COMMAND
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def cmd_workout(update, context) -> None:
-    """Show workout program overview and streak."""
+async def cmd_workout(ctx) -> None:
+    """Show workout program overview and streak. ctx: AlfredContext"""
     w = load_workout()
     program = w.get("program", {})
     streak  = w.get("streak", 0)
@@ -328,15 +328,15 @@ async def cmd_workout(update, context) -> None:
         lines.append("\nNo program set. Say \"build my workout program\" to generate one.")
 
     lines.append('\nSay "what should I do today?" for a personalised suggestion.')
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    await ctx.reply_markdown("\n".join(lines))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_workout_intent(intent: str, entities: dict, update, context) -> None:
-    msg = update.message
+async def handle_workout_intent(intent: str, entities: dict, ctx) -> None:
+    """ctx: AlfredContext"""
     tz  = pytz.timezone(TIMEZONE)
     today_iso = datetime.datetime.now(tz).date().isoformat()
 
@@ -357,7 +357,7 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
                 cardio_ent = parsed_cardio
 
         if not exercises and not cardio_ent and not duration_min:
-            await msg.reply_text(
+            await ctx.reply(
                 "I didn't catch what you did. Try:\n"
                 "\"bench 3x8 at 185, squats 4x6 at 225, ran 3km in 20 min — 45 min session, energy 4\""
             )
@@ -395,7 +395,7 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
         if pr_msgs:
             lines.extend(pr_msgs)
 
-        await msg.reply_text("\n".join(lines), parse_mode="Markdown")
+        await ctx.reply_markdown("\n".join(lines))
         return
 
     # ── WORKOUT_VIEW ──────────────────────────────────────────────────────────
@@ -403,7 +403,7 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
         days = int(entities.get("days", 7))
         _ensure_log_xlsx()
         if not os.path.exists(WORKOUT_XLSX):
-            await msg.reply_text("No workout history yet. Log a session to get started!")
+            await ctx.reply("No workout history yet. Log a session to get started!")
             return
         try:
             import openpyxl
@@ -411,12 +411,12 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
             ws   = wb["Workout Log"]
             rows = list(ws.iter_rows(values_only=True))
             if len(rows) < 2:
-                await msg.reply_text("No workout sessions logged yet.")
+                await ctx.reply("No workout sessions logged yet.")
                 return
             cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
             recent = [r for r in rows[1:] if r[0] and str(r[0]) >= cutoff]
             if not recent:
-                await msg.reply_text(f"No workouts in the last {days} days.")
+                await ctx.reply(f"No workouts in the last {days} days.")
                 return
             lines = [f"💪 *Last {days} days ({len(recent)} session{'s' if len(recent)!=1 else ''})*"]
             seen_dates = set()
@@ -427,19 +427,19 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
                     label = str(row[1] or "")
                     dur   = f"{row[2]} min" if row[2] else ""
                     lines.append(f"  {date}: {label} {dur}".strip())
-            await msg.reply_text("\n".join(lines), parse_mode="Markdown")
+            await ctx.reply_markdown("\n".join(lines))
         except Exception as e:
             logger.error(f"Error reading workout log: {e}")
-            await msg.reply_text("Couldn't read workout history. Try again.")
+            await ctx.reply("Couldn't read workout history. Try again.")
         return
 
     # ── WORKOUT_ASK (on-demand suggestion) ────────────────────────────────────
     if intent == WORKOUT_ASK:
         muscle = entities.get("muscle_group", "")
-        await msg.reply_text("⏳ Coming up with today's session...")
+        await ctx.reply("⏳ Coming up with today's session...")
         w       = load_workout()
         suggest = await _gpt_suggest_workout(w, muscle_group=muscle)
-        await msg.reply_text(suggest, parse_mode="Markdown")
+        await ctx.reply_markdown(suggest)
         return
 
     # ── WORKOUT_PLAN (view) ───────────────────────────────────────────────────
@@ -447,7 +447,7 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
         w = load_workout()
         program = w.get("program", {})
         if not program:
-            await msg.reply_text("No program yet. Say \"build my workout program\" to generate one.")
+            await ctx.reply("No program yet. Say \"build my workout program\" to generate one.")
             return
         lines = ["💪 *Your Workout Program*"]
         for day_label, exercises in program.items():
@@ -458,7 +458,7 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
                 for ex in exercises:
                     weight_note = f" ({ex.get('weight_note','')})" if ex.get('weight_note') else ""
                     lines.append(f"  • {ex.get('exercise','')} — {ex.get('sets','')}×{ex.get('reps','')}{weight_note}")
-        await msg.reply_text("\n".join(lines), parse_mode="Markdown")
+        await ctx.reply_markdown("\n".join(lines))
         return
 
     # ── WORKOUT_REBUILD ───────────────────────────────────────────────────────
@@ -466,10 +466,10 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
         from core.data import load_data, get_workout_settings
         data     = load_data()
         settings = get_workout_settings(data)
-        await msg.reply_text("⏳ Rebuilding your workout program...")
+        await ctx.reply("⏳ Rebuilding your workout program...")
         program = await _gpt_generate_program(settings)
         if not program:
-            await msg.reply_text("Couldn't generate a program right now. Try again.")
+            await ctx.reply("Couldn't generate a program right now. Try again.")
             return
         w = load_workout()
         w["program"] = program
@@ -482,10 +482,9 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
         })
         save_workout(w)
         day_labels = list(program.keys())
-        await msg.reply_text(
+        await ctx.reply_markdown(
             f"✓ New {len(day_labels)}-day program created:\n" +
-            "\n".join(f"  • {d}" for d in day_labels),
-            parse_mode="Markdown",
+            "\n".join(f"  • {d}" for d in day_labels)
         )
         return
 
@@ -498,14 +497,14 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
 
         if action == "list":
             if not templates:
-                await msg.reply_text("No saved templates yet. Say \"save this as [name]\" after logging a workout.")
+                await ctx.reply("No saved templates yet. Say \"save this as [name]\" after logging a workout.")
                 return
             lines = ["💾 *Saved Templates:*"] + [f"  • {n}" for n in templates]
-            await msg.reply_text("\n".join(lines), parse_mode="Markdown")
+            await ctx.reply_markdown("\n".join(lines))
 
         elif action == "save":
             if not name:
-                await msg.reply_text("What should I call this template?")
+                await ctx.reply("What should I call this template?")
                 return
             # Save last logged day's exercises from the xlsx as a template
             _ensure_log_xlsx()
@@ -521,13 +520,13 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
                 ]
                 templates[name] = template_exercises
                 save_workout(w)
-                await msg.reply_text(f"✓ Template \"{name}\" saved with {len(template_exercises)} exercises.")
+                await ctx.reply(f"✓ Template \"{name}\" saved with {len(template_exercises)} exercises.")
             except Exception as e:
-                await msg.reply_text("Couldn't save template from last session. Try again.")
+                await ctx.reply("Couldn't save template from last session. Try again.")
 
         elif action == "load":
             if not name or name not in templates:
-                await msg.reply_text(
+                await ctx.reply(
                     f"Template \"{name}\" not found." if name else "Which template? " +
                     ", ".join(f"\"{n}\"" for n in templates)
                 )
@@ -542,21 +541,16 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
                     suggested = (pr.get("weight_lb") or 0) + 5
                     pr_note   = f" → suggest {suggested} lb today"
                 lines.append(f"  • {ex.get('exercise','')} — {ex.get('sets','')}×{ex.get('reps','')}{pr_note}")
-            await msg.reply_text("\n".join(lines), parse_mode="Markdown")
+            await ctx.reply_markdown("\n".join(lines))
         return
 
     # ── WORKOUT_EXPORT ────────────────────────────────────────────────────────
     if intent == WORKOUT_EXPORT:
         _ensure_log_xlsx()
         if not os.path.exists(WORKOUT_XLSX):
-            await msg.reply_text("No workout history yet.")
+            await ctx.reply("No workout history yet.")
             return
-        await context.bot.send_document(
-            chat_id=msg.chat_id,
-            document=open(WORKOUT_XLSX, "rb"),
-            filename="workout_log.xlsx",
-            caption="Your complete workout log.",
-        )
+        await ctx.reply_document(WORKOUT_XLSX, caption="Your complete workout log.")
         return
 
     # ── WORKOUT_BODY ──────────────────────────────────────────────────────────
@@ -579,12 +573,12 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
                 parts.append(f"weight: {weight_lb} lb")
             if measurements:
                 parts.extend(f"{k}: {v}" for k, v in measurements.items())
-            await msg.reply_text(f"✓ Body stats logged: {', '.join(parts) if parts else 'entry saved'}.")
+            await ctx.reply(f"✓ Body stats logged: {', '.join(parts) if parts else 'entry saved'}.")
 
         elif action == "view":
             stats = w.get("body_stats", [])
             if not stats:
-                await msg.reply_text("No body stats logged yet.")
+                await ctx.reply("No body stats logged yet.")
                 return
             recent = stats[-5:]
             lines  = ["📏 *Recent Body Stats:*"]
@@ -596,5 +590,5 @@ async def handle_workout_intent(intent: str, entities: dict, update, context) ->
                     for k, v in s["measurements"].items():
                         line += f"  |  {k}: {v}"
                 lines.append(line)
-            await msg.reply_text("\n".join(lines), parse_mode="Markdown")
+            await ctx.reply_markdown("\n".join(lines))
         return

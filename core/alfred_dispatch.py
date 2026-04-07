@@ -237,65 +237,47 @@ async def alfred_dispatch(
             from features.ask import handle_ask
             await handle_ask(ctx.text, ctx)
 
-        # ─────────────────────────────────────────────────────────────────────
-        # UNMIGRATED FEATURES (Telegram pass-through only)
-        # Discord: returns "coming soon" message.
-        # Phase 4C: migrate meals, workout, journal, reply_assist, weekly_summary
-        # ─────────────────────────────────────────────────────────────────────
+        # ── WEEKLY SUMMARY ────────────────────────────────────────────────────
+        elif intent == WEEKLY_SUMMARY:
+            from features.summary import send_weekly_summary
+            await send_weekly_summary(ctx)
 
-        elif ctx.is_discord:
-            await ctx.reply(_DISCORD_COMING_SOON)
-            return
+        # ── MEALS ─────────────────────────────────────────────────────────────
+        elif intent in (MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
+                        MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS):
+            from features.meals import handle_meal_intent
+            await handle_meal_intent(intent, ents, ctx)
 
+        # ── WORKOUT ───────────────────────────────────────────────────────────
+        elif intent in (WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN,
+                        WORKOUT_REBUILD, WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY):
+            from features.workout import handle_workout_intent
+            await handle_workout_intent(intent, ents, ctx)
+
+        # ── JOURNAL ───────────────────────────────────────────────────────────
+        elif intent in (JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH,
+                        JOURNAL_MONTH, JOURNAL_WINS):
+            from features.journal import handle_journal_intent
+            await handle_journal_intent(intent, ents, ctx)
+
+        # ── REPLY / EMAIL ASSIST ──────────────────────────────────────────────
+        elif intent in (REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD):
+            from features.reply_assist import handle_reply_intent
+            await handle_reply_intent(intent, ents, ctx)
+
+        # ── PLUGIN INTENTS (fallback) ─────────────────────────────────────────
         else:
-            # Telegram pass-through for remaining unmigrated handlers
             update  = ctx._update
             context = ctx._context
-
-            if update is None:
-                await ctx.reply("Platform error: no update context available.")
-                return
-
-            from telegram.constants import ParseMode
-
-            # -- WEEKLY SUMMARY ---------------------------------------------------
-            if intent == WEEKLY_SUMMARY:
-                from features.summary import send_weekly_summary
-                await send_weekly_summary(context, update.effective_chat.id)
-
-            # -- MEALS -----------------------------------------------------------
-            elif intent in (MEAL_PLAN, MEAL_VIEW, MEAL_ADD, MEAL_RECIPE, MEAL_GENERATE,
-                            MEAL_IMPORT, MEAL_NUTRITION, MEAL_ADHERENCE, MEAL_EXPORT, MEAL_LEFTOVERS):
-                from features.meals import handle_meal_intent
-                await handle_meal_intent(intent, ents, update, context)
-
-            # -- WORKOUT ----------------------------------------------------------
-            elif intent in (WORKOUT_LOG, WORKOUT_VIEW, WORKOUT_ASK, WORKOUT_PLAN,
-                            WORKOUT_REBUILD, WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY):
-                from features.workout import handle_workout_intent
-                await handle_workout_intent(intent, ents, update, context)
-
-            # -- JOURNAL ----------------------------------------------------------
-            elif intent in (JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH,
-                            JOURNAL_MONTH, JOURNAL_WINS):
-                from features.journal import handle_journal_intent
-                await handle_journal_intent(intent, ents, update, context)
-
-            # -- REPLY / EMAIL ASSIST ---------------------------------------------
-            elif intent in (REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD):
-                from features.reply_assist import handle_reply_intent
-                await handle_reply_intent(intent, ents, update, context)
-
-            # -- PLUGIN INTENTS (fallback) ----------------------------------------
-            else:
+            if update is not None and context is not None:
+                from telegram.constants import ParseMode
                 handled = await dispatch_plugin_intent(
                     intent_result, update, context, loaded_plugins
                 )
                 if not handled:
-                    await update.message.reply_text(
-                        "I'm not sure how to handle that. Try `/help` to see what I can do.",
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
+                    await ctx.reply("I'm not sure how to handle that. Try `/help` to see what I can do.")
+            else:
+                await ctx.reply("I'm not sure how to handle that. Try `/help` to see what I can do.")
 
     except ImportError as e:
         logger.warning(f"alfred_dispatch: feature not yet built for intent '{intent}': {e}")

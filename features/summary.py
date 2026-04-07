@@ -5,7 +5,7 @@ Weekly summary — a GPT-powered review of the week's activity.
 
 PUBLIC INTERFACE
 ────────────────
-  send_weekly_summary(context, chat_id)
+  send_weekly_summary(ctx: AlfredContext)
       Called every Sunday at WEEKLY_SUMMARY_HOUR by the background job,
       or on-demand by the WEEKLY_SUMMARY intent.
 
@@ -185,9 +185,10 @@ async def _generate_summary(
 # PUBLIC: send_weekly_summary
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def send_weekly_summary(context, chat_id: int) -> None:
+async def send_weekly_summary(ctx) -> None:
     """
     Compile and send the weekly summary.
+    ctx: AlfredContext (imported inline to avoid circular imports)
     """
     from core.data import get_week_summary_data
     from features.memory import get_full_context
@@ -226,11 +227,5 @@ async def send_weekly_summary(context, chat_id: int) -> None:
         memory_block=memory_block,
     )
 
-    now = _now_local()
     header = f"📊 *Weekly Summary — Week of {week_start}*\n\n"
-
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=header + summary,
-        parse_mode="Markdown",
-    )
+    await ctx.reply_markdown(header + summary)

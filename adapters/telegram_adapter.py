@@ -154,3 +154,57 @@ def make_context(
         _update=update,
         _context=context,
     )
+
+
+def make_bg_ctx(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    user_id: int = 0,
+) -> AlfredContext:
+    """
+    Build an AlfredContext for a background / scheduled job (no incoming Update).
+    Used by proactive messages like weekly summary, journal reminder, meal check-in.
+    """
+
+    async def _reply(text_: str, parse_mode_: str = None) -> None:
+        kwargs = {}
+        if parse_mode_:
+            if parse_mode_.upper() == "HTML":
+                kwargs["parse_mode"] = ParseMode.HTML
+            elif parse_mode_.upper() in ("MARKDOWN", "MD"):
+                kwargs["parse_mode"] = ParseMode.MARKDOWN
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text_, **kwargs)
+        except Exception as e:
+            logger.error(f"telegram_adapter.make_bg_ctx._reply error: {e}")
+
+    async def _reply_doc(file_path: str, caption: str = "") -> None:
+        try:
+            with open(file_path, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=f,
+                    caption=caption,
+                )
+        except Exception as e:
+            logger.error(f"telegram_adapter.make_bg_ctx._reply_doc error: {e}")
+
+    async def _typing() -> None:
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception:
+            pass
+
+    return AlfredContext(
+        text="",
+        user_id=user_id,
+        chat_id=chat_id,
+        platform="telegram",
+        args=[],
+        _reply_fn=_reply,
+        _reply_doc_fn=_reply_doc,
+        _typing_fn=_typing,
+        _reply_menu_fn=None,
+        _update=None,
+        _context=context,
+    )

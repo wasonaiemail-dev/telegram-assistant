@@ -414,27 +414,27 @@ async def get_todays_meals_text() -> str:
 # /meals COMMAND
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def cmd_meals(update, context) -> None:
-    """Show today's meal plan."""
+async def cmd_meals(ctx) -> None:
+    """Show today's meal plan. ctx: AlfredContext"""
     today = _today_iso()
     plan  = _get_plan_for_date(today)
     if not plan:
-        await update.message.reply_text(
-            f"No meal plan for today. Say:\n"
-            f"• \"Plan my meals for the week\"\n"
-            f"• \"Breakfast today: oats\" to set individual meals\n"
-            f"• /meals recipe [name] to look up a recipe",
+        await ctx.reply(
+            "No meal plan for today. Say:\n"
+            "• \"Plan my meals for the week\"\n"
+            "• \"Breakfast today: oats\" to set individual meals\n"
+            "• /meals recipe [name] to look up a recipe"
         )
         return
-    await update.message.reply_text(_format_day_plan(plan), parse_mode="Markdown")
+    await ctx.reply_markdown(_format_day_plan(plan))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_meal_intent(intent: str, entities: dict, update, context) -> None:
-    msg = update.message
+async def handle_meal_intent(intent: str, entities: dict, ctx) -> None:
+    """ctx: AlfredContext"""
 
     # ── MEAL_VIEW ────────────────────────────────────────────────────────────
     if intent == MEAL_VIEW:
@@ -448,9 +448,9 @@ async def handle_meal_intent(intent: str, entities: dict, update, context) -> No
                 date_iso = _today_iso()
         plan = _get_plan_for_date(date_iso)
         if plan:
-            await msg.reply_text(_format_day_plan(plan), parse_mode="Markdown")
+            await ctx.reply_markdown(_format_day_plan(plan))
         else:
-            await msg.reply_text(f"No meal plan found for {date_iso}.")
+            await ctx.reply(f"No meal plan found for {date_iso}.")
         return
 
     # ── MEAL_PLAN (set a plan) ────────────────────────────────────────────────
@@ -460,9 +460,9 @@ async def handle_meal_intent(intent: str, entities: dict, update, context) -> No
             date_iso = _today_iso()
             plan = _get_plan_for_date(date_iso)
             if plan:
-                await msg.reply_text(_format_day_plan(plan), parse_mode="Markdown")
+                await ctx.reply_markdown(_format_day_plan(plan))
             else:
-                await msg.reply_text("No meal plan for today. Say \"plan my meals for the week\" to generate one.")
+                await ctx.reply("No meal plan for today. Say \"plan my meals for the week\" to generate one.")
             return
 
         meals_dict = entities.get("meals", {})
@@ -477,24 +477,23 @@ async def handle_meal_intent(intent: str, entities: dict, update, context) -> No
 
         if not meals_dict:
             # GPT suggestion from library
-            await msg.reply_text("⏳ Generating meal plan from your recipe library...")
+            await ctx.reply("⏳ Generating meal plan from your recipe library...")
             plan_dict = await _gpt_suggest_meal_plan(days=7)
             if not plan_dict:
-                await msg.reply_text("No recipes in your library yet. Add some recipes first!")
+                await ctx.reply("No recipes in your library yet. Add some recipes first!")
                 return
             saved = 0
             for d, m in plan_dict.items():
                 if _set_plan_for_date(d, m):
                     saved += 1
-            await msg.reply_text(
-                f"✓ Meal plan set for {saved} days. Send /meals to see today's plan.",
-                parse_mode="Markdown",
+            await ctx.reply_markdown(
+                f"✓ Meal plan set for {saved} days. Send /meals to see today's plan."
             )
         else:
             if _set_plan_for_date(date_iso, meals_dict):
-                await msg.reply_text(f"✓ Meal plan saved for {date_iso}.")
+                await ctx.reply(f"✓ Meal plan saved for {date_iso}.")
             else:
-                await msg.reply_text("Couldn't save that plan. Try again.")
+                await ctx.reply("Couldn't save that plan. Try again.")
         return
 
     # ── MEAL_RECIPE ───────────────────────────────────────────────────────────
@@ -503,16 +502,16 @@ async def handle_meal_intent(intent: str, entities: dict, update, context) -> No
         if not name:
             recipes = _load_recipes()
             if not recipes:
-                await msg.reply_text("No recipes in your library yet.")
+                await ctx.reply("No recipes in your library yet.")
                 return
             names = "\n".join(f"• {r.get('name','')}" for r in recipes[:20])
-            await msg.reply_text(f"*Your Recipes:*\n{names}", parse_mode="Markdown")
+            await ctx.reply_markdown(f"*Your Recipes:*\n{names}")
             return
         recipe = _find_recipe(name)
         if recipe:
-            await msg.reply_text(_format_recipe(recipe), parse_mode="Markdown")
+            await ctx.reply_markdown(_format_recipe(recipe))
         else:
-            await msg.reply_text(
+            await ctx.reply(
                 f"No recipe found for \"{name}\". Say \"generate a recipe for {name}\" to create one."
             )
         return
@@ -521,51 +520,50 @@ async def handle_meal_intent(intent: str, entities: dict, update, context) -> No
     if intent == MEAL_ADD:
         name = entities.get("name", "").strip()
         if not name:
-            await msg.reply_text("What should I call this recipe?")
+            await ctx.reply("What should I call this recipe?")
             return
         recipe = {k: entities.get(k, "") for k in _RECIPE_COLS}
         recipe["name"] = name
         if _save_recipe(recipe):
-            await msg.reply_text(f"✓ Recipe \"{name}\" saved to your library.")
+            await ctx.reply(f"✓ Recipe \"{name}\" saved to your library.")
         else:
-            await msg.reply_text("Couldn't save that recipe. Try again.")
+            await ctx.reply("Couldn't save that recipe. Try again.")
         return
 
     # ── MEAL_GENERATE (GPT recipe) ────────────────────────────────────────────
     if intent == MEAL_GENERATE:
         description = entities.get("description", "").strip()
         if not description:
-            await msg.reply_text("What should I create a recipe for? e.g. \"generate a high-protein pasta recipe\"")
+            await ctx.reply("What should I create a recipe for? e.g. \"generate a high-protein pasta recipe\"")
             return
-        await msg.reply_text(f"⏳ Creating a recipe for \"{description}\"...")
+        await ctx.reply(f"⏳ Creating a recipe for \"{description}\"...")
         recipe = await _gpt_generate_recipe(description)
         if not recipe:
-            await msg.reply_text("Couldn't generate that recipe. Try again.")
+            await ctx.reply("Couldn't generate that recipe. Try again.")
             return
         preview = _format_recipe(recipe)
         save    = entities.get("save", True)
         if save:
             _save_recipe(recipe)
-            await msg.reply_text(preview + "\n\n✓ Saved to your recipe library.", parse_mode="Markdown")
+            await ctx.reply_markdown(preview + "\n\n✓ Saved to your recipe library.")
         else:
-            await msg.reply_text(preview + "\n\nSay \"save this recipe\" to add it to your library.", parse_mode="Markdown")
+            await ctx.reply_markdown(preview + "\n\nSay \"save this recipe\" to add it to your library.")
         return
 
     # ── MEAL_IMPORT (URL) ──────────────────────────────────────────────────────
     if intent == MEAL_IMPORT:
         url = entities.get("url", "").strip()
         if not url:
-            await msg.reply_text("Which URL should I import from?")
+            await ctx.reply("Which URL should I import from?")
             return
-        await msg.reply_text("⏳ Importing recipe from that URL...")
+        await ctx.reply("⏳ Importing recipe from that URL...")
         recipe = await _gpt_import_recipe_url(url)
         if not recipe:
-            await msg.reply_text("Couldn't import from that URL. Try pasting the recipe text instead.")
+            await ctx.reply("Couldn't import from that URL. Try pasting the recipe text instead.")
             return
         _save_recipe(recipe)
-        await msg.reply_text(
-            f"✓ Imported *{recipe.get('name', 'Recipe')}* and saved to your library.",
-            parse_mode="Markdown",
+        await ctx.reply_markdown(
+            f"✓ Imported *{recipe.get('name', 'Recipe')}* and saved to your library."
         )
         return
 
@@ -574,7 +572,7 @@ async def handle_meal_intent(intent: str, entities: dict, update, context) -> No
         date_str = entities.get("date", "today")
         date_iso = _today_iso() if date_str in ("today", "") else date_str
         summary  = await _gpt_nutrition_summary(date_iso)
-        await msg.reply_text(summary, parse_mode="Markdown")
+        await ctx.reply_markdown(summary)
         return
 
     # ── MEAL_ADHERENCE ────────────────────────────────────────────────────────
@@ -583,24 +581,19 @@ async def handle_meal_intent(intent: str, entities: dict, update, context) -> No
         plan     = _get_plan_for_date(date_iso)
         notes    = entities.get("notes", "")
         if not plan:
-            await msg.reply_text("No meal plan found for today to log adherence against.")
+            await ctx.reply("No meal plan found for today to log adherence against.")
             return
         _log_adherence(date_iso, "all", str(plan), notes)
-        await msg.reply_text(f"✓ Meal adherence logged for {date_iso}.")
+        await ctx.reply(f"✓ Meal adherence logged for {date_iso}.")
         return
 
     # ── MEAL_EXPORT ───────────────────────────────────────────────────────────
     if intent == MEAL_EXPORT:
         _ensure_workbook()
         if not os.path.exists(MEALS_XLSX):
-            await msg.reply_text("No meal data yet.")
+            await ctx.reply("No meal data yet.")
             return
-        await context.bot.send_document(
-            chat_id=msg.chat_id,
-            document=open(MEALS_XLSX, "rb"),
-            filename="meals.xlsx",
-            caption="Your meal plan and recipe library.",
-        )
+        await ctx.reply_document(MEALS_XLSX, caption="Your meal plan and recipe library.")
         return
 
     # ── MEAL_LEFTOVERS ────────────────────────────────────────────────────────
@@ -614,15 +607,15 @@ async def handle_meal_intent(intent: str, entities: dict, update, context) -> No
         if action == "log":
             data["settings"]["leftovers"][today] = details
             save_data(data)
-            await msg.reply_text(f"✓ Leftovers logged: {details}")
+            await ctx.reply(f"✓ Leftovers logged: {details}")
         else:
             leftovers = data["settings"].get("leftovers", {})
             if leftovers:
                 recent = sorted(leftovers.items())[-5:]
                 lines  = [f"  {d}: {v}" for d, v in reversed(recent)]
-                await msg.reply_text("🍱 *Recent Leftovers:*\n" + "\n".join(lines), parse_mode="Markdown")
+                await ctx.reply_markdown("🍱 *Recent Leftovers:*\n" + "\n".join(lines))
             else:
-                await msg.reply_text("No leftovers logged yet.")
+                await ctx.reply("No leftovers logged yet.")
         return
 
 
@@ -630,8 +623,8 @@ async def handle_meal_intent(intent: str, entities: dict, update, context) -> No
 # SCHEDULED: meal adherence check
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def send_meal_adherence_check(context, chat_id: int) -> None:
-    """Evening prompt: did you eat as planned?"""
+async def send_meal_adherence_check(ctx) -> None:
+    """Evening prompt: did you eat as planned? ctx: AlfredContext"""
     today = _today_iso()
     plan  = _get_plan_for_date(today)
     if not plan:
@@ -653,8 +646,4 @@ async def send_meal_adherence_check(context, chat_id: int) -> None:
         "• \"I had [something different] for [meal slot]\"",
         "• \"Skip\" to log it later",
     ]
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text="\n".join(lines),
-        parse_mode="Markdown",
-    )
+    await ctx.reply_markdown("\n".join(lines))

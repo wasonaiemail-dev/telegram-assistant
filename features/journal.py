@@ -157,11 +157,12 @@ def is_journal_session_active() -> bool:
     return bool(_get_session(data))
 
 
-async def handle_journal_session_reply(text: str, update, context) -> bool:
+async def handle_journal_session_reply(text: str, ctx) -> bool:
     """
     If an active prompted session exists, record the answer and send the
     next question (or finalise the session).
     Returns True if message was consumed, False if no active session.
+    ctx: AlfredContext
     """
     from core.data import save_data
     data    = load_data()
@@ -186,10 +187,7 @@ async def handle_journal_session_reply(text: str, update, context) -> bool:
     # More questions?
     if current_idx < len(questions):
         next_q = questions[current_idx]
-        await update.message.reply_text(
-            f"*{current_idx + 1}/{len(questions)}* {next_q}",
-            parse_mode="Markdown",
-        )
+        await ctx.reply_markdown(f"*{current_idx + 1}/{len(questions)}* {next_q}")
         return True
 
     # Session complete — save and finalize
@@ -204,9 +202,8 @@ async def handle_journal_session_reply(text: str, update, context) -> bool:
     })
 
     # Offer freeform add-on
-    await update.message.reply_text(
-        "✓ Journal saved. Anything else you'd like to add? (Send text or a voice message, or type \"done\" to finish.)",
-        parse_mode="Markdown",
+    await ctx.reply(
+        "✓ Journal saved. Anything else you'd like to add? (Send text or a voice message, or type \"done\" to finish.)"
     )
     # Set a freeform follow-on flag
     from core.data import save_data
@@ -216,8 +213,8 @@ async def handle_journal_session_reply(text: str, update, context) -> bool:
     return True
 
 
-async def handle_journal_freeform_reply(text: str, update, context) -> bool:
-    """Handle a freeform follow-on after a prompted session."""
+async def handle_journal_freeform_reply(text: str, ctx) -> bool:
+    """Handle a freeform follow-on after a prompted session. ctx: AlfredContext"""
     from core.data import save_data
     data = load_data()
     date_iso = data.get("settings", {}).get("journal", {}).get("_awaiting_freeform")
@@ -229,7 +226,7 @@ async def handle_journal_freeform_reply(text: str, update, context) -> bool:
     save_data(data)
 
     if text.strip().lower() in ("done", "no", "skip", "nothing"):
-        await update.message.reply_text("Good. Sleep well 🌙")
+        await ctx.reply("Good. Sleep well 🌙")
         return True
 
     ts = datetime.datetime.utcnow().isoformat()
@@ -238,7 +235,7 @@ async def handle_journal_freeform_reply(text: str, update, context) -> bool:
         "content":   text.strip(),
         "timestamp": ts,
     })
-    await update.message.reply_text("✓ Added to tonight's journal. Sleep well 🌙")
+    await ctx.reply("✓ Added to tonight's journal. Sleep well 🌙")
     return True
 
 
@@ -246,10 +243,11 @@ async def handle_journal_freeform_reply(text: str, update, context) -> bool:
 # VOICE JOURNAL
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_voice_journal(file_path: str, update, context) -> None:
+async def handle_voice_journal(file_path: str, ctx) -> None:
     """
     Transcribe a voice message with Whisper, GPT-clean it, confirm with user.
     Called from bot.py when a voice message is received during an active session.
+    ctx: AlfredContext
     """
     from openai import AsyncOpenAI
     client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -264,7 +262,7 @@ async def handle_voice_journal(file_path: str, update, context) -> None:
         raw_text = transcript_resp.strip() if isinstance(transcript_resp, str) else str(transcript_resp)
     except Exception as e:
         logger.error(f"Whisper transcription failed: {e}")
-        await update.message.reply_text("Couldn't transcribe that voice message. Try typing instead.")
+        await ctx.reply("Couldn't transcribe that voice message. Try typing instead.")
         return
 
     # GPT clean-up
@@ -293,15 +291,14 @@ async def handle_voice_journal(file_path: str, update, context) -> None:
     }
     save_data(data)
 
-    await update.message.reply_text(
+    await ctx.reply_markdown(
         f"🎙 *Transcription:*\n_{cleaned[:600]}_\n\n"
-        f"Save this to your journal? Reply *yes* to save or *edit* + corrected text.",
-        parse_mode="Markdown",
+        f"Save this to your journal? Reply *yes* to save or *edit* + corrected text."
     )
 
 
-async def handle_voice_confirm(text: str, update, context) -> bool:
-    """Confirm or edit a pending voice transcription."""
+async def handle_voice_confirm(text: str, ctx) -> bool:
+    """Confirm or edit a pending voice transcription. ctx: AlfredContext"""
     from core.data import save_data
     data    = load_data()
     pending = data.get("settings", {}).get("journal", {}).get("_pending_voice")
@@ -318,7 +315,7 @@ async def handle_voice_confirm(text: str, update, context) -> bool:
     elif lower in ("no", "cancel", "discard"):
         data["settings"]["journal"]["_pending_voice"] = None
         save_data(data)
-        await update.message.reply_text("Voice journal discarded.")
+        await ctx.reply("Voice journal discarded.")
         return True
     else:
         return False  # Not a voice confirm response
@@ -332,7 +329,7 @@ async def handle_voice_confirm(text: str, update, context) -> bool:
             "content":   content,
             "timestamp": ts,
         })
-        await update.message.reply_text("✓ Voice journal saved. Sleep well 🌙")
+        await ctx.reply("✓ Voice journal saved. Sleep well 🌙")
     return True
 
 
@@ -430,9 +427,9 @@ def _collect_entries_text(journal: dict, start_iso: str | None = None,
 # /journal COMMAND
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def cmd_journal(update, context) -> None:
-    """Start or view journal. /journal → prompt. /journal [date] → view."""
-    args = context.args or []
+async def cmd_journal(ctx) -> None:
+    """Start or view journal. /journal → prompt. /journal [date] → view. ctx: AlfredContext"""
+    args = ctx.args or []
     if args:
         # View a past entry
         date_str = " ".join(args)
@@ -442,22 +439,21 @@ async def cmd_journal(update, context) -> None:
             date_iso = _today_iso()
         day_data = get_journal_day(date_iso)
         if day_data and day_data.get("entries"):
-            await update.message.reply_text(
-                _format_day(date_iso, day_data), parse_mode="Markdown"
-            )
+            await ctx.reply_markdown(_format_day(date_iso, day_data))
         else:
-            await update.message.reply_text(f"No journal entry found for {date_iso}.")
+            await ctx.reply(f"No journal entry found for {date_iso}.")
         return
 
     # Start prompted session
-    await _start_journal_session(update, context)
+    await _start_journal_session(ctx)
 
 
-async def _start_journal_session(update, context) -> None:
+async def _start_journal_session(ctx) -> None:
+    """ctx: AlfredContext"""
     from core.data import save_data
     questions = _get_prompts_for_today()
     if not questions:
-        await update.message.reply_text(
+        await ctx.reply(
             "No journal prompts configured. Say whatever you'd like and I'll save it."
         )
         return
@@ -471,10 +467,9 @@ async def _start_journal_session(update, context) -> None:
     })
     save_data(data)
 
-    await update.message.reply_text(
+    await ctx.reply_markdown(
         f"📓 *Evening Journal* ({_today_iso()})\n\n"
-        f"*1/{len(questions)}* {questions[0]}",
-        parse_mode="Markdown",
+        f"*1/{len(questions)}* {questions[0]}"
     )
 
 
@@ -482,12 +477,12 @@ async def _start_journal_session(update, context) -> None:
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_journal_intent(intent: str, entities: dict, update, context) -> None:
-    msg = update.message
+async def handle_journal_intent(intent: str, entities: dict, ctx) -> None:
+    """ctx: AlfredContext"""
 
     # ── JOURNAL_PROMPT ────────────────────────────────────────────────────────
     if intent == JOURNAL_PROMPT:
-        await _start_journal_session(update, context)
+        await _start_journal_session(ctx)
         return
 
     # ── JOURNAL_VIEW ──────────────────────────────────────────────────────────
@@ -504,9 +499,9 @@ async def handle_journal_intent(intent: str, entities: dict, update, context) ->
                 date_iso = _today_iso()
         day_data = get_journal_day(date_iso)
         if day_data and day_data.get("entries"):
-            await msg.reply_text(_format_day(date_iso, day_data), parse_mode="Markdown")
+            await ctx.reply_markdown(_format_day(date_iso, day_data))
         else:
-            await msg.reply_text(f"No journal entry found for {date_iso}.")
+            await ctx.reply(f"No journal entry found for {date_iso}.")
         return
 
     # ── JOURNAL_SEARCH ────────────────────────────────────────────────────────
@@ -516,7 +511,7 @@ async def handle_journal_intent(intent: str, entities: dict, update, context) ->
         journal  = load_journal()
 
         if not journal:
-            await msg.reply_text("No journal entries yet.")
+            await ctx.reply("No journal entries yet.")
             return
 
         if date_str and not query:
@@ -527,17 +522,17 @@ async def handle_journal_intent(intent: str, entities: dict, update, context) ->
                 date_iso = _today_iso()
             day_data = journal.get(date_iso)
             if day_data:
-                await msg.reply_text(_format_day(date_iso, day_data), parse_mode="Markdown")
+                await ctx.reply_markdown(_format_day(date_iso, day_data))
             else:
-                await msg.reply_text(f"No entry found for {date_iso}.")
+                await ctx.reply(f"No entry found for {date_iso}.")
             return
 
         if not query:
-            await msg.reply_text("What should I search for? e.g. \"search journal for stress\"")
+            await ctx.reply("What should I search for? e.g. \"search journal for stress\"")
             return
 
         # GPT keyword search
-        await msg.reply_text("🔍 Searching your journal...")
+        await ctx.reply("🔍 Searching your journal...")
         # Optionally narrow by date
         start_iso = None
         if date_str:
@@ -547,7 +542,7 @@ async def handle_journal_intent(intent: str, entities: dict, update, context) ->
                 pass
         text   = _collect_entries_text(journal, start_iso=start_iso)
         result = await _gpt_search(text, query)
-        await msg.reply_text(f"🔍 *Search: \"{query}\"*\n\n{result}", parse_mode="Markdown")
+        await ctx.reply_markdown(f"🔍 *Search: \"{query}\"*\n\n{result}")
         return
 
     # ── JOURNAL_MONTH ─────────────────────────────────────────────────────────
@@ -569,12 +564,12 @@ async def handle_journal_intent(intent: str, entities: dict, update, context) ->
         end_iso   = month_iso + "-31"
         text      = _collect_entries_text(journal, start_iso=start_iso, end_iso=end_iso)
         if not text:
-            await msg.reply_text(f"No journal entries found for {month_iso}.")
+            await ctx.reply(f"No journal entries found for {month_iso}.")
             return
 
-        await msg.reply_text("⏳ Writing your monthly reflection...")
+        await ctx.reply("⏳ Writing your monthly reflection...")
         summary = await _gpt_monthly_summary(text, month_label=month_iso)
-        await msg.reply_text(f"📓 *{month_iso} Monthly Reflection*\n\n{summary}", parse_mode="Markdown")
+        await ctx.reply_markdown(f"📓 *{month_iso} Monthly Reflection*\n\n{summary}")
         return
 
     # ── JOURNAL_WINS ──────────────────────────────────────────────────────────
@@ -585,11 +580,11 @@ async def handle_journal_intent(intent: str, entities: dict, update, context) ->
         cutoff  = (datetime.datetime.now(tz).date() - datetime.timedelta(days=days)).isoformat()
         text    = _collect_entries_text(journal, start_iso=cutoff)
         if not text:
-            await msg.reply_text(f"No journal entries in the last {days} days.")
+            await ctx.reply(f"No journal entries in the last {days} days.")
             return
-        await msg.reply_text("⏳ Finding your highlights...")
+        await ctx.reply("⏳ Finding your highlights...")
         wins = await _gpt_wins_highlights(text, days)
-        await msg.reply_text(f"🌟 *Wins & Gratitude — Last {days} Days*\n\n{wins}", parse_mode="Markdown")
+        await ctx.reply_markdown(f"🌟 *Wins & Gratitude — Last {days} Days*\n\n{wins}")
         return
 
 
@@ -597,8 +592,8 @@ async def handle_journal_intent(intent: str, entities: dict, update, context) ->
 # SCHEDULED: journal reminder
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def send_journal_reminder(context, chat_id: int, is_followup: bool = False) -> None:
-    """Send the nightly journal reminder."""
+async def send_journal_reminder(ctx, is_followup: bool = False) -> None:
+    """Send the nightly journal reminder. ctx: AlfredContext"""
     today    = _today_iso()
     day_data = get_journal_day(today)
 
@@ -606,12 +601,8 @@ async def send_journal_reminder(context, chat_id: int, is_followup: bool = False
         return  # Already journaled today
 
     prefix = "One more reminder 📓 " if is_followup else ""
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=(
-            f"{prefix}*Evening Journal* 📓\n\n"
-            f"Time to reflect on your day. Send /journal to start, "
-            f"or just send a voice message and I'll transcribe it for you."
-        ),
-        parse_mode="Markdown",
+    await ctx.reply_markdown(
+        f"{prefix}*Evening Journal* 📓\n\n"
+        f"Time to reflect on your day. Send /journal to start, "
+        f"or just send a voice message and I'll transcribe it for you."
     )
