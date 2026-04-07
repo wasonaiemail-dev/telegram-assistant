@@ -187,21 +187,77 @@ async def cmd_sports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     args = update.message.text.split()[1:] if len(update.message.text.split()) > 1 else []
     action = args[0].lower() if args else "setup"
 
-    if action in ["setup", "config"]:
+    if action == "addplayer":
+        # /sports addplayer <name>
+        player_name = " ".join(args[1:]).strip()
+        if not player_name:
+            await update.message.reply_text(
+                "Usage: <code>/sports addplayer &lt;name&gt;</code>\n"
+                "Example: <code>/sports addplayer LeBron James</code>",
+                parse_mode="HTML"
+            )
+            return
+        settings = sports_config.load_sports_settings()
+        players = settings.setdefault("briefing_favorite_players", [])
+        if player_name in players:
+            await update.message.reply_text(f"✓ {player_name} is already tracked.")
+        else:
+            players.append(player_name)
+            sports_config.save_sports_settings(settings)
+            await update.message.reply_text(
+                f"✓ Added <b>{player_name}</b> to your tracked players.\n"
+                f"Their stats will appear in tomorrow's briefing.",
+                parse_mode="HTML"
+            )
+        return
+
+    elif action == "removeplayer":
+        # /sports removeplayer <name>
+        player_name = " ".join(args[1:]).strip()
+        if not player_name:
+            await update.message.reply_text(
+                "Usage: <code>/sports removeplayer &lt;name&gt;</code>",
+                parse_mode="HTML"
+            )
+            return
+        settings = sports_config.load_sports_settings()
+        players = settings.get("briefing_favorite_players", [])
+        # Case-insensitive match
+        match = next((p for p in players if p.lower() == player_name.lower()), None)
+        if match:
+            players.remove(match)
+            sports_config.save_sports_settings(settings)
+            await update.message.reply_text(f"✓ Removed <b>{match}</b> from tracked players.", parse_mode="HTML")
+        else:
+            await update.message.reply_text(f"'{player_name}' wasn't in your tracked players.")
+        return
+
+    elif action in ["setup", "config"]:
         # Show settings menu
         settings = sports_config.load_sports_settings()
 
-        fav_teams = settings.get("favorite_teams", [])
+        fav_teams   = settings.get("favorite_teams", [])
         fav_leagues = settings.get("favorite_leagues", [])
-        alerts = settings.get("alerts_enabled", True)
-        bankroll = settings.get("bankroll", 0.0)
+        alerts      = settings.get("alerts_enabled", True)
+        bankroll    = settings.get("bankroll", 0.0)
 
-        message = "<b>⚙️ Sports Settings</b>\n\n"
+        reddit_on   = settings.get("briefing_reddit_highlights", True)
+        youtube_on  = settings.get("briefing_youtube_top_plays", False)
+        players_on  = settings.get("briefing_track_fav_players", False)
+        fav_players = settings.get("briefing_favorite_players", [])
+
+        message  = "<b>⚙️ Sports Settings</b>\n\n"
         message += f"Alerts: {'✓ Enabled' if alerts else '✗ Disabled'}\n"
         message += f"Favorite Teams: {len(fav_teams)}\n"
         message += f"Favorite Leagues: {len(fav_leagues)}\n"
         message += f"Bankroll: ${bankroll:.2f}\n\n"
-        message += "Use the buttons below to configure."
+        message += "<b>📊 Morning Briefing</b>\n"
+        message += f"Reddit Highlights: {'✓ On' if reddit_on else '✗ Off'}\n"
+        message += f"YouTube Top Plays: {'✓ On' if youtube_on else '✗ Off'}\n"
+        message += f"Player Tracking: {'✓ On' if players_on else '✗ Off'}"
+        if fav_players:
+            message += f" ({', '.join(fav_players)})"
+        message += "\n\nUse the buttons below to configure."
 
         keyboard = [
             [
@@ -211,6 +267,9 @@ async def cmd_sports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             [
                 InlineKeyboardButton("Set Bankroll", callback_data="sports_setup_bankroll"),
                 InlineKeyboardButton("View Teams", callback_data="sports_setup_view_teams"),
+            ],
+            [
+                InlineKeyboardButton("📊 Briefing Settings", callback_data="sports_briefing_menu"),
             ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)

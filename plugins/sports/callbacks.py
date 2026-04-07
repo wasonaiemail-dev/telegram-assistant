@@ -87,6 +87,21 @@ async def handle_sports_callback(
             await _handle_alert_toggle(query)
 
         # ─────────────────────────────────────────────────────────────────
+        # BRIEFING SETTINGS CALLBACKS
+        # ─────────────────────────────────────────────────────────────────
+        elif action == "briefing":
+            subaction = parts[2] if len(parts) > 2 else "menu"
+            if subaction == "menu":
+                await _handle_briefing_menu(query)
+            elif subaction == "toggle":
+                setting_key = parts[3] if len(parts) > 3 else ""
+                await _handle_briefing_toggle(query, setting_key)
+            elif subaction == "clear_players":
+                await _handle_briefing_clear_players(query)
+            elif subaction == "add_player":
+                await _handle_briefing_add_player_prompt(query)
+
+        # ─────────────────────────────────────────────────────────────────
         # BET CALLBACKS
         # ─────────────────────────────────────────────────────────────────
         elif action == "bet":
@@ -274,6 +289,148 @@ async def _handle_bet_add(query) -> None:
         "<code>NBA Lakers+5.5 +110 25</code>"
     )
     await query.edit_message_text(message, parse_mode="HTML")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BRIEFING SETTINGS CALLBACKS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _briefing_menu_text(settings: dict) -> str:
+    """Build the briefing settings status message."""
+    reddit  = settings.get("briefing_reddit_highlights", True)
+    youtube = settings.get("briefing_youtube_top_plays", False)
+    players = settings.get("briefing_track_fav_players", False)
+    fav     = settings.get("briefing_favorite_players", [])
+
+    msg  = "<b>📊 Briefing Settings</b>\n\n"
+    msg += f"Reddit Highlights: {'✅ On' if reddit else '❌ Off'}\n"
+    msg += f"  Top Highlight posts per league, free, no API key.\n\n"
+    msg += f"YouTube Top Plays: {'✅ On' if youtube else '❌ Off'}\n"
+    msg += f"  Search URL (free) or direct video with YOUTUBE_API_KEY.\n\n"
+    msg += f"Player Tracking: {'✅ On' if players else '❌ Off'}\n"
+    if players:
+        if fav:
+            msg += f"  Tracking: {', '.join(fav)}\n"
+        else:
+            msg += f"  No players added yet — use /sports addplayer &lt;name&gt;\n"
+    else:
+        msg += (
+            "  ⚠️ Uses API-Sports (~3-5 calls/player/day).\n"
+            "  Free tier = 100 req/day total across all sports features.\n"
+            "  2+ players may exhaust quota before afternoon.\n"
+            "  Upgrade at api-sports.io ($10/mo+) for higher limits.\n"
+        )
+    return msg
+
+
+def _briefing_menu_keyboard(settings: dict) -> InlineKeyboardMarkup:
+    """Build the briefing settings inline keyboard."""
+    reddit  = settings.get("briefing_reddit_highlights", True)
+    youtube = settings.get("briefing_youtube_top_plays", False)
+    players = settings.get("briefing_track_fav_players", False)
+    fav     = settings.get("briefing_favorite_players", [])
+
+    keyboard = [
+        [InlineKeyboardButton(
+            f"{'🔴 Turn Off' if reddit else '🟢 Turn On'} Reddit Highlights",
+            callback_data="sports_briefing_toggle_reddit"
+        )],
+        [InlineKeyboardButton(
+            f"{'🔴 Turn Off' if youtube else '🟢 Turn On'} YouTube Top Plays",
+            callback_data="sports_briefing_toggle_youtube"
+        )],
+        [InlineKeyboardButton(
+            f"{'🔴 Turn Off' if players else '🟢 Turn On'} Player Tracking",
+            callback_data="sports_briefing_toggle_players"
+        )],
+    ]
+    if players:
+        keyboard.append([
+            InlineKeyboardButton("➕ Add Player", callback_data="sports_briefing_add_player"),
+        ])
+        if fav:
+            keyboard.append([
+                InlineKeyboardButton("🗑 Clear All Players", callback_data="sports_briefing_clear_players"),
+            ])
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def _handle_briefing_menu(query) -> None:
+    """Show the briefing settings menu."""
+    settings = sports_config.load_sports_settings()
+    await query.edit_message_text(
+        _briefing_menu_text(settings),
+        reply_markup=_briefing_menu_keyboard(settings),
+        parse_mode="HTML",
+    )
+
+
+async def _handle_briefing_toggle(query, setting_key: str) -> None:
+    """
+    Toggle a briefing boolean setting.
+
+    setting_key: "reddit" | "youtube" | "players"
+    """
+    key_map = {
+        "reddit":  "briefing_reddit_highlights",
+        "youtube": "briefing_youtube_top_plays",
+        "players": "briefing_track_fav_players",
+    }
+    full_key = key_map.get(setting_key)
+    if not full_key:
+        await query.answer("Unknown setting", show_alert=True)
+        return
+
+    settings = sports_config.load_sports_settings()
+    current  = settings.get(full_key, False)
+    settings[full_key] = not current
+    sports_config.save_sports_settings(settings)
+
+    # If turning player tracking ON, show the cost warning once via popup
+    if setting_key == "players" and not current:
+        await query.answer(
+            "⚠️ Player tracking uses API-Sports (100 req/day free). "
+            "Add players with /sports addplayer <name>",
+            show_alert=True,
+        )
+    else:
+        await query.answer()
+
+    # Refresh the menu
+    await query.edit_message_text(
+        _briefing_menu_text(settings),
+        reply_markup=_briefing_menu_keyboard(settings),
+        parse_mode="HTML",
+    )
+
+
+async def _handle_briefing_add_player_prompt(query) -> None:
+    """Show instructions for adding a tracked player."""
+    await query.edit_message_text(
+        "<b>➕ Add Tracked Player</b>\n\n"
+        "Send a message:\n"
+        "<code>/sports addplayer &lt;name&gt;</code>\n\n"
+        "Examples:\n"
+        "<code>/sports addplayer LeBron James</code>\n"
+        "<code>/sports addplayer Jokic</code>\n\n"
+        "Their last-game stats will appear in your morning briefing "
+        "if they played yesterday.\n\n"
+        "Remove with: <code>/sports removeplayer &lt;name&gt;</code>",
+        parse_mode="HTML",
+    )
+
+
+async def _handle_briefing_clear_players(query) -> None:
+    """Clear all favorite players."""
+    settings = sports_config.load_sports_settings()
+    settings["briefing_favorite_players"] = []
+    sports_config.save_sports_settings(settings)
+    await query.answer("Cleared all tracked players.")
+    await query.edit_message_text(
+        _briefing_menu_text(settings),
+        reply_markup=_briefing_menu_keyboard(settings),
+        parse_mode="HTML",
+    )
 
 
 async def _handle_bet_stats(query) -> None:

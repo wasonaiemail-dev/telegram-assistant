@@ -433,10 +433,12 @@ async def section_sports_briefing(_now) -> str:
         logger.error(f"Sports briefing: settings load failed: {e}")
         return ""
 
-    favorite_teams   = settings.get("favorite_teams", [])    # [{league, team_id, team_name}]
-    favorite_leagues = settings.get("favorite_leagues", [])  # [league_slug, ...]
-    reddit_enabled   = settings.get("briefing_reddit_highlights", True)
-    youtube_enabled  = settings.get("briefing_youtube_top_plays", False)
+    favorite_teams    = settings.get("favorite_teams", [])    # [{league, team_id, team_name}]
+    favorite_leagues  = settings.get("favorite_leagues", [])  # [league_slug, ...]
+    reddit_enabled    = settings.get("briefing_reddit_highlights", True)
+    youtube_enabled   = settings.get("briefing_youtube_top_plays", False)
+    track_players     = settings.get("briefing_track_fav_players", False)
+    tracked_names     = settings.get("briefing_favorite_players", [])  # display names
 
     # Derive league list from favorites (explicit leagues + leagues from fav teams)
     leagues_to_show = list(favorite_leagues)
@@ -463,6 +465,10 @@ async def section_sports_briefing(_now) -> str:
 
     section_lines = [f"🏆 <b>Sports Recap — {date_label}</b>"]
     had_any_game  = False
+
+    # Lookup dict populated as we parse box scores — name.lower() → player dict
+    # Used at the end for tracked player stat lines (zero extra API calls).
+    all_players_seen: Dict[str, Dict[str, str]] = {}
 
     # ── Per-league: fetch scoreboard + box scores ──────────────────────────
     for league_slug in leagues_to_show:
@@ -533,6 +539,11 @@ async def section_sports_briefing(_now) -> str:
                 bs = box_score_map.get(event.get("id"))
                 if bs:
                     top_players = _parse_top_players(bs, n=3)
+                    # Also collect ALL players from this game for tracked-player lookup.
+                    # _parse_top_players with n=99 gives everyone; reuse the same data.
+                    all_in_game = _parse_top_players(bs, n=99)
+                    for p in all_in_game:
+                        all_players_seen[p["name"].lower()] = p
 
                 league_lines.append(_fmt_game_recap(game, top_players, is_favorite=is_fav))
                 had_any_game = True
@@ -592,5 +603,19 @@ async def section_sports_briefing(_now) -> str:
 
         if any_yt:
             section_lines.extend(yt_lines)
+
+    # ── Tracked Player Stats (opt-in, default OFF) ─────────────────────────
+    # No extra API calls — scanned from box scores already fetched above.
+    # If the player didn't appear in any box score yesterday (injury/rest/off-day),
+    # we note that rather than silently skipping them.
+    if track_players and tracked_names:
+        player_lines = ["\n👤 <b>Your Players</b>"]
+        for name in tracked_names:
+            match = all_players_seen.get(name.lower())
+            if match:
+                player_lines.append(_fmt_player_line(match).lstrip())  # no indent for this section
+            else:
+                player_lines.append(f"  <code>{name}: did not play yesterday</code>")
+        section_lines.extend(player_lines)
 
     return "\n".join(section_lines)

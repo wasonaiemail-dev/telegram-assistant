@@ -281,9 +281,10 @@ The current ESPN scraping + keyword regex approach has been identified as fragil
 - [x] Hooked into `features/briefing.py` `_SECTION_BUILDERS["sports"]`
 - [x] Added `"sports"` to `_BRIEFING_DEFAULT_ORDER` and `_BRIEFING_ALL_SECTIONS` in `core/data.py`
 - [x] Added `sports` to setup wizard prompt with cost warnings in `features/setup.py`
-- [ ] **Still needed:** `/sports` Briefing Settings sub-menu (toggle reddit/youtube/player tracking in-app)
-- [ ] **Still needed:** Favorite player stat line tracking (requires API-Sports, buyer cost warning)
-- [ ] **Still needed:** Deploy + regression test
+- [x] `/sports → Briefing Settings` in-app toggle menu — reddit/youtube/player tracking on/off, add/clear players
+- [x] `/sports addplayer <name>` and `/sports removeplayer <name>` text commands
+- [x] Favorite player stat lines — scanned from already-fetched box scores (zero extra API calls)
+- [x] Deployed April 6, 2026
 
 **Phase 4 — Cross-Platform Adapters (Next)**
 Rationale: Many bettors are already heavily integrated with Discord. Build platform abstraction before betting so the betting plugin works cross-platform from day 1.
@@ -456,7 +457,7 @@ telegram-assistant/
 
 ---
 
-*Last updated: April 6, 2026 (Session 13 — Phase 3 complete, sports morning briefing built)*
+*Last updated: April 6, 2026 (Session 13 — Phase 3 fully complete, all features built + deployed)*
 
 ---
 
