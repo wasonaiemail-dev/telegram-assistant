@@ -306,7 +306,7 @@ async def alfred_dispatch(
             f"alfred_dispatch: unhandled error for intent '{intent}': {e}\n"
             f"{traceback.format_exc()}"
         )
-        await ctx.reply(f"DEBUG ERROR [{intent}]: {type(e).__name__}: {e}")
+        await ctx.reply("Something went wrong. Try again, or use a specific command.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
