@@ -74,7 +74,13 @@ def _now_local() -> datetime.datetime:
 def _next_id(reminders: list) -> int:
     if not reminders:
         return 1
-    return max(int(r.get("id", 0)) for r in reminders) + 1
+    max_id = 0
+    for r in reminders:
+        try:
+            max_id = max(max_id, int(r.get("id", 0)))
+        except (ValueError, TypeError):
+            pass
+    return max_id + 1
 
 
 def _load_reminders() -> tuple[dict, list]:
