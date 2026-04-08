@@ -375,7 +375,10 @@ async def _discord_scores(ctx, args_str: str, loaded_plugins) -> None:
                 if team_filter in g["home_team"].lower() or team_filter in g["away_team"].lower()
             ]
 
-        formatted = formatting.format_scores(scores, games=games)
+        league_meta  = scores.get("league", {})
+        league_name  = league_meta.get("name", league_slug.upper()) if isinstance(league_meta, dict) else str(league_meta)
+        league_emoji = league_meta.get("emoji", "🏆") if isinstance(league_meta, dict) else "🏆"
+        formatted = formatting.format_scoreboard(games, league_name, league_emoji)
         await ctx.reply_html(formatted)
 
     except Exception as e:
@@ -412,7 +415,11 @@ async def _discord_standings(ctx, args_str: str, loaded_plugins) -> None:
             )
             return
 
-        formatted = formatting.format_standings(standings)
+        standings_list = standings.get("standings", [])
+        league_name    = standings.get("league", league_slug.upper())
+        league_info_d  = sports_config.get_league_info(league_slug)
+        league_emoji   = league_info_d.get("emoji", "🏆") if league_info_d else "🏆"
+        formatted = formatting.format_standings(standings_list, league_name, league_emoji)
         await ctx.reply_html(formatted)
 
     except Exception as e:
@@ -449,7 +456,12 @@ async def _discord_schedule(ctx, args_str: str, loaded_plugins) -> None:
             )
             return
 
-        formatted = formatting.format_schedule(schedule)
+        games_list   = schedule.get("games", [])
+        league_name  = schedule.get("league", league_slug.upper())
+        league_info_d = sports_config.get_league_info(league_slug)
+        league_emoji  = league_info_d.get("emoji", "🏆") if league_info_d else "🏆"
+        team_filter_out = schedule.get("team", "")
+        formatted = formatting.format_schedule(games_list, league_name, league_emoji, team_filter_out)
         await ctx.reply_html(formatted)
 
     except Exception as e:
