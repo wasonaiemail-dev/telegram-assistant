@@ -72,12 +72,20 @@ YOUTUBE_API_URL    = "https://www.googleapis.com/youtube/v3/search"
 
 # League → official channel info + fallback search query
 LEAGUE_YT_INFO: Dict[str, Dict[str, str]] = {
-    "nba":  {"channel": "UCWJ2lWNubArHWmf3FIHbfcQ", "query": "NBA Top 10 Plays"},
-    "nfl":  {"channel": "UCDVYQ4Zhbm3S2dlz7P1GBDg", "query": "NFL Top 10 Plays"},
-    "mlb":  {"channel": "UCzWQYUVCpZqtN93H8RR44Qw", "query": "MLB Top 10 Plays"},
-    "nhl":  {"channel": "UCqFMzb-4AUf6WAIbl132QKA", "query": "NHL Top 10 Plays"},
-    "epl":  {"channel": "UCqZQlzSHbVJrwrn5XvzrzcA", "query": "Premier League Top 10 Goals"},
+    "nba":  {"channel": "UCWJ2lWNubArHWmf3FIHbfcQ", "query": "Top 10 Plays of the Night"},
+    "nfl":  {"channel": "UCDVYQ4Zhbm3S2dlz7P1GBDg", "query": "Top 10 Plays of the Week"},
+    "mlb":  {"channel": "UCzWQYUVCpZqtN93H8RR44Qw", "query": "Top 10 Plays"},
+    "nhl":  {"channel": "UCqFMzb-4AUf6WAIbl132QKA", "query": "Top 10 Plays of the Night"},
+    "epl":  {"channel": "UCqZQlzSHbVJrwrn5XvzrzcA", "query": "Top 10 Goals"},
 }
+
+# Words that indicate a title is NOT a "top plays" clip (used to filter API results)
+_YT_EXCLUDE_TITLE_WORDS = ["recap", "nightly recap", "weekly", "monthly", "interview",
+                            "press conference", "podcast", "preview", "schedule"]
+# At least one of these must appear in the title for it to be kept
+_YT_REQUIRE_TITLE_WORDS = ["top 10", "top plays", "best plays", "top dunks", "top goals",
+                            "top moments", "top shots", "highlights", "plays of the night",
+                            "plays of the week"]
 
 # ── ESPN box score stat indices ───────────────────────────────────────────────
 # Confirmed via live test: labels = ["MIN","PTS","FG","3PT","FT","REB","AST","TO","STL","BLK"]
@@ -370,7 +378,13 @@ async def _get_youtube_top10(
 
     if api_key:
         import datetime as _dt
-        published_after = _dt.datetime(date.year, date.month, date.day, 0, 0, 0).strftime("%Y-%m-%dT%H:%M:%SZ")
+        import html as _html
+        # Search 3 days back so we always catch the previous night's upload
+        # even if it was posted just after midnight
+        search_from = date - _dt.timedelta(days=1)
+        published_after = _dt.datetime(
+            search_from.year, search_from.month, search_from.day, 0, 0, 0
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
         data = await _fetch_json(
             YOUTUBE_API_URL,
             params={
@@ -378,9 +392,9 @@ async def _get_youtube_top10(
                 "channelId":      yt["channel"],
                 "q":              yt["query"],
                 "type":           "video",
-                "order":          "viewCount",
+                "order":          "date",          # most-recent first, not most-viewed
                 "publishedAfter": published_after,
-                "maxResults":     str(n),
+                "maxResults":     "25",            # fetch more so we can filter
                 "key":            api_key,
             },
         )
@@ -389,13 +403,21 @@ async def _get_youtube_top10(
             results = []
             for item in items:
                 video_id = item.get("id", {}).get("videoId")
-                import html as _html
                 title    = _html.unescape(item.get("snippet", {}).get("title", "Top Plays"))
+                title_lower = title.lower()
+                # Skip videos whose title contains excluded words
+                if any(w in title_lower for w in _YT_EXCLUDE_TITLE_WORDS):
+                    continue
+                # Only keep videos that look like actual highlight/plays clips
+                if not any(w in title_lower for w in _YT_REQUIRE_TITLE_WORDS):
+                    continue
                 if video_id:
                     results.append({
                         "title": title,
                         "url":   f"https://youtu.be/{video_id}",
                     })
+                if len(results) >= n:
+                    break
             if results:
                 return results
 
