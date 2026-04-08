@@ -197,10 +197,11 @@ async def cmd_sports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 parse_mode="HTML"
             )
             return
-        league_slug = sports_config.resolve_league_slug(league_input)
+        league_slug = sports_config.normalize_league(league_input)
         if not league_slug:
             await update.message.reply_text(
-                f"❌ Unknown league: <b>{league_input}</b>",
+                f"❌ Unknown league: <b>{league_input}</b>\n"
+                "Try: nba, nfl, nhl, mlb, nba, epl, etc.",
                 parse_mode="HTML"
             )
             return
@@ -209,8 +210,7 @@ async def cmd_sports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if league_slug in leagues:
             await update.message.reply_text(f"✓ {league_slug.upper()} is already a favorite league.")
         else:
-            leagues.append(league_slug)
-            sports_config.save_sports_settings(settings)
+            sports_config.add_favorite_league(league_slug)
             league_info = sports_config.get_league_info(league_slug)
             name = league_info.get("name", league_slug.upper()) if league_info else league_slug.upper()
             await update.message.reply_text(
@@ -229,12 +229,11 @@ async def cmd_sports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 parse_mode="HTML"
             )
             return
-        league_slug = sports_config.resolve_league_slug(league_input)
+        league_slug = sports_config.normalize_league(league_input)
         settings = sports_config.load_sports_settings()
         leagues = settings.get("favorite_leagues", [])
         if league_slug and league_slug in leagues:
-            leagues.remove(league_slug)
-            sports_config.save_sports_settings(settings)
+            sports_config.remove_favorite_league(league_slug)
             await update.message.reply_text(f"✓ Removed {league_slug.upper()} from favorite leagues.")
         else:
             await update.message.reply_text(f"'{league_input}' wasn't in your favorite leagues.")
@@ -251,7 +250,7 @@ async def cmd_sports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
         league_input = args[1].lower()
         team_name = " ".join(args[2:]).strip()
-        league_slug = sports_config.resolve_league_slug(league_input)
+        league_slug = sports_config.normalize_league(league_input)
         if not league_slug:
             await update.message.reply_text(
                 f"❌ Unknown league: <b>{league_input}</b>",
