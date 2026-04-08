@@ -506,32 +506,10 @@ async def _discord_stats(ctx, cmd: str, args_str: str, loaded_plugins) -> None:
 
 
 async def _discord_briefing(ctx) -> None:
-    """!briefing — trigger morning briefing."""
+    """!briefing — trigger morning briefing via AlfredContext (Discord-aware)."""
     try:
-        from features.briefing import send_briefing
-
-        # send_briefing takes (context, chat_id) — context is Telegram-specific.
-        # For Discord, we build a lightweight proxy.
-        class _DiscordBriefingContext:
-            """Minimal context proxy for send_briefing() on Discord."""
-            def __init__(self, channel_send_fn):
-                self._send = channel_send_fn
-
-            class bot:
-                pass
-
-            async def send_to_channel(self, chat_id, text, parse_mode=None):
-                from core.html_utils import html_to_discord
-                await self._send(html_to_discord(text) if parse_mode == "HTML" else text)
-
-        # send_briefing doesn't use context.bot.send_message on all paths;
-        # it may use various methods. For Phase 4 MVP, we route through
-        # the intent classifier which will use the Telegram fallback.
-        await ctx.reply(
-            "⚙️ Full briefing on Discord is coming in Phase 4B. "
-            "For now, try `!scores nba` or ask me about specific sports."
-        )
-
+        from features.briefing import send_briefing_ctx
+        await send_briefing_ctx(ctx)
     except Exception as e:
         logger.error(f"discord !briefing error: {e}", exc_info=True)
         await ctx.reply("❌ Could not generate briefing right now.")
@@ -555,7 +533,7 @@ async def _discord_help(ctx, loaded_plugins) -> None:
         "  !leaders [league]      — league leaders\n\n"
         "<b>Assistant</b>\n"
         "  !ask [question]        — ask me anything\n"
-        "  !briefing              — morning briefing (coming soon)\n\n"
+        "  !briefing              — morning briefing\n\n"
         "<b>Lists & Tasks</b>\n"
         "  !todos / !notes / !reminders — coming soon\n\n"
         "<b>Natural Language</b>\n"
