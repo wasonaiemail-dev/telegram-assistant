@@ -122,13 +122,16 @@ def _create_discord_client():
 
 def main() -> None:
     """Start the Alfred Discord bot."""
+    print("[discord_bot] main() called", flush=True)
     logging.basicConfig(
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
         level=logging.INFO,
+        stream=sys.stdout,   # Explicitly write to stdout so Railway captures it
     )
     logging.getLogger("discord").setLevel(logging.WARNING)
 
     if not _check_config():
+        print("[discord_bot] DISCORD_TOKEN missing — exiting", flush=True)
         sys.exit(1)
 
     result = _create_discord_client()
