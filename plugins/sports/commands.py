@@ -187,7 +187,93 @@ async def cmd_sports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     args = update.message.text.split()[1:] if len(update.message.text.split()) > 1 else []
     action = args[0].lower() if args else "setup"
 
-    if action == "addplayer":
+    if action == "addleague":
+        # /sports addleague <slug>  e.g. /sports addleague nba
+        league_input = args[1].lower() if len(args) > 1 else ""
+        if not league_input:
+            await update.message.reply_text(
+                "Usage: <code>/sports addleague &lt;league&gt;</code>\n"
+                "Example: <code>/sports addleague nba</code>",
+                parse_mode="HTML"
+            )
+            return
+        league_slug = sports_config.resolve_league_slug(league_input)
+        if not league_slug:
+            await update.message.reply_text(
+                f"❌ Unknown league: <b>{league_input}</b>",
+                parse_mode="HTML"
+            )
+            return
+        settings = sports_config.load_sports_settings()
+        leagues = settings.setdefault("favorite_leagues", [])
+        if league_slug in leagues:
+            await update.message.reply_text(f"✓ {league_slug.upper()} is already a favorite league.")
+        else:
+            leagues.append(league_slug)
+            sports_config.save_sports_settings(settings)
+            league_info = sports_config.get_league_info(league_slug)
+            name = league_info.get("name", league_slug.upper()) if league_info else league_slug.upper()
+            await update.message.reply_text(
+                f"✓ Added <b>{name}</b> to your favorite leagues.\n"
+                f"It will appear in tomorrow's sports briefing.",
+                parse_mode="HTML"
+            )
+        return
+
+    elif action == "removeleague":
+        # /sports removeleague <slug>
+        league_input = args[1].lower() if len(args) > 1 else ""
+        if not league_input:
+            await update.message.reply_text(
+                "Usage: <code>/sports removeleague &lt;league&gt;</code>",
+                parse_mode="HTML"
+            )
+            return
+        league_slug = sports_config.resolve_league_slug(league_input)
+        settings = sports_config.load_sports_settings()
+        leagues = settings.get("favorite_leagues", [])
+        if league_slug and league_slug in leagues:
+            leagues.remove(league_slug)
+            sports_config.save_sports_settings(settings)
+            await update.message.reply_text(f"✓ Removed {league_slug.upper()} from favorite leagues.")
+        else:
+            await update.message.reply_text(f"'{league_input}' wasn't in your favorite leagues.")
+        return
+
+    elif action == "addteam":
+        # /sports addteam <league> <team_name>  e.g. /sports addteam NBA Lakers
+        if len(args) < 3:
+            await update.message.reply_text(
+                "Usage: <code>/sports addteam &lt;league&gt; &lt;team_name&gt;</code>\n"
+                "Example: <code>/sports addteam NBA Lakers</code>",
+                parse_mode="HTML"
+            )
+            return
+        league_input = args[1].lower()
+        team_name = " ".join(args[2:]).strip()
+        league_slug = sports_config.resolve_league_slug(league_input)
+        if not league_slug:
+            await update.message.reply_text(
+                f"❌ Unknown league: <b>{league_input}</b>",
+                parse_mode="HTML"
+            )
+            return
+        settings = sports_config.load_sports_settings()
+        teams = settings.setdefault("favorite_teams", [])
+        existing = [t for t in teams if t.get("league") == league_slug and t.get("team_name", "").lower() == team_name.lower()]
+        if existing:
+            await update.message.reply_text(f"✓ {team_name} is already a favorite team.")
+        else:
+            teams.append({"league": league_slug, "team_name": team_name})
+            sports_config.save_sports_settings(settings)
+            await update.message.reply_text(
+                f"✓ Added <b>{team_name}</b> ({league_slug.upper()}) to your favorite teams.\n"
+                f"They will appear in tomorrow's sports briefing.",
+                parse_mode="HTML"
+            )
+        return
+
+    elif action == "addplayer":
         # /sports addplayer <name>
         player_name = " ".join(args[1:]).strip()
         if not player_name:
