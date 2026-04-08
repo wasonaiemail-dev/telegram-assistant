@@ -26,6 +26,7 @@ API QUOTA NOTES (shown to buyer in /sports → Briefing Settings):
 
 import asyncio
 import aiohttp
+import html as _html_escape
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -532,7 +533,7 @@ async def _get_youtube_top10(
             results = []
             for item in items:
                 video_id = item.get("id", {}).get("videoId")
-                title    = _html.unescape(item.get("snippet", {}).get("title", "Top Plays"))
+                title    = _html_escape.escape(_html.unescape(item.get("snippet", {}).get("title", "Top Plays")))
                 title_lower = title.lower()
                 # Skip videos whose title contains excluded words
                 if any(w in title_lower for w in _YT_EXCLUDE_TITLE_WORDS):
@@ -571,8 +572,8 @@ def _fmt_player_line(player: Dict[str, str]) -> str:
       BLK  ≥ 2           (e.g. "4 BLK")
     This keeps lines tight — no padding with 1-steal noise.
     """
-    name = player.get("name", "Unknown")
-    team = player.get("team", "?")[:3]
+    name = _html_escape.escape(player.get("name", "Unknown"))
+    team = _html_escape.escape(player.get("team", "?")[:3])
     pts  = player.get("pts", "-")
     reb  = player.get("reb", "-")
     ast  = player.get("ast", "-")
@@ -612,10 +613,10 @@ def _fmt_game_recap(
     is_favorite: bool = False,
 ) -> str:
     """Format a single game result with top player lines."""
-    away        = game.get("away_team", "Away")
-    home        = game.get("home_team", "Home")
-    away_score  = game.get("away_score", "")
-    home_score  = game.get("home_score", "")
+    away        = _html_escape.escape(game.get("away_team", "Away"))
+    home        = _html_escape.escape(game.get("home_team", "Home"))
+    away_score  = _html_escape.escape(str(game.get("away_score", "")))
+    home_score  = _html_escape.escape(str(game.get("home_score", "")))
     fav_prefix  = "⭐ " if is_favorite else ""
 
     if away_score and home_score:
@@ -794,7 +795,7 @@ async def section_sports_briefing(_now, platform: str = "telegram") -> str:
                     plays_lines.append(f"{i}. {title}")
                     plays_lines.append(clip["url"])
                 else:
-                    plays_lines.append(f'  {i}. <a href="{clip["url"]}">{title}</a>')
+                    plays_lines.append(f'  {i}. <a href="{clip["url"]}">{_html_escape.escape(title)}</a>')
             section_lines.extend(plays_lines)
 
     # ── YouTube Top Plays (opt-in, default OFF, API key optional) ──────────

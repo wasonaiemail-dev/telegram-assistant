@@ -800,12 +800,15 @@ async def _send_long(bot, chat_id: int, text: str, parse_mode: str = "Markdown")
     MAX = 4000  # stay under Telegram's 4096 limit with buffer
 
     async def _send_chunk(chunk: str) -> None:
-        """Send one chunk, falling back to plain text if Markdown is rejected."""
+        """Send one chunk, falling back to plain text if formatting is rejected."""
         try:
             await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode)
         except Exception:
-            # Strip Markdown symbols and retry as plain text
-            plain = chunk.replace("*", "").replace("_", "").replace("`", "")
+            if parse_mode == "HTML":
+                import re
+                plain = re.sub(r'<[^>]+>', '', chunk)
+            else:
+                plain = chunk.replace("*", "").replace("_", "").replace("`", "")
             await bot.send_message(chat_id=chat_id, text=plain, parse_mode=None)
 
     if len(text) <= MAX:
