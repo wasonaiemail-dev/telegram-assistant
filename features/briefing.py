@@ -552,14 +552,23 @@ async def send_briefing(context, chat_id: int) -> None:
         except Exception:
             results[key] = ""
 
+    # Sports section uses HTML — pull it out before building the Markdown message
+    sports_html = results.pop("sports", "") if "sports" in results else ""
+
     sections = [f"☀️ *{_greeting(now)}, {_fmt_date(now)}*"]
     for key in order:
+        if key == "sports":
+            continue
         val = results.get(key, "")
         if val:
             sections.append(val)
 
     full_text = "\n\n".join(s for s in sections if s)
     await _send_long(context.bot, chat_id, full_text)
+
+    # Send sports as HTML so tags render correctly
+    if sports_html:
+        await _send_long(context.bot, chat_id, sports_html, parse_mode="HTML")
 
 
 
@@ -640,19 +649,24 @@ async def send_briefing_ctx(ctx) -> None:
         except Exception:
             results[key] = ""
 
+    # Sports section uses HTML formatting — send it separately so it doesn't
+    # get mixed into the Markdown message where <b>/<code> render as literal text.
+    sports_html = results.pop("sports", "") if "sports" in results else ""
+
     sections = [f"☀️ *{_greeting(now)}, {_fmt_date(now)}*"]
     for key in order:
+        if key == "sports":
+            continue  # handled separately below
         val = results.get(key, "")
         if val:
             sections.append(val)
 
     full_text = "\n\n".join(s for s in sections if s)
 
-    # Split long briefings (ctx.reply handles Discord 2000-char limit internally)
+    # Send main briefing (Markdown)
     if len(full_text) <= 4000:
         await ctx.reply_markdown(full_text)
     else:
-        # Chunk on double newlines to respect section boundaries
         chunks = []
         current = ""
         for section in sections:
@@ -666,6 +680,10 @@ async def send_briefing_ctx(ctx) -> None:
             chunks.append(current)
         for chunk in chunks:
             await ctx.reply_markdown(chunk)
+
+    # Send sports section as HTML so <b>/<code>/<a> tags render correctly
+    if sports_html:
+        await ctx.reply_html(sports_html)
 
 
 async def send_weather_ctx(ctx, location: str | None = None) -> None:
