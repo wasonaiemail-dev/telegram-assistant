@@ -303,10 +303,10 @@ def _briefing_menu_text(settings: dict) -> str:
     fav     = settings.get("briefing_favorite_players", [])
 
     msg  = "<b>📊 Briefing Settings</b>\n\n"
-    msg += f"Reddit Highlights: {'✅ On' if reddit else '❌ Off'}\n"
-    msg += f"  Top Highlight posts per league, free, no API key.\n\n"
+    msg += f"Top Plays (Reddit): {'✅ On' if reddit else '❌ Off'}\n"
+    msg += f"  Individual highlight clips from Reddit — Highlight flair only.\n\n"
     msg += f"YouTube Top Plays: {'✅ On' if youtube else '❌ Off'}\n"
-    msg += f"  Search URL (free) or direct video with YOUTUBE_API_KEY.\n\n"
+    msg += f"  Official league Top 10 videos via YouTube API key.\n\n"
     msg += f"Player Tracking: {'✅ On' if players else '❌ Off'}\n"
     if players:
         if fav:
@@ -332,7 +332,7 @@ def _briefing_menu_keyboard(settings: dict) -> InlineKeyboardMarkup:
 
     keyboard = [
         [InlineKeyboardButton(
-            f"{'🔴 Turn Off' if reddit else '🟢 Turn On'} Reddit Highlights",
+            f"{'🔴 Turn Off' if reddit else '🟢 Turn On'} Top Plays (Reddit)",
             callback_data="sports_briefing_toggle_reddit"
         )],
         [InlineKeyboardButton(
