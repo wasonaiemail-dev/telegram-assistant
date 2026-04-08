@@ -339,6 +339,135 @@ async def _fetch_reddit_highlights(
     return highlights[:5]
 
 
+# ── YouTube domain set for sorting top plays ──────────────────────────────────
+_YOUTUBE_DOMAINS = {"youtu.be", "youtube.com", "www.youtube.com"}
+
+
+async def _fetch_reddit_top_plays_sub(
+    subreddit: str,
+    limit: int = 25,
+    highlight_flair_only: bool = True,
+    min_score: int = 0,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch highlight clips from a subreddit for the Top Plays section.
+
+    When highlight_flair_only=True (league subs): only posts where
+    link_flair_text contains "highlight" are returned — filters out
+    interviews, quotes, news, and other non-play content.
+
+    When highlight_flair_only=False (r/sports catch-all): falls back to
+    any post with a video domain that clears min_score.
+
+    Returns list of dicts: {title, url, score, domain, subreddit}
+    url = the actual video link the post points to (not the Reddit permalink).
+    """
+    VIDEO_DOMAINS = {
+        "streamable.com", "v.redd.it", "youtu.be", "youtube.com",
+        "www.youtube.com", "twitter.com", "x.com", "instagram.com",
+        "clips.twitch.tv", "gfycat.com", "medal.tv",
+    }
+
+    data = await _fetch_json(
+        REDDIT_TOP_URL.format(sub=subreddit),
+        headers=REDDIT_HEADERS,
+        params={"t": "day", "limit": str(limit)},
+    )
+    if not data:
+        return []
+
+    posts = []
+    try:
+        for child in data.get("data", {}).get("children", []):
+            post   = child.get("data", {})
+            flair  = (post.get("link_flair_text") or "").lower()
+            title  = post.get("title", "")
+            domain = post.get("domain", "")
+            score  = post.get("score", 0)
+            url    = post.get("url", "")  # actual video URL, not permalink
+
+            if not url or score < min_score:
+                continue
+
+            if highlight_flair_only:
+                if "highlight" not in flair:
+                    continue
+            else:
+                # Catch-all: require a known video domain
+                if domain not in VIDEO_DOMAINS:
+                    continue
+
+            posts.append({
+                "title":     title,
+                "url":       url,
+                "score":     score,
+                "domain":    domain,
+                "subreddit": subreddit,
+            })
+    except Exception as e:
+        logger.error(f"Reddit top plays parse error (r/{subreddit}): {e}")
+
+    posts.sort(key=lambda p: p["score"], reverse=True)
+    return posts
+
+
+async def _build_top_plays(
+    leagues: List[str],
+    total: int = 10,
+) -> List[Dict[str, Any]]:
+    """
+    Assemble a cross-sport top plays list for the briefing.
+
+    1. Fetches Highlight-flair posts from each configured league's subreddit.
+    2. Fetches r/sports as a catch-all for sports not covered by a specific
+       subreddit (tennis, cricket, Olympics, etc.) — requires ≥1000 upvotes.
+    3. Deduplicates by URL.
+    4. Sorts YouTube links first (they auto-embed inline in Discord/Telegram),
+       then all others — both groups sorted by score descending.
+    5. Returns top `total` clips.
+    """
+    CATCHALL_MIN_SCORE = 1000
+
+    seen_urls: set = set()
+    all_clips: List[Dict[str, Any]] = []
+
+    # ── League-specific subreddits (Highlight flair only) ─────────────────
+    tasks = []
+    slugs = []
+    for league_slug in leagues:
+        sub = LEAGUE_SUBREDDITS.get(league_slug.lower())
+        if sub:
+            tasks.append(_fetch_reddit_top_plays_sub(sub, limit=25, highlight_flair_only=True))
+            slugs.append(league_slug)
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for posts in results:
+        if isinstance(posts, list):
+            for p in posts:
+                if p["url"] not in seen_urls:
+                    seen_urls.add(p["url"])
+                    all_clips.append(p)
+
+    # ── r/sports catch-all (any video domain, ≥1000 upvotes) ─────────────
+    catchall = await _fetch_reddit_top_plays_sub(
+        "sports", limit=50,
+        highlight_flair_only=False,
+        min_score=CATCHALL_MIN_SCORE,
+    )
+    for p in catchall:
+        if p["url"] not in seen_urls:
+            seen_urls.add(p["url"])
+            all_clips.append(p)
+
+    # ── Sort: YouTube links first (inline embed), then others — both by score
+    yt_clips    = sorted([p for p in all_clips if p["domain"] in _YOUTUBE_DOMAINS],
+                         key=lambda p: p["score"], reverse=True)
+    other_clips = sorted([p for p in all_clips if p["domain"] not in _YOUTUBE_DOMAINS],
+                         key=lambda p: p["score"], reverse=True)
+
+    return (yt_clips + other_clips)[:total]
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # YOUTUBE TOP PLAYS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -649,34 +778,24 @@ async def section_sports_briefing(_now, platform: str = "telegram") -> str:
     if not had_any_game:
         return ""  # No completed games — nothing useful to show
 
-    # ── Reddit Highlights (opt-in, default ON) ─────────────────────────────
+    # ── Top Plays (opt-in, default ON) ────────────────────────────────────
+    # Sources Reddit highlight-flair clips from league subreddits + r/sports
+    # catch-all. YouTube links sorted first for inline embed in Discord.
     if reddit_enabled:
-        reddit_lines = ["\n🎬 <b>Top Highlights</b>"]
-        any_highlights = False
-
-        for league_slug in leagues_to_show:
-            sub = LEAGUE_SUBREDDITS.get(league_slug.lower())
-            if not sub:
-                continue
-
-            league_info = LEAGUES.get(league_slug.lower(), {})
-            emoji_r     = league_info.get("emoji", "🏆")
-            name_r      = league_info.get("name", league_slug.upper())
-
-            posts = await _fetch_reddit_highlights(sub, limit=15)
-            if not posts:
-                continue
-
-            reddit_lines.append(f"\n{emoji_r} {name_r}")
-            for post in posts[:3]:
-                title = post["title"]
+        clips = await _build_top_plays(leagues_to_show, total=10)
+        if clips:
+            plays_lines = ["\n🎬 <b>Top Plays</b>"]
+            for i, clip in enumerate(clips, 1):
+                title = clip["title"]
                 if len(title) > 80:
                     title = title[:77] + "…"
-                reddit_lines.append(f'  • <a href="{post["url"]}">{title}</a>')
-            any_highlights = True
-
-        if any_highlights:
-            section_lines.extend(reddit_lines)
+                if platform == "discord":
+                    # Discord auto-embeds raw video URLs
+                    plays_lines.append(f"{i}. {title}")
+                    plays_lines.append(clip["url"])
+                else:
+                    plays_lines.append(f'  {i}. <a href="{clip["url"]}">{title}</a>')
+            section_lines.extend(plays_lines)
 
     # ── YouTube Top Plays (opt-in, default OFF, API key optional) ──────────
     # Telegram: numbered list of HTML hyperlinks (up to 10 per league)
