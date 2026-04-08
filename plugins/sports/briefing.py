@@ -89,6 +89,14 @@ _DEFAULT_STL = 8
 _DEFAULT_BLK = 9
 _DEFAULT_FG  = 2
 
+# ── Top performer thresholds ──────────────────────────────────────────────────
+# Always show the top MIN players; show additional players up to MAX if their
+# composite score (PTS + REB×0.5 + AST×0.5) meets the threshold.
+# e.g. threshold=25 catches: 25 pts, 20/10, 18/8/8, etc.
+TOP_PLAYERS_MIN       = 3
+TOP_PLAYERS_MAX       = 6
+COMPOSITE_THRESHOLD   = 25.0   # extra players shown only if score >= this
+
 # HTTP timeout
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
 
@@ -232,6 +240,39 @@ def _parse_top_players(
     return players[:n]
 
 
+def _select_players_for_game(
+    all_players: List[Dict[str, str]],
+    min_n: int = TOP_PLAYERS_MIN,
+    max_n: int = TOP_PLAYERS_MAX,
+    threshold: float = COMPOSITE_THRESHOLD,
+) -> List[Dict[str, str]]:
+    """
+    Return top performers for a game using a threshold-expansion rule:
+      • Always include the top min_n players (floor).
+      • Include additional players (up to max_n) whose composite score ≥ threshold.
+      • Never exceed max_n to keep the briefing tight.
+
+    Example with defaults (min=3, max=6, threshold=25):
+      - A game with scores [38, 28, 18, 14] → returns 2 (both ≥25) + 1 mandatory = but
+        since sorted, top 3 are 38/28/18; 38 and 28 qualify, 18 doesn't, so we keep 3.
+      - A game with scores [40, 35, 30, 26, 12] → returns 4 (all ≥25 up to max 6).
+    """
+    if not all_players:
+        return []
+
+    # Guarantee at least min_n (or all players if fewer exist)
+    result = list(all_players[:min_n])
+
+    # Expand: add players beyond min_n who clear the threshold, up to max_n
+    for player in all_players[min_n:max_n]:
+        if player["score"] >= threshold:
+            result.append(player)
+        else:
+            break  # sorted descending — once below threshold, rest are too
+
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # REDDIT HIGHLIGHTS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -294,23 +335,38 @@ async def _fetch_reddit_highlights(
 # YOUTUBE TOP PLAYS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def _get_youtube_url(league_slug: str, date: datetime) -> Optional[str]:
+async def _get_youtube_top10(
+    league_slug: str, date: datetime, n: int = 10
+) -> List[Dict[str, str]]:
     """
-    Return a YouTube URL for the league's top plays from the given date.
+    Return up to n YouTube videos for the league's top plays from the given date.
 
-    With YOUTUBE_API_KEY: queries official channel, returns direct video link.
-    Without key: returns a YouTube search URL (no API cost, always works).
+    Each item: {"title": str, "url": str}
+
+    With YOUTUBE_API_KEY:
+      - Queries the league's official channel by viewCount for videos published
+        on or after the given date (publishedAfter).
+      - Returns up to n results as individual video links.
+
+    Without YOUTUBE_API_KEY:
+      - Returns a single search URL item (can't enumerate videos without the API).
+      - title = "{League} Top Plays — {date}", url = YouTube search URL.
+
+    Telegram callers render each item as a numbered hyperlink.
+    Discord callers post each raw URL on its own line for auto-embed.
     """
-    yt = LEAGUE_YT_INFO.get(league_slug.lower())
+    yt       = LEAGUE_YT_INFO.get(league_slug.lower())
+    league_info = LEAGUES.get(league_slug.lower(), {})
+    league_name = league_info.get("name", league_slug.upper())
+    date_str    = date.strftime("%B %-d, %Y")
+
     if not yt:
-        # No official channel mapped — still return search URL
-        league_info = LEAGUES.get(league_slug.lower(), {})
-        league_name = league_info.get("name", league_slug.upper())
+        # No official channel mapped — fall back to a single search URL
         query = f"{league_name} top plays {date.strftime('%B %-d %Y')}"
-        return YOUTUBE_SEARCH_URL.format(q=quote_plus(query))
+        return [{"title": f"{league_name} Top Plays — {date_str}",
+                 "url":   YOUTUBE_SEARCH_URL.format(q=quote_plus(query))}]
 
     api_key = os.environ.get("YOUTUBE_API_KEY")
-    date_str = date.strftime("%B %-d, %Y")
 
     if api_key:
         published_after = date.replace(
@@ -325,20 +381,28 @@ async def _get_youtube_url(league_slug: str, date: datetime) -> Optional[str]:
                 "type":           "video",
                 "order":          "viewCount",
                 "publishedAfter": published_after,
-                "maxResults":     "1",
+                "maxResults":     str(n),
                 "key":            api_key,
             },
         )
         if data:
             items = data.get("items", [])
-            if items:
-                video_id = items[0].get("id", {}).get("videoId")
+            results = []
+            for item in items:
+                video_id = item.get("id", {}).get("videoId")
+                title    = item.get("snippet", {}).get("title", "Top Plays")
                 if video_id:
-                    return f"https://youtu.be/{video_id}"
+                    results.append({
+                        "title": title,
+                        "url":   f"https://youtu.be/{video_id}",
+                    })
+            if results:
+                return results
 
-    # Fallback: YouTube search URL (always works, no key needed)
+    # Fallback: single search URL (no API key or API returned nothing)
     query = f"{yt['query']} {date_str}"
-    return YOUTUBE_SEARCH_URL.format(q=quote_plus(query))
+    return [{"title": f"{league_name} Top Plays — {date_str}",
+             "url":   YOUTUBE_SEARCH_URL.format(q=quote_plus(query))}]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -419,12 +483,16 @@ def _fmt_game_recap(
 # MAIN SECTION BUILDER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def section_sports_briefing(_now) -> str:
+async def section_sports_briefing(_now, platform: str = "telegram") -> str:
     """
     Morning briefing section: sports recap.
 
     Hooked into features/briefing.py as _SECTION_BUILDERS["sports"].
-    Returns formatted Telegram HTML string or "" if nothing to show.
+    Returns formatted HTML string or "" if nothing to show.
+
+    platform: "telegram" or "discord"
+      - Telegram: HTML links (<a href>), numbered YouTube list
+      - Discord:  plain YouTube URLs on separate lines (auto-embed)
     """
     # ── Load settings ──────────────────────────────────────────────────────
     try:
@@ -534,14 +602,15 @@ async def section_sports_briefing(_now) -> str:
                     or game["away_team"].lower() in fav_team_names
                 )
 
-                # Extract top 3 players from box score
+                # Extract top performers from box score using threshold expansion.
+                # _parse_top_players with n=99 gets everyone sorted; we then apply
+                # the threshold rule (min 3, extras up to max 6 if score ≥ 25).
                 top_players: List[Dict[str, str]] = []
                 bs = box_score_map.get(event.get("id"))
                 if bs:
-                    top_players = _parse_top_players(bs, n=3)
-                    # Also collect ALL players from this game for tracked-player lookup.
-                    # _parse_top_players with n=99 gives everyone; reuse the same data.
                     all_in_game = _parse_top_players(bs, n=99)
+                    top_players = _select_players_for_game(all_in_game)
+                    # Also register everyone for tracked-player stat lookup
                     for p in all_in_game:
                         all_players_seen[p["name"].lower()] = p
 
@@ -588,18 +657,36 @@ async def section_sports_briefing(_now) -> str:
             section_lines.extend(reddit_lines)
 
     # ── YouTube Top Plays (opt-in, default OFF, API key optional) ──────────
+    # Telegram: numbered list of HTML hyperlinks (up to 10 per league)
+    # Discord:  raw YouTube URLs on separate lines — Discord auto-embeds each one
     if youtube_enabled:
         yt_lines = ["\n▶️ <b>Top Plays</b>"]
         any_yt   = False
 
         for league_slug in leagues_to_show:
-            yt_url = await _get_youtube_url(league_slug, yesterday)
-            if yt_url:
-                league_info = LEAGUES.get(league_slug.lower(), {})
-                name_yt     = league_info.get("name", league_slug.upper())
-                emoji_yt    = league_info.get("emoji", "🏆")
-                yt_lines.append(f'  {emoji_yt} <a href="{yt_url}">{name_yt} Top Plays</a>')
-                any_yt = True
+            league_info = LEAGUES.get(league_slug.lower(), {})
+            name_yt     = league_info.get("name", league_slug.upper())
+            emoji_yt    = league_info.get("emoji", "🏆")
+
+            videos = await _get_youtube_top10(league_slug, yesterday, n=10)
+            if not videos:
+                continue
+
+            if platform == "discord":
+                # Discord auto-embeds raw YouTube URLs — one URL per line
+                yt_lines.append(f"\n{emoji_yt} **{name_yt} Top Plays**")
+                for vid in videos:
+                    yt_lines.append(vid["url"])
+            else:
+                # Telegram: numbered hyperlink list
+                yt_lines.append(f"\n{emoji_yt} <b>{name_yt} Top Plays</b>")
+                for i, vid in enumerate(videos, 1):
+                    title = vid["title"]
+                    if len(title) > 70:
+                        title = title[:67] + "…"
+                    yt_lines.append(f'  {i}. <a href="{vid["url"]}">{title}</a>')
+
+            any_yt = True
 
         if any_yt:
             section_lines.extend(yt_lines)

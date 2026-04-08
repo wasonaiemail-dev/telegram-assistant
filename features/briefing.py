@@ -493,10 +493,10 @@ async def _section_workout_stats(_now):
         return ""
 
 
-async def _section_sports(_now):
+async def _section_sports(_now, platform: str = "telegram"):
     try:
         from plugins.sports.briefing import section_sports_briefing
-        return await section_sports_briefing(_now)
+        return await section_sports_briefing(_now, platform=platform)
     except Exception:
         return ""
 
@@ -538,8 +538,13 @@ async def send_briefing(context, chat_id: int) -> None:
 
     now = _now_local()
 
-    tasks = {key: asyncio.create_task(_SECTION_BUILDERS[key](now))
-             for key in order if key in _SECTION_BUILDERS}
+    # send_briefing is the Telegram-only path — platform is always "telegram"
+    import functools
+    builders = dict(_SECTION_BUILDERS)
+    builders["sports"] = functools.partial(_section_sports, platform="telegram")
+
+    tasks = {key: asyncio.create_task(builders[key](now))
+             for key in order if key in builders}
     results = {}
     for key, task in tasks.items():
         try:
@@ -615,14 +620,19 @@ async def send_briefing_ctx(ctx) -> None:
         await ctx.reply("⚠️ Briefing unavailable — data load failed.")
         return
 
-    import asyncio
+    import asyncio, functools
     enabled = bs.get("enabled", list(_SECTION_BUILDERS.keys()))
     order   = [s for s in bs.get("order", list(_SECTION_BUILDERS.keys())) if s in enabled]
 
     now = _now_local()
 
-    tasks = {key: asyncio.create_task(_SECTION_BUILDERS[key](now))
-             for key in order if key in _SECTION_BUILDERS}
+    # Use ctx.platform so YouTube renders as links (Telegram) or embeds (Discord)
+    platform = getattr(ctx, "platform", "telegram")
+    builders = dict(_SECTION_BUILDERS)
+    builders["sports"] = functools.partial(_section_sports, platform=platform)
+
+    tasks = {key: asyncio.create_task(builders[key](now))
+             for key in order if key in builders}
     results = {}
     for key, task in tasks.items():
         try:
