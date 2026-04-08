@@ -10,5 +10,5 @@ openpyxl>=3.1.2
 beautifulsoup4>=4.12.0
 matplotlib>=3.8.0
 aiohttp>=3.8.0
-# Discord adapter — uncomment if running discord_bot.py
-# discord.py>=2.3.2
+# Discord adapter
+discord.py>=2.3.2
