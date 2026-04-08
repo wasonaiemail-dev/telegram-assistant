@@ -369,9 +369,8 @@ async def _get_youtube_top10(
     api_key = os.environ.get("YOUTUBE_API_KEY")
 
     if api_key:
-        published_after = date.replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        import datetime as _dt
+        published_after = _dt.datetime(date.year, date.month, date.day, 0, 0, 0).strftime("%Y-%m-%dT%H:%M:%SZ")
         data = await _fetch_json(
             YOUTUBE_API_URL,
             params={
@@ -390,7 +389,8 @@ async def _get_youtube_top10(
             results = []
             for item in items:
                 video_id = item.get("id", {}).get("videoId")
-                title    = item.get("snippet", {}).get("title", "Top Plays")
+                import html as _html
+                title    = _html.unescape(item.get("snippet", {}).get("title", "Top Plays"))
                 if video_id:
                     results.append({
                         "title": title,
