@@ -655,7 +655,7 @@ async def section_sports_briefing(_now, platform: str = "telegram") -> str:
 
     favorite_teams    = settings.get("favorite_teams", [])    # [{league, team_id, team_name}]
     favorite_leagues  = settings.get("favorite_leagues", [])  # [league_slug, ...]
-    reddit_enabled    = settings.get("briefing_reddit_highlights", True)
+    reddit_enabled    = settings.get("briefing_top_plays", True)
     youtube_enabled   = settings.get("briefing_youtube_top_plays", False)
     track_players     = settings.get("briefing_track_fav_players", False)
     tracked_names     = settings.get("briefing_favorite_players", [])  # display names

@@ -326,7 +326,7 @@ async def cmd_sports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         alerts      = settings.get("alerts_enabled", True)
         bankroll    = settings.get("bankroll", 0.0)
 
-        reddit_on   = settings.get("briefing_reddit_highlights", True)
+        reddit_on   = settings.get("briefing_top_plays", True)
         youtube_on  = settings.get("briefing_youtube_top_plays", False)
         players_on  = settings.get("briefing_track_fav_players", False)
         fav_players = settings.get("briefing_favorite_players", [])

@@ -297,7 +297,7 @@ async def _handle_bet_add(query) -> None:
 
 def _briefing_menu_text(settings: dict) -> str:
     """Build the briefing settings status message."""
-    reddit  = settings.get("briefing_reddit_highlights", True)
+    reddit  = settings.get("briefing_top_plays", True)
     youtube = settings.get("briefing_youtube_top_plays", False)
     players = settings.get("briefing_track_fav_players", False)
     fav     = settings.get("briefing_favorite_players", [])
@@ -325,7 +325,7 @@ def _briefing_menu_text(settings: dict) -> str:
 
 def _briefing_menu_keyboard(settings: dict) -> InlineKeyboardMarkup:
     """Build the briefing settings inline keyboard."""
-    reddit  = settings.get("briefing_reddit_highlights", True)
+    reddit  = settings.get("briefing_top_plays", True)
     youtube = settings.get("briefing_youtube_top_plays", False)
     players = settings.get("briefing_track_fav_players", False)
     fav     = settings.get("briefing_favorite_players", [])
@@ -372,7 +372,7 @@ async def _handle_briefing_toggle(query, setting_key: str) -> None:
     setting_key: "reddit" | "youtube" | "players"
     """
     key_map = {
-        "reddit":  "briefing_reddit_highlights",
+        "reddit":  "briefing_top_plays",
         "youtube": "briefing_youtube_top_plays",
         "players": "briefing_track_fav_players",
     }
