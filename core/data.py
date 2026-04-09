@@ -1087,3 +1087,23 @@ def get_smart_suggestion_settings(data: dict) -> dict:
     ss.setdefault("enabled", True)
     ss.setdefault("areas", ["habits"])
     return ss
+
+
+def get_schedule_settings(data: dict) -> dict:
+    """
+    Return schedule/timing settings for all auto-fired jobs.
+
+    Falls back to Railway env vars so existing deployments are unaffected
+    until the buyer explicitly sets these in /setup.
+    """
+    import os as _os
+    s  = data.setdefault("settings", {})
+    sc = s.setdefault("schedule", {})
+    sc.setdefault("briefing_enabled",      True)
+    sc.setdefault("briefing_hour",         int(_os.getenv("BRIEFING_HOUR",        "7")))
+    sc.setdefault("briefing_minute",       int(_os.getenv("BRIEFING_MINUTE",      "0")))
+    sc.setdefault("habit_nudge_hour",      int(_os.getenv("HABIT_NUDGE_HOUR",     "15")))
+    sc.setdefault("habit_nudge_minute",    int(_os.getenv("HABIT_NUDGE_MINUTE",   "0")))
+    sc.setdefault("travel_weather_hour",   int(_os.getenv("TRAVEL_WEATHER_HOUR",  "19")))
+    sc.setdefault("travel_weather_minute", int(_os.getenv("TRAVEL_WEATHER_MINUTE","0")))
+    return sc

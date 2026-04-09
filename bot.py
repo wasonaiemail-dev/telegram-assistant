@@ -845,6 +845,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def _job_briefing(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
+        from core.data import load_data, get_schedule_settings
+        sched = get_schedule_settings(load_data())
+        if not sched.get("briefing_enabled", True):
+            return  # Buyer disabled the scheduled briefing
         from features.briefing import send_briefing
         await send_briefing(context, ALLOWED_USER_ID)
     except Exception as e:
@@ -937,23 +941,57 @@ async def _job_advance_recurring(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"job_advance_recurring error: {e}")
 
 
+def reschedule_job(job_queue, name: str, handler, hour: int, minute: int) -> None:
+    """
+    Cancel any existing job with the given name and reschedule it at the new time.
+    Called from the setup wizard when the buyer changes a timing setting.
+    """
+    import datetime as _dt
+    tz = pytz.timezone(TIMEZONE)
+    for job in job_queue.get_jobs_by_name(name):
+        job.schedule_removal()
+    job_queue.run_daily(
+        handler,
+        time=_dt.time(hour, minute, tzinfo=tz),
+        name=name,
+    )
+    logger.info(f"Rescheduled '{name}' to {hour:02d}:{minute:02d} {TIMEZONE}")
+
+
 def _schedule_jobs(job_queue: JobQueue) -> None:
     """Register all background jobs."""
     tz = pytz.timezone(TIMEZONE)
 
-    job_queue.run_daily(
-        _job_briefing,
-        time=dtime(BRIEFING_HOUR, BRIEFING_MINUTE, tzinfo=tz),
-        name="daily_briefing",
-    )
+    # ── Load buyer schedule settings (userdata → env var fallback) ───────────
+    try:
+        from core.data import load_data, get_schedule_settings
+        _sched = get_schedule_settings(load_data())
+    except Exception as _e:
+        logger.warning(f"_schedule_jobs: could not load schedule settings, using env vars: {_e}")
+        _sched = {}
+
+    _briefing_enabled = _sched.get("briefing_enabled", True)
+    _briefing_h       = _sched.get("briefing_hour",         BRIEFING_HOUR)
+    _briefing_m       = _sched.get("briefing_minute",       BRIEFING_MINUTE)
+    _nudge_h          = _sched.get("habit_nudge_hour",      HABIT_NUDGE_HOUR)
+    _nudge_m          = _sched.get("habit_nudge_minute",    HABIT_NUDGE_MINUTE)
+    _travel_h         = _sched.get("travel_weather_hour",   TRAVEL_WEATHER_HOUR)
+    _travel_m         = _sched.get("travel_weather_minute", TRAVEL_WEATHER_MINUTE)
+
+    if _briefing_enabled:
+        job_queue.run_daily(
+            _job_briefing,
+            time=dtime(_briefing_h, _briefing_m, tzinfo=tz),
+            name="daily_briefing",
+        )
     job_queue.run_daily(
         job_google_health_check,
-        time=dtime(HEALTH_CHECK_HOUR, HEALTH_CHECK_MINUTE, tzinfo=tz),
+        time=dtime(_briefing_h, max(0, _briefing_m - 10), tzinfo=tz),
         name="google_health_check",
     )
     job_queue.run_daily(
         _job_habit_nudge,
-        time=dtime(HABIT_NUDGE_HOUR, HABIT_NUDGE_MINUTE, tzinfo=tz),
+        time=dtime(_nudge_h, _nudge_m, tzinfo=tz),
         name="habit_nudge",
     )
     job_queue.run_daily(
@@ -963,7 +1001,7 @@ def _schedule_jobs(job_queue: JobQueue) -> None:
     )
     job_queue.run_daily(
         _job_travel_weather,
-        time=dtime(TRAVEL_WEATHER_HOUR, TRAVEL_WEATHER_MINUTE, tzinfo=tz),
+        time=dtime(_travel_h, _travel_m, tzinfo=tz),
         name="travel_weather",
     )
     job_queue.run_daily(

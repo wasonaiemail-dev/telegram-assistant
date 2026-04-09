@@ -65,6 +65,7 @@ from core.data import (
     get_workout_settings,
     get_reply_settings,
     get_weekly_summary_settings,
+    get_schedule_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -652,8 +653,11 @@ _WEEKDAY_MAP = {
 _PREFS_STEPS = [
     "reply_tone",
     "briefing_sections",
+    "briefing_schedule",
     "shopping_lists",
     "weekly_summary",
+    "habit_nudge_schedule",
+    "travel_weather_schedule",
     "workout",
     "meals",
     "journal",
@@ -662,21 +666,40 @@ _PREFS_STEPS = [
 ]
 
 _PREFS_TITLES = {
-    "reply_tone":        "🗨️ Reply Tone",
-    "briefing_sections": "🌅 Morning Briefing Sections",
-    "shopping_lists":    "🛒 Shopping List Names",
-    "weekly_summary":    "📊 Weekly Summary Schedule",
-    "workout":           "💪 Workout Setup",
-    "meals":             "🍽️ Meal Adherence Reminder",
-    "journal":           "📓 Journal Reminder",
-    "meal_nutrition":    "🥗 Meal Nutrition Goals",
-    "smart_suggestions": "💡 Smart Pattern Suggestions",
+    "reply_tone":             "🗨️ Reply Tone",
+    "briefing_sections":      "🌅 Morning Briefing Sections",
+    "briefing_schedule":      "⏰ Morning Briefing Schedule",
+    "shopping_lists":         "🛒 Shopping List Names",
+    "weekly_summary":         "📊 Weekly Summary Schedule",
+    "habit_nudge_schedule":   "✅ Daily Habit Check-In Time",
+    "travel_weather_schedule":"🌤️ Travel Weather Alert Time",
+    "workout":                "💪 Workout Setup",
+    "meals":                  "🍽️ Meal Adherence Reminder",
+    "journal":                "📓 Journal Reminder",
+    "meal_nutrition":         "🥗 Meal Nutrition Goals",
+    "smart_suggestions":      "💡 Smart Pattern Suggestions",
 }
 
 _PREFS_PROMPTS = {
     "reply_tone": (
         "What default tone should I use when drafting reply suggestions?\n\n"
         "Tap a button below, or type: *warm*, *professional*, *casual*, or *playful*."
+    ),
+    "briefing_schedule": (
+        "Do you want a daily morning briefing automatically sent?\n\n"
+        "• Type *yes [time]* to enable — e.g. *yes 7:30am* or *yes 8:00am*\n"
+        "• Type *no* to disable (you can still trigger it manually with /briefing)\n\n"
+        "Type *skip* to keep the current setting."
+    ),
+    "habit_nudge_schedule": (
+        "What time should I send your daily habit check-in reminder?\n\n"
+        "Format: *3:00pm* or *15:00*\n"
+        "Type *skip* for default (3:00pm)."
+    ),
+    "travel_weather_schedule": (
+        "What time should I check your next-day calendar for travel weather alerts?\n\n"
+        "Format: *7:00pm* or *19:00*\n"
+        "Type *skip* for default (7:00pm)."
     ),
     "briefing_sections": (
         "Which sections do you want in your morning briefing, and in what order?\n\n"
@@ -900,6 +923,99 @@ async def _save_prefs_answer(
                     "Valid options: " + ", ".join(_ALL_BRIEFING_SECTIONS)
                 )
                 return
+
+    # ── briefing_schedule ─────────────────────────────────────────────────────
+    elif key == "briefing_schedule":
+        if not skip:
+            raw = answer.strip().lower()
+            if raw == "no":
+                sc = get_schedule_settings(data)
+                sc["briefing_enabled"] = False
+                save_data(data)
+                # Cancel the live job so it stops immediately (no restart needed)
+                try:
+                    jq = context.application.job_queue
+                    for job in jq.get_jobs_by_name("daily_briefing"):
+                        job.schedule_removal()
+                    for job in jq.get_jobs_by_name("google_health_check"):
+                        job.schedule_removal()
+                except Exception:
+                    pass
+                feedback = "✓ Scheduled briefing disabled. Use /briefing anytime to trigger it manually."
+            elif raw.startswith("yes"):
+                # Extract time from "yes 7:30am" or just "yes" (keep current time)
+                parts   = raw.split(None, 1)
+                time_t  = _parse_time(parts[1]) if len(parts) > 1 else None
+                sc      = get_schedule_settings(data)
+                sc["briefing_enabled"] = True
+                if time_t:
+                    sc["briefing_hour"]   = time_t[0]
+                    sc["briefing_minute"] = time_t[1]
+                save_data(data)
+                # Reschedule the live job immediately
+                try:
+                    from bot import reschedule_job, _job_briefing, _job_briefing as _jb
+                    import pytz
+                    from core.config import TIMEZONE, ALLOWED_USER_ID
+                    jq = context.application.job_queue
+                    reschedule_job(jq, "daily_briefing", _jb, sc["briefing_hour"], sc["briefing_minute"])
+                    reschedule_job(jq, "google_health_check",
+                                   __import__("bot", fromlist=["job_google_health_check"]).job_google_health_check,
+                                   sc["briefing_hour"], max(0, sc["briefing_minute"] - 10))
+                except Exception:
+                    pass  # Will take effect on next restart
+                time_str = _fmt_time(sc["briefing_hour"], sc["briefing_minute"]) if time_t else "current time"
+                feedback = f"✓ Morning briefing enabled at {time_str}."
+            else:
+                await msg.reply_text(
+                    "Type *yes [time]* (e.g. *yes 7:30am*) to enable, or *no* to disable.",
+                    parse_mode="Markdown",
+                )
+                return
+
+    # ── habit_nudge_schedule ──────────────────────────────────────────────────
+    elif key == "habit_nudge_schedule":
+        if not skip:
+            time_t = _parse_time(answer.strip())
+            if not time_t:
+                await msg.reply_text(
+                    "Couldn't parse that time. Try: *3:00pm* or *15:00*",
+                    parse_mode="Markdown",
+                )
+                return
+            sc = get_schedule_settings(data)
+            sc["habit_nudge_hour"]   = time_t[0]
+            sc["habit_nudge_minute"] = time_t[1]
+            save_data(data)
+            try:
+                from bot import reschedule_job, _job_habit_nudge
+                reschedule_job(context.application.job_queue, "habit_nudge",
+                               _job_habit_nudge, time_t[0], time_t[1])
+            except Exception:
+                pass
+            feedback = f"✓ Habit check-in set to {_fmt_time(*time_t)}."
+
+    # ── travel_weather_schedule ───────────────────────────────────────────────
+    elif key == "travel_weather_schedule":
+        if not skip:
+            time_t = _parse_time(answer.strip())
+            if not time_t:
+                await msg.reply_text(
+                    "Couldn't parse that time. Try: *7:00pm* or *19:00*",
+                    parse_mode="Markdown",
+                )
+                return
+            sc = get_schedule_settings(data)
+            sc["travel_weather_hour"]   = time_t[0]
+            sc["travel_weather_minute"] = time_t[1]
+            save_data(data)
+            try:
+                from bot import reschedule_job, _job_travel_weather
+                reschedule_job(context.application.job_queue, "travel_weather",
+                               _job_travel_weather, time_t[0], time_t[1])
+            except Exception:
+                pass
+            feedback = f"✓ Travel weather alert set to {_fmt_time(*time_t)}."
 
     # ── shopping_lists ────────────────────────────────────────────────────────
     elif key == "shopping_lists":
