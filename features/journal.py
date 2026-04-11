@@ -429,6 +429,14 @@ def _collect_entries_text(journal: dict, start_iso: str | None = None,
 
 async def cmd_journal(ctx) -> None:
     """Start or view journal. /journal → prompt. /journal [date] → view. ctx: AlfredContext"""
+    js = get_journal_settings(load_data())
+    if not js.get("enabled", True):
+        await ctx.reply(
+            "Journal is currently disabled. "
+            "Enable it in /setup → Configure preferences → Journal."
+        )
+        return
+
     args = ctx.args or []
     if args:
         # View a past entry
@@ -594,6 +602,10 @@ async def handle_journal_intent(intent: str, entities: dict, ctx) -> None:
 
 async def send_journal_reminder(ctx, is_followup: bool = False) -> None:
     """Send the nightly journal reminder. ctx: AlfredContext"""
+    js = get_journal_settings(load_data())
+    if not js.get("enabled", True):
+        return  # Buyer disabled journal reminders
+
     today    = _today_iso()
     day_data = get_journal_day(today)
 

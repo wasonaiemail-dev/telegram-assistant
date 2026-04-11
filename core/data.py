@@ -1034,6 +1034,7 @@ def get_journal_settings(data: dict) -> dict:
         "What was challenging?",
         "What are you grateful for?",
     ]
+    js.setdefault("enabled",             True)
     js.setdefault("prompts_by_day", {str(i): list(default_prompts) for i in range(7)})
     js.setdefault("reminder_count",      1)
     js.setdefault("reminder_gap_min",    0)

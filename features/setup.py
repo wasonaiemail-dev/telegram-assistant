@@ -661,6 +661,7 @@ _PREFS_STEPS = [
     "workout",
     "meals",
     "journal",
+    "journal_prompts",
     "meal_nutrition",
     "smart_suggestions",
 ]
@@ -675,7 +676,8 @@ _PREFS_TITLES = {
     "travel_weather_schedule":"🌤️ Travel Weather Alert Time",
     "workout":                "💪 Workout Setup",
     "meals":                  "🍽️ Meal Adherence Reminder",
-    "journal":                "📓 Journal Reminder",
+    "journal":                "📓 Journal",
+    "journal_prompts":        "✏️ Journal Questions",
     "meal_nutrition":         "🥗 Meal Nutrition Goals",
     "smart_suggestions":      "💡 Smart Pattern Suggestions",
 }
@@ -743,9 +745,17 @@ _PREFS_PROMPTS = {
         "Type *skip* for default (8:00pm)."
     ),
     "journal": (
-        "What time should I send your evening journal reminder?\n"
-        "For multiple reminders, separate with commas: *9:00pm, 10:00pm*\n\n"
-        "Type *skip* for default (9:00pm)."
+        "Enable nightly journal reminders?\n\n"
+        "• *yes [time]* — enable with a reminder time (e.g. *yes 9:00pm*)\n"
+        "• *yes [time1], [time2]* — multiple reminders (e.g. *yes 9pm, 10pm*)\n"
+        "• *no* — disable reminders (you can still use /journal manually)\n\n"
+        "Type *skip* to keep current setting."
+    ),
+    "journal_prompts": (
+        "Customize your daily journal questions (applied every day).\n\n"
+        "Type up to 5 questions, separated by commas or on separate lines.\n\n"
+        "Example: *What went well today?, What would I do differently?, What am I grateful for?*\n\n"
+        "Type *skip* to keep defaults."
     ),
     "meal_nutrition": (
         "Set your daily macro targets for meal tracking.\n"
@@ -1118,21 +1128,57 @@ async def _save_prefs_answer(
     # ── journal ───────────────────────────────────────────────────────────────
     elif key == "journal":
         if not skip:
-            raw_times = [s.strip() for s in answer.split(",") if s.strip()]
-            parsed    = [_parse_time(s) for s in raw_times]
-            parsed    = [t for t in parsed if t is not None]
-            if not parsed:
+            raw = answer.strip().lower()
+            if raw == "no":
+                js = get_journal_settings(data)
+                js["enabled"] = False
+                save_data(data)
+                feedback = "✓ Journal reminders disabled. Use /journal anytime to write an entry."
+            elif raw.startswith("yes"):
+                # Parse times from "yes 9pm" or "yes 9pm, 10pm"
+                after     = raw[3:].strip().lstrip(",").strip()
+                raw_times = [s.strip() for s in after.replace("\n", ",").split(",") if s.strip()]
+                parsed    = [_parse_time(s) for s in raw_times if _parse_time(s)]
+                if not parsed:
+                    # "yes" with no time — enable with current/default time
+                    parsed = None
+                js = get_journal_settings(data)
+                js["enabled"] = True
+                if parsed:
+                    js["reminder_times"] = [f"{t[0]:02d}:{t[1]:02d}" for t in parsed]
+                    js["reminder_count"] = len(parsed)
+                save_data(data)
+                if parsed:
+                    labels   = ", ".join(_fmt_time(*t) for t in parsed)
+                    feedback = f"✓ Journal reminders enabled at {labels}."
+                else:
+                    feedback = "✓ Journal reminders enabled at current time."
+            else:
                 await msg.reply_text(
-                    "Couldn't parse time(s). Try: *9:00pm* or *9pm, 10pm*",
+                    "Type *yes [time]* to enable (e.g. *yes 9pm*) or *no* to disable.",
+                    parse_mode="Markdown",
+                )
+                return
+
+    # ── journal_prompts ───────────────────────────────────────────────────────
+    elif key == "journal_prompts":
+        if not skip:
+            # Accept comma-separated or newline-separated questions
+            raw_qs = [q.strip() for q in answer.replace("\n", ",").split(",") if q.strip()]
+            # Minimum 1, max 5 questions; must be non-trivially long (>5 chars)
+            questions = [q for q in raw_qs if len(q) > 5][:5]
+            if not questions:
+                await msg.reply_text(
+                    "Please enter at least one question (minimum 6 characters).",
                     parse_mode="Markdown",
                 )
                 return
             js = get_journal_settings(data)
-            js["reminder_times"] = [f"{t[0]:02d}:{t[1]:02d}" for t in parsed]
-            js["reminder_count"] = len(parsed)
+            # Apply same questions to all 7 days
+            js["prompts_by_day"] = {str(i): list(questions) for i in range(7)}
             save_data(data)
-            labels   = ", ".join(_fmt_time(*t) for t in parsed)
-            feedback = f"✓ Journal reminder(s) set to: {labels}."
+            preview  = "\n".join(f"  {i+1}. {q}" for i, q in enumerate(questions))
+            feedback = f"✓ Journal questions updated ({len(questions)}):\n{preview}"
 
     # ── meal_nutrition ────────────────────────────────────────────────────────
     elif key == "meal_nutrition":

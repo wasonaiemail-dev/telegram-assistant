@@ -903,6 +903,9 @@ async def _job_weekly_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def _job_journal_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
+        from core.data import load_data, get_journal_settings
+        if not get_journal_settings(load_data()).get("enabled", True):
+            return  # Buyer disabled journal
         from features.journal import send_journal_reminder
         ctx = _make_bg_ctx(context, ALLOWED_USER_ID)
         await send_journal_reminder(ctx, is_followup=False)
@@ -912,6 +915,9 @@ async def _job_journal_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def _job_journal_followup(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
+        from core.data import load_data, get_journal_settings
+        if not get_journal_settings(load_data()).get("enabled", True):
+            return  # Buyer disabled journal
         from features.journal import send_journal_reminder
         ctx = _make_bg_ctx(context, ALLOWED_USER_ID)
         await send_journal_reminder(ctx, is_followup=True)
