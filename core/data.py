@@ -1090,6 +1090,19 @@ def get_smart_suggestion_settings(data: dict) -> dict:
     return ss
 
 
+def get_base_sports_settings(data: dict) -> dict:
+    """
+    Return base Alfred sports recap settings (no Sports Pack plugin needed).
+    Stores favorite teams for NFL/NBA/MLB/NHL — shown in morning briefing.
+    The Sports Pack plugin overrides this entirely when installed.
+    """
+    s  = data.setdefault("settings", {})
+    ss = s.setdefault("base_sports", {})
+    ss.setdefault("enabled",        False)   # Off by default — buyer must configure teams
+    ss.setdefault("favorite_teams", [])      # [{league: "nfl", team_name: "Chiefs"}, ...]
+    return ss
+
+
 def get_schedule_settings(data: dict) -> dict:
     """
     Return schedule/timing settings for all auto-fired jobs.

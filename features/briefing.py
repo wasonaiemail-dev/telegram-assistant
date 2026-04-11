@@ -493,10 +493,113 @@ async def _section_workout_stats(_now):
         return ""
 
 
+async def _build_base_sports_recap(_now) -> str:
+    """
+    Base sports recap — runs when the Sports Pack plugin is NOT installed.
+    Fetches yesterday's results for the buyer's configured favorite teams.
+    Supports NFL, NBA, MLB, NHL only (hardcoded — Sports Pack adds more).
+    """
+    import aiohttp
+    from core.data import load_data, get_base_sports_settings
+
+    settings       = get_base_sports_settings(load_data())
+    favorite_teams = settings.get("favorite_teams", [])
+    if not favorite_teams:
+        return ""
+
+    yesterday = (_now.date() - datetime.timedelta(days=1)).strftime("%Y%m%d")
+
+    _LEAGUE_MAP = {
+        "nfl": {"sport": "football",   "league": "nfl", "emoji": "🏈"},
+        "nba": {"sport": "basketball", "league": "nba", "emoji": "🏀"},
+        "mlb": {"sport": "baseball",   "league": "mlb", "emoji": "⚾"},
+        "nhl": {"sport": "hockey",     "league": "nhl", "emoji": "🏒"},
+    }
+
+    lines = []
+    timeout = aiohttp.ClientTimeout(total=5)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        for entry in favorite_teams:
+            league_slug = entry.get("league", "").lower()
+            team_name   = entry.get("team_name", "").lower().strip()
+            cfg         = _LEAGUE_MAP.get(league_slug)
+            if not cfg or not team_name:
+                continue
+
+            url = (
+                f"https://site.api.espn.com/apis/site/v2/sports"
+                f"/{cfg['sport']}/{cfg['league']}/scoreboard?dates={yesterday}"
+            )
+            try:
+                async with session.get(url) as r:
+                    if r.status != 200:
+                        continue
+                    data = await r.json()
+
+                for event in data.get("events", []):
+                    comp        = event.get("competitions", [{}])[0]
+                    competitors = comp.get("competitors", [])
+                    completed   = event.get("status", {}).get("type", {}).get("completed", False)
+                    if not completed:
+                        continue
+
+                    # Check if our team is in this game
+                    our_side = None
+                    for c in competitors:
+                        t = c.get("team", {})
+                        names = [
+                            t.get("displayName", "").lower(),
+                            t.get("shortDisplayName", "").lower(),
+                            t.get("abbreviation", "").lower(),
+                            t.get("name", "").lower(),
+                        ]
+                        if any(team_name in n or n in team_name for n in names if n):
+                            our_side = c
+                            break
+
+                    if not our_side:
+                        continue
+
+                    home = next((c for c in competitors if c.get("homeAway") == "home"), {})
+                    away = next((c for c in competitors if c.get("homeAway") == "away"), {})
+                    home_abbr  = home.get("team", {}).get("abbreviation", "?")
+                    away_abbr  = away.get("team", {}).get("abbreviation", "?")
+                    home_score = home.get("score", "?")
+                    away_score = away.get("score", "?")
+                    won        = our_side.get("winner", False)
+                    result     = "W" if won else "L"
+
+                    lines.append(
+                        f"{cfg['emoji']} {away_abbr} {away_score} @ {home_abbr} {home_score} "
+                        f"<b>({result})</b>"
+                    )
+                    break  # Only one game per team per day
+            except Exception:
+                continue
+
+    if not lines:
+        return ""
+
+    return "<b>⚡ Yesterday's Results</b>\n" + "\n".join(lines)
+
+
 async def _section_sports(_now, platform: str = "telegram"):
+    # Sports Pack plugin takes priority if installed
     try:
         from plugins.sports.briefing import section_sports_briefing
         return await section_sports_briefing(_now, platform=platform)
+    except ImportError:
+        pass  # Plugin not installed — fall through to base recap
+    except Exception:
+        return ""  # Plugin installed but crashed
+
+    # Base Alfred recap (no plugin)
+    try:
+        from core.data import load_data, get_base_sports_settings
+        if not get_base_sports_settings(load_data()).get("enabled", False):
+            return ""
+        return await _build_base_sports_recap(_now)
     except Exception:
         return ""
 

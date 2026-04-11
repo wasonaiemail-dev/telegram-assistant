@@ -66,6 +66,7 @@ from core.data import (
     get_reply_settings,
     get_weekly_summary_settings,
     get_schedule_settings,
+    get_base_sports_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -654,6 +655,7 @@ _PREFS_STEPS = [
     "reply_tone",
     "briefing_sections",
     "briefing_schedule",
+    "sports_recap",
     "shopping_lists",
     "weekly_summary",
     "habit_nudge_schedule",
@@ -670,6 +672,7 @@ _PREFS_TITLES = {
     "reply_tone":             "🗨️ Reply Tone",
     "briefing_sections":      "🌅 Morning Briefing Sections",
     "briefing_schedule":      "⏰ Morning Briefing Schedule",
+    "sports_recap":           "🏆 Sports Recap (Base)",
     "shopping_lists":         "🛒 Shopping List Names",
     "weekly_summary":         "📊 Weekly Summary Schedule",
     "habit_nudge_schedule":   "✅ Daily Habit Check-In Time",
@@ -692,6 +695,15 @@ _PREFS_PROMPTS = {
         "• Type *yes [time]* to enable — e.g. *yes 7:30am* or *yes 8:00am*\n"
         "• Type *no* to disable (you can still trigger it manually with /briefing)\n\n"
         "Type *skip* to keep the current setting."
+    ),
+    "sports_recap": (
+        "Would you like yesterday's game results for your favorite teams in your morning briefing?\n\n"
+        "Supported leagues: NFL, NBA, MLB, NHL.\n"
+        "Format: *NFL: Chiefs, NBA: Lakers, MLB: Yankees, NHL: Bruins*\n"
+        "Skip any leagues you don't follow. One team per league.\n\n"
+        "• Type *none* to disable the sports recap\n"
+        "• Type *skip* to keep current setting\n\n"
+        "Note: If you have the Sports & Betting Pack installed, it overrides this automatically."
     ),
     "habit_nudge_schedule": (
         "What time should I send your daily habit check-in reminder?\n\n"
@@ -982,6 +994,45 @@ async def _save_prefs_answer(
                     parse_mode="Markdown",
                 )
                 return
+
+    # ── sports_recap ─────────────────────────────────────────────────────────
+    elif key == "sports_recap":
+        if not skip:
+            from core.data import get_base_sports_settings
+            raw = answer.strip().lower()
+            if raw == "none":
+                ss = get_base_sports_settings(data)
+                ss["enabled"]        = False
+                ss["favorite_teams"] = []
+                save_data(data)
+                feedback = "✓ Sports recap disabled."
+            else:
+                # Parse "NFL: Chiefs, NBA: Lakers, MLB: Yankees, NHL: Bruins"
+                # Also handles partial input like "NBA: Lakers, NHL: Bruins"
+                _VALID_LEAGUES = {"nfl": "nfl", "nba": "nba", "mlb": "mlb", "nhl": "nhl"}
+                teams = []
+                # Split on commas, then parse each "LEAGUE: Team" pair
+                parts = [p.strip() for p in answer.split(",") if p.strip()]
+                for part in parts:
+                    if ":" in part:
+                        league_raw, team_raw = part.split(":", 1)
+                        league_slug = league_raw.strip().lower()
+                        team_name   = team_raw.strip().title()
+                        if league_slug in _VALID_LEAGUES and team_name:
+                            teams.append({"league": league_slug, "team_name": team_name})
+                if not teams:
+                    await msg.reply_text(
+                        "Couldn't parse any teams. Use format: *NFL: Chiefs, NBA: Lakers*\n"
+                        "Or type *none* to disable, *skip* to keep current.",
+                        parse_mode="Markdown",
+                    )
+                    return
+                ss = get_base_sports_settings(data)
+                ss["enabled"]        = True
+                ss["favorite_teams"] = teams
+                save_data(data)
+                summary  = ", ".join(f"{t['league'].upper()}: {t['team_name']}" for t in teams)
+                feedback = f"✓ Sports recap enabled — following: {summary}."
 
     # ── habit_nudge_schedule ──────────────────────────────────────────────────
     elif key == "habit_nudge_schedule":
