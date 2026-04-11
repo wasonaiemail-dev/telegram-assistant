@@ -61,6 +61,15 @@ def _auth_error_msg() -> str:
     return "❌ Google Tasks isn't connected. Run /auth to connect your Google account."
 
 
+def _show_due_dates() -> bool:
+    """Return whether due dates should be shown (CW8 toggle)."""
+    try:
+        from core.data import load_data, get_todo_settings
+        return get_todo_settings(load_data()).get("show_due_dates", True)
+    except Exception:
+        return True
+
+
 def _format_todo(task: dict, idx: int) -> str:
     """Format a single todo for display."""
     title    = task.get("title", "(untitled)")
@@ -73,7 +82,7 @@ def _format_todo(task: dict, idx: int) -> str:
     parts = [f"  {idx}. {title}"]
 
     extras = []
-    if due:
+    if due and _show_due_dates():   # CW8: respect due-date display toggle
         extras.append(f"due {due}")
     if priority == "high":
         extras.append("🔴 high")

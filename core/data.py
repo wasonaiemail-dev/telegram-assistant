@@ -1064,6 +1064,23 @@ def get_reply_settings(data: dict) -> dict:
     return rs
 
 
+def get_shopping_settings(data: dict) -> dict:
+    """Return shopping feature settings."""
+    s  = data.setdefault("settings", {})
+    ss = s.setdefault("shopping", {})
+    ss.setdefault("default_list", "grocery")    # CW7: fallback list for unrouted items
+    ss.setdefault("starter_items_added", False)  # CW7: lazy starter items flag
+    return ss
+
+
+def get_todo_settings(data: dict) -> dict:
+    """Return todo display/behaviour settings."""
+    s  = data.setdefault("settings", {})
+    ts = s.setdefault("todos", {})
+    ts.setdefault("show_due_dates", True)   # CW8: toggle due-date display
+    return ts
+
+
 def get_weekly_summary_settings(data: dict) -> dict:
     """Return weekly summary schedule settings."""
     s = data.setdefault("settings", {})

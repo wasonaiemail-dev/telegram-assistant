@@ -659,6 +659,8 @@ _PREFS_STEPS = [
     "briefing_schedule",
     "sports_recap",
     "shopping_lists",
+    "shopping_default",     # CW7: default list + 50 starter items
+    "todo_display",         # CW8: due-date display toggle
     "weekly_summary",
     "habit_nudge_schedule",
     "travel_weather_schedule",
@@ -678,6 +680,8 @@ _PREFS_TITLES = {
     "briefing_schedule":      "⏰ Morning Briefing Schedule",
     "sports_recap":           "🏆 Sports Recap (Base)",
     "shopping_lists":         "🛒 Shopping List Names",
+    "shopping_default":       "🛒 Default Shopping List",
+    "todo_display":           "📋 Todo Display Options",
     "weekly_summary":         "📊 Weekly Summary Schedule",
     "habit_nudge_schedule":   "✅ Daily Habit Check-In Time",
     "travel_weather_schedule":"🌤️ Travel Weather Alert Time",
@@ -746,6 +750,18 @@ _PREFS_PROMPTS = {
         "Type 1–5 names separated by commas.\n\n"
         "Example: *groceries, pharmacy, amazon*\n"
         "Type *skip* for defaults: grocery, household, wishlist."
+    ),
+    "shopping_default": (
+        "Which list should items go to when you don't specify one?\n\n"
+        "Type the list name — e.g. *grocery*, *groceries*, *household*\n\n"
+        "I'll also pre-populate that list with 50 common grocery items to get you started. "
+        "Type *skip* to keep the default (grocery) and still get the starter items."
+    ),
+    "todo_display": (
+        "Should I show due dates next to your todos?\n\n"
+        "• *yes* — show due dates (e.g. \"Buy milk  (due 2026-04-15)\")\n"
+        "• *no* — hide due dates for a cleaner look\n\n"
+        "Type *skip* to keep the current setting (yes)."
     ),
     "weekly_summary": (
         "When should I deliver your weekly AI summary?\n\n"
@@ -1119,6 +1135,51 @@ async def _save_prefs_answer(
                 feedback = f"✓ Shopping lists set to: {', '.join(n.title() for n in names)}."
             else:
                 await msg.reply_text("Please enter at least one list name.")
+                return
+
+    # ── shopping_default ──────────────────────────────────────────────────────
+    elif key == "shopping_default":
+        from core.data import get_shopping_settings
+        ss = get_shopping_settings(data)
+        if not skip:
+            raw = answer.strip().lower().replace(" ", "_")
+            list_names = data.get("settings", {}).get("shopping_lists",
+                                                       ["grocery", "household", "wishlist"])
+            normalized = [n.lower().replace(" ", "_") for n in list_names]
+            if raw and (raw in normalized or raw in list_names):
+                # Normalise to match the stored format
+                matched = raw
+                ss["default_list"] = matched
+            else:
+                ss["default_list"] = raw or "grocery"
+        # Always schedule starter items to be injected on first /shopping view
+        ss["starter_items_added"] = False
+        save_data(data)
+        default = ss["default_list"]
+        feedback = (
+            f"✓ Default list set to *{default.replace('_', ' ').title()}*. "
+            f"50 starter items will be added when you first view that list."
+        )
+
+    # ── todo_display ──────────────────────────────────────────────────────────
+    elif key == "todo_display":
+        if not skip:
+            from core.data import get_todo_settings
+            raw = answer.strip().lower()
+            ts  = get_todo_settings(data)
+            if raw in {"yes", "y", "on", "show"}:
+                ts["show_due_dates"] = True
+                save_data(data)
+                feedback = "✓ Due dates will be shown on todos."
+            elif raw in {"no", "n", "off", "hide"}:
+                ts["show_due_dates"] = False
+                save_data(data)
+                feedback = "✓ Due dates hidden — cleaner todo list."
+            else:
+                await msg.reply_text(
+                    "Type *yes* to show due dates or *no* to hide them.",
+                    parse_mode="Markdown",
+                )
                 return
 
     # ── weekly_summary ────────────────────────────────────────────────────────

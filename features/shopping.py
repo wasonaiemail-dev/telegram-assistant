@@ -73,17 +73,58 @@ def _auth_error_msg() -> str:
     return "❌ Google Tasks isn't connected. Run /auth to connect your Google account."
 
 
+_STARTER_ITEMS = [
+    "Milk", "Eggs", "Bread", "Butter", "Cheese",
+    "Chicken breast", "Ground beef", "Salmon", "Rice", "Pasta",
+    "Olive oil", "Salt", "Pepper", "Onions", "Garlic",
+    "Tomatoes", "Lettuce", "Spinach", "Broccoli", "Carrots",
+    "Potatoes", "Apples", "Bananas", "Oranges", "Lemons",
+    "Yogurt", "Cream cheese", "Sour cream", "Heavy cream", "Orange juice",
+    "Coffee", "Tea", "Sugar", "Flour", "Oats",
+    "Canned tomatoes", "Chicken broth", "Black beans", "Chickpeas", "Soy sauce",
+    "Vinegar", "Honey", "Maple syrup", "Peanut butter", "Jam",
+    "Crackers", "Chips", "Chocolate", "Granola bars", "Frozen vegetables",
+]
+
+
 def _auto_route_list(item_text: str) -> str:
     """
     Guess which shopping list an item belongs to by keyword matching.
     Returns a list key (e.g. "grocery", "household", "wishlist").
-    Defaults to "grocery".
+    Falls back to the buyer-configured default list (CW7).
     """
     item_lower = item_text.lower()
     for list_key, keywords in SHOPPING_KEYWORDS.items():
         if any(kw in item_lower for kw in keywords):
             return list_key
-    return "grocery"
+    # CW7: use buyer's configured default list instead of hardcoded "grocery"
+    try:
+        from core.data import load_data, get_shopping_settings
+        return get_shopping_settings(load_data()).get("default_list", "grocery")
+    except Exception:
+        return "grocery"
+
+
+def _inject_starter_items_if_needed(svc) -> None:
+    """
+    Lazily add 50 common grocery items to the default list on first use.
+    Only runs once — gated by the starter_items_added flag.
+    """
+    try:
+        from core.data import load_data, save_data, get_shopping_settings
+        from adapters.google_tasks import add_shopping_item
+        data = load_data()
+        ss   = get_shopping_settings(data)
+        if ss.get("starter_items_added"):
+            return
+        default_list = ss.get("default_list", "grocery")
+        for item in _STARTER_ITEMS:
+            add_shopping_item(svc, default_list, item)
+        ss["starter_items_added"] = True
+        save_data(data)
+        logger.info("CW7: starter grocery items added to '%s'", default_list)
+    except Exception as e:
+        logger.warning("CW7: starter items inject failed: %s", e)
 
 
 def _normalize_list_key(raw: str) -> str | None:
@@ -195,6 +236,7 @@ async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     # /shopping — show all lists
+    _inject_starter_items_if_needed(svc)  # CW7: lazy one-time starter items
     from adapters.google_tasks import list_all_shopping
     all_items = list_all_shopping(svc)
     await update.message.reply_text(
@@ -239,6 +281,7 @@ async def handle_shopping_intent(
 
     # ── SHOP_LIST ─────────────────────────────────────────────────────────────
     if intent == SHOP_LIST:
+        _inject_starter_items_if_needed(svc)  # CW7: lazy one-time starter items
         raw_list = entities.get("list", "all")
         if raw_list in ("all", "", None):
             from adapters.google_tasks import list_all_shopping
