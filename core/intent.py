@@ -675,6 +675,10 @@ def _build_gpt_system(memory_categories: list) -> str:
     Args:
         memory_categories: The current active list of memory categories.
     """
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    from core.config import TIMEZONE as _TZ
+    _today_str = _dt.datetime.now(_ZI(_TZ)).strftime("%Y-%m-%d")
     memory_cats = "|".join(f'"{c}"' for c in memory_categories)
     return f"""You are the intent classifier for {BOT_NAME}, a personal assistant Telegram bot.
 Classify the user's message into exactly one intent and extract relevant entities.
@@ -914,7 +918,7 @@ CLASSIFICATION RULES:
 - If the message references the user's personal data (todos, calendar, habits, etc.), use the specific intent.
 - "remind me to X" always maps to reminder_add, not todo_add.
 - "add X to my list" without a specific list → shop_add with list_key "grocery".
-- Dates like "tomorrow", "next Monday", "in 2 days", "this Friday" are valid due values — pass them as-is.
+- Always resolve dates/times to absolute ISO format. Today is {_today_str}. Use "YYYY-MM-DD" for date-only, "YYYY-MM-DDTHH:MM" for date+time. Example: "remind me tomorrow at 3pm" → due "YYYY-MM-DDTHH:MM" using tomorrow's date.
 
 DISAMBIGUATION:
 - "I worked out" / "hit the gym" / "exercised" → habit_log (quick check-in for the habit streak).
