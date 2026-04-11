@@ -67,6 +67,7 @@ from core.data import (
     get_weekly_summary_settings,
     get_schedule_settings,
     get_base_sports_settings,
+    get_event_prep_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -665,6 +666,7 @@ _PREFS_STEPS = [
     "journal",
     "journal_prompts",
     "meal_nutrition",
+    "event_prep",
     "smart_suggestions",
 ]
 
@@ -682,6 +684,7 @@ _PREFS_TITLES = {
     "journal":                "📓 Journal",
     "journal_prompts":        "✏️ Journal Questions",
     "meal_nutrition":         "🥗 Meal Nutrition Goals",
+    "event_prep":             "📋 Event Prep",
     "smart_suggestions":      "💡 Smart Pattern Suggestions",
 }
 
@@ -774,6 +777,12 @@ _PREFS_PROMPTS = {
         "Format: *calories, protein_g, carbs_g, fat_g*\n\n"
         "Example: *2000, 150, 200, 65*\n"
         "Type *skip* if you don't want to track macros."
+    ),
+    "event_prep": (
+        "Should I send nightly event prep notes for tomorrow's calendar events?\n\n"
+        "• *yes* — enable (I'll prep you each night before significant events)\n"
+        "• *no* — disable (you can still trigger manually with /eventprep)\n\n"
+        "Type *skip* to keep current setting."
     ),
     "smart_suggestions": (
         "Alfred can proactively spot patterns and nudge you. Which areas?\n\n"
@@ -1254,6 +1263,25 @@ async def _save_prefs_answer(
                     return
             else:
                 await msg.reply_text("Please provide all 4 values: calories, protein, carbs, fat.", parse_mode="Markdown")
+                return
+
+    # ── event_prep ───────────────────────────────────────────────────────────
+    elif key == "event_prep":
+        if not skip:
+            raw = answer.strip().lower()
+            if raw in {"yes", "y", "on", "enable"}:
+                get_event_prep_settings(data)["enabled"] = True
+                save_data(data)
+                feedback = "✓ Nightly event prep enabled."
+            elif raw in {"no", "n", "off", "disable"}:
+                get_event_prep_settings(data)["enabled"] = False
+                save_data(data)
+                feedback = "✓ Nightly event prep disabled. Use /eventprep anytime to trigger manually."
+            else:
+                await msg.reply_text(
+                    "Type *yes* to enable or *no* to disable.",
+                    parse_mode="Markdown",
+                )
                 return
 
     # ── smart_suggestions ─────────────────────────────────────────────────────

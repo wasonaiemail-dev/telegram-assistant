@@ -127,6 +127,10 @@ async def send_event_prep(context, chat_id: int) -> None:
     )
     from features.memory import get_context_for_message
 
+    from core.data import load_data, get_event_prep_settings
+    if not get_event_prep_settings(load_data()).get("enabled", True):
+        return  # Buyer disabled nightly event prep in /setup
+
     if not is_authorized():
         return
 

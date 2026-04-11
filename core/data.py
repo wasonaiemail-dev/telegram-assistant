@@ -1090,6 +1090,18 @@ def get_smart_suggestion_settings(data: dict) -> dict:
     return ss
 
 
+def get_event_prep_settings(data: dict) -> dict:
+    """
+    Return event prep settings.
+    enabled: True by default — buyers can turn off nightly event prep messages
+             via /setup → Configure preferences → Event Prep.
+    """
+    s  = data.setdefault("settings", {})
+    ep = s.setdefault("event_prep", {})
+    ep.setdefault("enabled", True)   # On by default (existing behaviour)
+    return ep
+
+
 def get_base_sports_settings(data: dict) -> dict:
     """
     Return base Alfred sports recap settings (no Sports Pack plugin needed).
