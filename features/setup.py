@@ -1307,3 +1307,76 @@ async def _finish_prefs_flow(
         "Some changes (like journal reminder times) take effect after the next restart.",
         parse_mode="Markdown",
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DISCORD COMPATIBILITY SHIMS
+# Allow the preferences wizard to run on Discord via AlfredContext (ctx)
+# instead of Telegram's Update / ContextTypes objects.
+#
+# All the internal wizard functions use:
+#   msg = update.callback_query.message if update.callback_query else update.message
+#   await msg.reply_text(text, parse_mode=..., reply_markup=...)
+#
+# _DiscordMsg maps reply_text → ctx.reply() so the existing code runs
+# unchanged.  reply_markup (inline buttons) is silently ignored — Discord
+# users type "skip" / tone names as text instead of tapping buttons.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _DiscordMsg:
+    """Fake Telegram Message that forwards reply_text → ctx.reply()."""
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+
+    async def reply_text(self, text: str, parse_mode=None, reply_markup=None) -> None:
+        # reply_markup (InlineKeyboardMarkup) is ignored on Discord.
+        # The existing prompts already include typed equivalents ("type skip", etc.)
+        await self._ctx.reply(text)
+
+
+class _DiscordUpdate:
+    """Fake Telegram Update that wraps a Discord AlfredContext."""
+
+    def __init__(self, ctx):
+        self.callback_query = None          # never a callback on Discord
+        self.message = _DiscordMsg(ctx)
+
+
+class _DiscordCtx:
+    """Fake PTB ContextTypes.DEFAULT_TYPE — job_queue reschedule silently skipped."""
+
+    args = []
+    application = None  # type: ignore   (job_queue calls are try/except'd in setup.py)
+
+
+async def start_prefs_flow_discord(ctx) -> None:
+    """
+    Start the 14-step preferences wizard on Discord.
+    Called by discord_bot._discord_setup().
+    """
+    await _start_prefs_flow(_DiscordUpdate(ctx), _DiscordCtx())
+
+
+async def handle_setup_message_discord(ctx, text: str) -> None:
+    """
+    Process a free-text message during an active setup session on Discord.
+    discord_bot.on_message() calls this whenever is_setup_active() is True
+    and the message is not a command.
+    """
+    state = _load_state()
+    if not state.get("active"):
+        return
+
+    flow    = state.get("flow")
+    update  = _DiscordUpdate(ctx)
+    context = _DiscordCtx()
+
+    if flow == "memory":
+        await _handle_memory_answer(update, context, state, text)
+    elif flow == "addcat":
+        await _handle_addcat_answer(update, context, state, text)
+    elif flow == "prefs":
+        await _handle_prefs_answer(update, context, state, text)
+    else:
+        _clear_state()

@@ -248,6 +248,15 @@ def main() -> None:
             if handled:
                 return
 
+        # If a setup wizard is active, intercept text before the intent classifier
+        try:
+            from features.setup import is_setup_active, handle_setup_message_discord
+            if is_setup_active() and not has_prefix:
+                await handle_setup_message_discord(ctx, text)
+                return
+        except Exception as _setup_err:
+            logger.warning(f"Discord: setup intercept error: {_setup_err}")
+
         # Natural language — classify and dispatch
         try:
             await ctx.send_typing()
@@ -322,8 +331,51 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
             await ctx.reply("What would you like to know? Type your question after `!ask`.")
             return True
 
+    if cmd == "setup":
+        await _discord_setup(ctx)
+        return True
+
     # Unknown command — fall through to intent classifier
     return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DISCORD SETUP HANDLER
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _discord_setup(ctx) -> None:
+    """
+    Handle !setup (and !setup cancel / !setup memory) on Discord.
+
+    !setup         — starts the 14-step preferences wizard
+    !setup cancel  — cancels an in-progress wizard session
+    !setup memory  — friendly note (full memory wizard is Telegram-only for now)
+    """
+    from features.setup import (
+        start_prefs_flow_discord,
+        _clear_state,          # noqa: F401  (private but safe to import directly)
+        is_setup_active,
+    )
+
+    sub = (ctx.args[0].lower() if ctx.args else "")
+
+    if sub == "cancel":
+        _clear_state()
+        await ctx.reply(
+            "Setup cancelled. Your settings are unchanged.\n"
+            "Run `!setup` anytime to restart."
+        )
+        return
+
+    if sub == "memory":
+        await ctx.reply(
+            "Full memory setup is best done via the Telegram bot (it uses guided buttons).\n"
+            "On Discord you can still add facts directly: `!memory add [category] [fact]`"
+        )
+        return
+
+    # Default — launch 14-step preferences wizard
+    await start_prefs_flow_discord(ctx)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
