@@ -1060,6 +1060,7 @@ def get_reply_settings(data: dict) -> dict:
     s = data.setdefault("settings", {})
     rs = s.setdefault("reply", {})
     rs.setdefault("default_tone", "warm")
+    rs.setdefault("signature", "")   # CW6: sign-off appended to reply drafts
     return rs
 
 

@@ -98,7 +98,8 @@ def get_last_draft() -> str | None:
 
 async def _gpt_reply_from_image(image_b64: str, context_hint: str, tone: str,
                                  style_examples: list[str], contact_ctx: str,
-                                 is_email: bool = False) -> str:
+                                 is_email: bool = False,
+                                 signature: str = "") -> str:
     """Use GPT-4o vision to read the screenshot and draft replies."""
     from openai import AsyncOpenAI
     client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -113,10 +114,11 @@ async def _gpt_reply_from_image(image_b64: str, context_hint: str, tone: str,
 
     contact_block = f"\n\nContext about the person in this conversation:\n{contact_ctx}" if contact_ctx else ""
     extra_context = f"\n\nAdditional context from the user: {context_hint}" if context_hint else ""
+    sig_block     = f"\n\nEnd each reply option with this sign-off: {signature}" if signature else ""
 
     system = (
         f"You are a skilled communication assistant helping draft {medium} replies. "
-        f"Tone instruction: {tone_instruction}{style_block}{contact_block}"
+        f"Tone instruction: {tone_instruction}{style_block}{contact_block}{sig_block}"
     )
 
     user_text = (
@@ -150,7 +152,8 @@ async def _gpt_reply_from_image(image_b64: str, context_hint: str, tone: str,
 
 
 async def _gpt_reply_from_text(email_text: str, context_hint: str, tone: str,
-                                style_examples: list[str], contact_ctx: str) -> str:
+                                style_examples: list[str], contact_ctx: str,
+                                signature: str = "") -> str:
     """Draft an email reply from pasted text (no vision needed)."""
     from openai import AsyncOpenAI
     client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -163,10 +166,11 @@ async def _gpt_reply_from_text(email_text: str, context_hint: str, tone: str,
 
     contact_block = f"\n\nContext about sender:\n{contact_ctx}" if contact_ctx else ""
     extra_context = f"\n\nAdditional context: {context_hint}" if context_hint else ""
+    sig_block     = f"\n\nEnd each reply option with this sign-off: {signature}" if signature else ""
 
     prompt = (
         f"Draft 3 reply options for this email. Tone: {tone_instruction}{style_block}"
-        f"{contact_block}{extra_context}\n\n"
+        f"{contact_block}{extra_context}{sig_block}\n\n"
         f"Email:\n{email_text[:3000]}\n\n"
         f"Format:\n**Option 1 — [tone]:**\n[reply]\n\n**Option 2 — [tone]:**\n[reply]\n\n"
         f"**Option 3 — [tone]:**\n[reply]\n\n"
@@ -223,9 +227,10 @@ async def handle_photo_for_reply(photo_file_path: str, ctx,
     # Pop any context the user typed before sending the photo
     pending_ctx = pop_pending_context()
 
-    # Get buyer's preferred tone
+    # Get buyer's preferred tone and signature
     reply_settings = get_reply_settings(data)
     tone           = reply_settings.get("default_tone", "warm")
+    signature      = reply_settings.get("signature", "")
 
     # Load style library
     lib            = load_style_library()
@@ -258,6 +263,7 @@ async def handle_photo_for_reply(photo_file_path: str, ctx,
         style_examples=style_examples,
         contact_ctx = contact_ctx,
         is_email    = is_email,
+        signature   = signature,
     )
 
     # Check if GPT needs clarification
@@ -341,7 +347,9 @@ async def handle_reply_intent(intent: str, entities: dict, ctx) -> None:
         if email_text:
             # Pasted email text
             data           = load_data()
-            tone           = get_reply_settings(data).get("default_tone", "warm")
+            rs             = get_reply_settings(data)
+            tone           = rs.get("default_tone", "warm")
+            signature      = rs.get("signature", "")
             lib            = load_style_library()
             style_examples = lib.get("examples", [])
             await ctx.reply("⏳ Drafting email reply...")
@@ -351,6 +359,7 @@ async def handle_reply_intent(intent: str, entities: dict, ctx) -> None:
                 tone           = tone,
                 style_examples = style_examples,
                 contact_ctx    = "",
+                signature      = signature,
             )
             set_last_draft(draft)
             await ctx.reply_markdown(draft)

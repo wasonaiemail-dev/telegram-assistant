@@ -654,6 +654,7 @@ _WEEKDAY_MAP = {
 # Ordered list of step keys
 _PREFS_STEPS = [
     "reply_tone",
+    "reply_signature",
     "briefing_sections",
     "briefing_schedule",
     "sports_recap",
@@ -672,6 +673,7 @@ _PREFS_STEPS = [
 
 _PREFS_TITLES = {
     "reply_tone":             "🗨️ Reply Tone",
+    "reply_signature":        "✍️ Reply Signature",
     "briefing_sections":      "🌅 Morning Briefing Sections",
     "briefing_schedule":      "⏰ Morning Briefing Schedule",
     "sports_recap":           "🏆 Sports Recap (Base)",
@@ -692,6 +694,12 @@ _PREFS_PROMPTS = {
     "reply_tone": (
         "What default tone should I use when drafting reply suggestions?\n\n"
         "Tap a button below, or type: *warm*, *professional*, *casual*, or *playful*."
+    ),
+    "reply_signature": (
+        "What name or sign-off should I append to reply drafts?\n\n"
+        "• Type your name or closing — e.g. *Tyler*, *Thanks, Tyler*, *— T*\n"
+        "• Type *none* to draft replies without a signature\n\n"
+        "Type *skip* to keep current setting."
     ),
     "briefing_schedule": (
         "Do you want a daily morning briefing automatically sent?\n\n"
@@ -936,6 +944,19 @@ async def _save_prefs_answer(
                     "Please choose: warm, professional, casual, or playful."
                 )
                 return  # don't advance — ask again
+
+    # ── reply_signature ───────────────────────────────────────────────────────
+    elif key == "reply_signature":
+        if not skip:
+            raw = answer.strip()
+            if raw.lower() in {"none", "no", "off", "clear"}:
+                get_reply_settings(data)["signature"] = ""
+                save_data(data)
+                feedback = "✓ Reply signature cleared — drafts will have no sign-off."
+            else:
+                get_reply_settings(data)["signature"] = raw
+                save_data(data)
+                feedback = f"✓ Reply signature set to: *{raw}*"
 
     # ── briefing_sections ─────────────────────────────────────────────────────
     elif key == "briefing_sections":
