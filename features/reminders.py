@@ -52,7 +52,7 @@ import logging
 import datetime
 from zoneinfo import ZoneInfo
 
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
 from core.alfred_context import AlfredContext
@@ -60,6 +60,9 @@ from core.config import BOT_NAME, TIMEZONE, RECUR_LABELS
 from core.intent import (
     REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
 )
+
+# HP1: day-of-week name lookup (Mon=0 … Sun=6)
+_DOW_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +191,12 @@ def _format_reminder(r: dict, idx: int) -> str:
         extras.append(f"📅 {dt_str}")
 
     if recur and recur != "none":
-        extras.append(f"🔁 {RECUR_LABELS.get(recur, recur)}")
+        recur_label = RECUR_LABELS.get(recur, recur)
+        # HP1: show "every Monday" instead of generic "weekly" for day-specific recurrences
+        recur_day = r.get("recur_day")
+        if recur == "weekly" and recur_day is not None:
+            recur_label = f"every {_DOW_NAMES[int(recur_day)]}"
+        extras.append(f"🔁 {recur_label}")
 
     if extras:
         parts.append(f"     _({', '.join(extras)})_")
@@ -307,11 +315,15 @@ async def check_and_fire_reminders(context, chat_id: int) -> None:
     """
     Check all active reminders. Fire any whose due time has passed.
     Marks them done or advances recurring ones.
+    Attaches a Snooze inline button (HP2) using the configured snooze duration.
     """
-    from core.data import compute_next_recur_date
+    from core.data import compute_next_recur_date, load_data, get_reminder_settings
 
     now  = _now_local()
     data, reminders = _load_reminders()
+
+    # HP2: get configured snooze duration
+    snooze_mins = get_reminder_settings(load_data()).get("snooze_minutes", 10)
 
     fired_any = False
     for r in reminders:
@@ -322,25 +334,45 @@ async def check_and_fire_reminders(context, chat_id: int) -> None:
             continue
         if now >= due_dt:
             # Fire the reminder
-            recur = r.get("recur", "none")
-            text  = r.get("text", "(reminder)")
+            recur     = r.get("recur", "none")
+            recur_day = r.get("recur_day")   # HP1: day-of-week (0=Mon…6=Sun)
+            text      = r.get("text", "(reminder)")
 
-            recur_label = RECUR_LABELS.get(recur, "") if recur != "none" else ""
-            suffix      = f" _(🔁 {recur_label})_" if recur_label else ""
+            # HP1: show "every Monday" label for day-specific weekly recurrences
+            if recur != "none":
+                if recur == "weekly" and recur_day is not None:
+                    recur_label = f"every {_DOW_NAMES[int(recur_day)]}"
+                else:
+                    recur_label = RECUR_LABELS.get(recur, recur)
+                suffix = f" _(🔁 {recur_label})_"
+            else:
+                suffix = ""
+
+            # HP2: snooze button on the fired message
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    f"💤 Snooze {snooze_mins}min",
+                    callback_data=f"rem_snooze_{r['id']}_{snooze_mins}",
+                ),
+                InlineKeyboardButton("✓ Done", callback_data=f"rem_done_{r['id']}"),
+            ]])
 
             try:
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=f"⏰ *Reminder:* {text}{suffix}",
                     parse_mode="Markdown",
+                    reply_markup=keyboard,
                 )
             except Exception as e:
                 logger.warning(f"check_and_fire_reminders: send failed: {e}")
 
             if recur and recur != "none":
-                # Advance to next occurrence
+                # HP1: advance to next occurrence, passing recur_day for day-specific weekly
                 from_date = due_dt.date()
-                next_date = compute_next_recur_date(recur, from_date=from_date)
+                next_date = compute_next_recur_date(
+                    recur, from_date=from_date, recur_day=recur_day
+                )
                 if next_date:
                     r["recur_next"] = next_date
                     # Keep time component if original had one
@@ -358,6 +390,67 @@ async def check_and_fire_reminders(context, chat_id: int) -> None:
 
     if fired_any:
         _save_reminders(data)
+
+
+async def handle_reminder_callback(update, context) -> None:
+    """
+    Handle inline button callbacks from fired reminder messages.
+    Patterns:
+      rem_snooze_<id>_<minutes>  — postpone reminder by <minutes>
+      rem_done_<id>              — mark reminder done
+    HP2: snooze callback.
+    """
+    query = update.callback_query
+    await query.answer()
+    cb = query.data or ""
+
+    data, reminders = _load_reminders()
+    now = _now_local()
+
+    if cb.startswith("rem_snooze_"):
+        # rem_snooze_<id>_<minutes>
+        parts = cb.split("_")
+        try:
+            rem_id    = int(parts[2])
+            snooze_m  = int(parts[3]) if len(parts) > 3 else 10
+        except (ValueError, IndexError):
+            await query.edit_message_text("Couldn't parse snooze request.")
+            return
+
+        r = next((x for x in reminders if x.get("id") == rem_id), None)
+        if not r:
+            await query.edit_message_text("Reminder not found.")
+            return
+
+        new_due = now + datetime.timedelta(minutes=snooze_m)
+        new_due_str = new_due.strftime("%Y-%m-%dT%H:%M")
+        r["due"]        = new_due_str
+        r["recur_next"] = new_due_str[:10]
+        r["done"]       = False
+        _save_reminders(data)
+        await query.edit_message_text(
+            f"💤 Snoozed _{r['text']}_ for {snooze_m} minutes.",
+            parse_mode="Markdown",
+        )
+
+    elif cb.startswith("rem_done_"):
+        try:
+            rem_id = int(cb.split("_")[2])
+        except (ValueError, IndexError):
+            await query.edit_message_text("Couldn't parse done request.")
+            return
+
+        r = next((x for x in reminders if x.get("id") == rem_id), None)
+        if not r:
+            await query.edit_message_text("Reminder not found.")
+            return
+
+        r["done"] = True
+        _save_reminders(data)
+        await query.edit_message_text(
+            f"✓ Done: _{r['text']}_",
+            parse_mode="Markdown",
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -380,9 +473,31 @@ async def handle_reminder_intent(
             await ctx.reply('What should I remind you about? Try: "remind me to call mom tomorrow at 3pm"')
             return
 
-        raw_due = entities.get("due", "")
-        due     = _parse_due(raw_due)
-        recur   = entities.get("recur") or "none"
+        raw_due   = entities.get("due", "")
+        due       = _parse_due(raw_due)
+        recur     = entities.get("recur") or "none"
+        # HP1: day-of-week specific weekly recurrence (0=Mon…6=Sun)
+        recur_day_raw = entities.get("recur_day")
+        recur_day = int(recur_day_raw) if recur_day_raw is not None else None
+
+        # HP1: if recur_day given without explicit recur, default to weekly
+        if recur_day is not None and recur == "none":
+            recur = "weekly"
+
+        # HP1: if no due date set and recur_day given, auto-set first occurrence
+        if due is None and recur_day is not None:
+            from core.data import compute_next_recur_date as _cnrd
+            import datetime as _dt
+            tz_now = _now_local()
+            # Find next occurrence starting from today (inclusive)
+            candidate = tz_now.date()
+            if candidate.weekday() == recur_day:
+                # Today is the right day — use today (if no time specified, 9am)
+                first_date = candidate.isoformat()
+            else:
+                first_date = _cnrd("weekly", from_date=candidate - _dt.timedelta(days=1), recur_day=recur_day)
+            due = first_date
+
         now_str = _now_local().strftime("%Y-%m-%dT%H:%M")
 
         new_r = {
@@ -391,6 +506,7 @@ async def handle_reminder_intent(
             "due":        due,
             "done":       False,
             "recur":      recur,
+            "recur_day":  recur_day,   # HP1: day-of-week (0=Mon…6=Sun) or None
             "recur_next": due[:10] if due else None,
             "added":      now_str,
         }
@@ -404,7 +520,11 @@ async def handle_reminder_intent(
             else:
                 extras.append(f"📅 {due}")
         if recur and recur != "none":
-            extras.append(f"🔁 {RECUR_LABELS.get(recur, recur)}")
+            # HP1: show "every Monday" label for day-specific recurrences
+            if recur == "weekly" and recur_day is not None:
+                extras.append(f"🔁 every {_DOW_NAMES[recur_day]}")
+            else:
+                extras.append(f"🔁 {RECUR_LABELS.get(recur, recur)}")
 
         suffix = f" _({', '.join(extras)})_" if extras else ""
         await ctx.reply_markdown(f"⏰ Reminder set: *{text}*{suffix}")

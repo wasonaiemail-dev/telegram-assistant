@@ -808,13 +808,16 @@ def get_week_summary_data(data=None):
 # RECURRING TODO / REMINDER HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def compute_next_recur_date(recur, from_date=None):
+def compute_next_recur_date(recur, from_date=None, recur_day=None):
     """
     Compute the next due date for a recurring item.
 
     Args:
         recur:     one of "daily", "weekdays", "weekly", "monthly", "none"
         from_date: datetime.date to compute from (default: today)
+        recur_day: int 0–6 (Mon=0, Sun=6). When set with recur="weekly",
+                   finds the next occurrence of that weekday instead of +7 days.
+                   HP1: day-of-week specific weekly recurrence.
 
     Returns:
         ISO date string "YYYY-MM-DD", or None if recur == "none".
@@ -836,7 +839,14 @@ def compute_next_recur_date(recur, from_date=None):
             next_dt += datetime.timedelta(days=1)
 
     elif recur == "weekly":
-        next_dt = base + datetime.timedelta(weeks=1)
+        if recur_day is not None:
+            # HP1: find the next occurrence of the specified weekday (0=Mon…6=Sun)
+            # Start from the day AFTER base so we always advance forward
+            next_dt = base + datetime.timedelta(days=1)
+            while next_dt.weekday() != int(recur_day):
+                next_dt += datetime.timedelta(days=1)
+        else:
+            next_dt = base + datetime.timedelta(weeks=1)
 
     elif recur == "monthly":
         # Same day next month; clamp to end-of-month on short months
@@ -1082,14 +1092,24 @@ def get_todo_settings(data: dict) -> dict:
 
 
 def get_weekly_summary_settings(data: dict) -> dict:
-    """Return weekly summary schedule settings."""
+    """Return weekly summary schedule + section settings."""
     s = data.setdefault("settings", {})
     ws = s.setdefault("weekly_summary", {})
     import os as _os
     ws.setdefault("hour",    int(_os.getenv("WEEKLY_SUMMARY_HOUR", "9")))
     ws.setdefault("minute",  int(_os.getenv("WEEKLY_SUMMARY_MINUTE", "0")))
     ws.setdefault("weekday", int(_os.getenv("WEEKLY_SUMMARY_WEEKDAY", "0")))
+    # HP3: section toggles — which blocks appear in the weekly summary
+    ws.setdefault("enabled_sections", ["habits", "calendar", "todos"])
     return ws
+
+
+def get_reminder_settings(data: dict) -> dict:
+    """Return reminder behaviour settings (HP2: snooze duration)."""
+    s  = data.setdefault("settings", {})
+    rs = s.setdefault("reminder_settings", {})
+    rs.setdefault("snooze_minutes", 10)   # HP2: configurable snooze length
+    return rs
 
 
 def get_mood_trend_from_data(data: dict, days: int = 14) -> list:

@@ -742,7 +742,9 @@ habit_view      Show today's habit progress.
                 Entities: {{}}
 
 reminder_add    Add a reminder or recurring reminder.
-                Entities: text (required), due (date/time str or null), recur ("daily"|"weekdays"|"weekly"|"monthly"|null)
+                Entities: text (required), due (date/time str or null),
+                          recur ("daily"|"weekdays"|"weekly"|"monthly"|null),
+                          recur_day (int 0–6, Mon=0…Sun=6, only when a specific weekday is mentioned e.g. "every Monday"→0, "every Friday"→4)
 
 reminder_list   List active reminders.
                 Entities: {{}}

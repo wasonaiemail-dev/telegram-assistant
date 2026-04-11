@@ -189,32 +189,41 @@ async def send_weekly_summary(ctx) -> None:
     """
     Compile and send the weekly summary.
     ctx: AlfredContext (imported inline to avoid circular imports)
+    HP3: respects enabled_sections setting — only builds blocks for enabled sections.
     """
-    from core.data import get_week_summary_data
+    from core.data import get_week_summary_data, load_data, get_weekly_summary_settings
     from features.memory import get_full_context
     from core.google_auth import is_authorized, get_calendar_service, get_tasks_service
 
-    # Always gather habit/local data
-    week_data = get_week_summary_data()
-    habit_block = _get_habit_summary(week_data.get("completed_habits", {}))
+    # HP3: get which sections are enabled
+    ws_settings       = get_weekly_summary_settings(load_data())
+    enabled_sections  = ws_settings.get("enabled_sections", ["habits", "calendar", "todos"])
 
+    # Always gather week date range
+    week_data  = get_week_summary_data()
     week_start = week_data.get("week_start", "")
     week_end   = week_data.get("week_end", "")
 
-    # Calendar and tasks need Google auth
+    # HP3: only build each block if section is enabled
+    habit_block = ""
+    if "habits" in enabled_sections:
+        habit_block = _get_habit_summary(week_data.get("completed_habits", {}))
+
     calendar_block = ""
     todos_block    = ""
 
     if is_authorized():
-        cal_svc = get_calendar_service()
-        if cal_svc:
-            calendar_block = _get_calendar_summary(cal_svc)
+        if "calendar" in enabled_sections:
+            cal_svc = get_calendar_service()
+            if cal_svc:
+                calendar_block = _get_calendar_summary(cal_svc)
 
-        tasks_svc = get_tasks_service()
-        if tasks_svc:
-            todos_block = _get_todos_summary(tasks_svc)
+        if "todos" in enabled_sections:
+            tasks_svc = get_tasks_service()
+            if tasks_svc:
+                todos_block = _get_todos_summary(tasks_svc)
 
-    # Full memory context for summary
+    # Memory context is always included (not buyer-toggleable)
     memory_block = get_full_context()
 
     # Generate GPT summary

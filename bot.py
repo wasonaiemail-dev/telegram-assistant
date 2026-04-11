@@ -826,6 +826,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     Route all inline keyboard callbacks by prefix:
       mem_*   -> features/memory.py
       setup_* -> features/setup.py
+      rem_*   -> features/reminders.py  (HP2: snooze/done buttons)
     """
     query = update.callback_query
     data  = (query.data or "")
@@ -834,6 +835,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await handle_memory_callback(update, context)
     elif data.startswith("setup_"):
         await handle_setup_callback(update, context)
+    elif data.startswith("rem_"):
+        from features.reminders import handle_reminder_callback
+        await handle_reminder_callback(update, context)
     else:
         await query.answer()
         logger.warning(f"Unhandled callback: {data!r}")

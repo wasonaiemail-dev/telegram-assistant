@@ -68,6 +68,7 @@ from core.data import (
     get_schedule_settings,
     get_base_sports_settings,
     get_event_prep_settings,
+    get_weekly_summary_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -659,8 +660,9 @@ _PREFS_STEPS = [
     "briefing_schedule",
     "sports_recap",
     "shopping_lists",
-    "shopping_default",     # CW7: default list + 50 starter items
-    "todo_display",         # CW8: due-date display toggle
+    "shopping_default",       # CW7: default list + 50 starter items
+    "todo_display",           # CW8: due-date display toggle
+    "snooze_duration",        # HP2: reminder snooze length
     "weekly_summary",
     "habit_nudge_schedule",
     "travel_weather_schedule",
@@ -671,6 +673,7 @@ _PREFS_STEPS = [
     "meal_nutrition",
     "event_prep",
     "smart_suggestions",
+    "weekly_summary_sections",  # HP3: weekly summary section toggles
 ]
 
 _PREFS_TITLES = {
@@ -682,6 +685,7 @@ _PREFS_TITLES = {
     "shopping_lists":         "🛒 Shopping List Names",
     "shopping_default":       "🛒 Default Shopping List",
     "todo_display":           "📋 Todo Display Options",
+    "snooze_duration":        "💤 Reminder Snooze Duration",
     "weekly_summary":         "📊 Weekly Summary Schedule",
     "habit_nudge_schedule":   "✅ Daily Habit Check-In Time",
     "travel_weather_schedule":"🌤️ Travel Weather Alert Time",
@@ -691,7 +695,8 @@ _PREFS_TITLES = {
     "journal_prompts":        "✏️ Journal Questions",
     "meal_nutrition":         "🥗 Meal Nutrition Goals",
     "event_prep":             "📋 Event Prep",
-    "smart_suggestions":      "💡 Smart Pattern Suggestions",
+    "smart_suggestions":          "💡 Smart Pattern Suggestions",
+    "weekly_summary_sections":    "📊 Weekly Summary Sections",
 }
 
 _PREFS_PROMPTS = {
@@ -762,6 +767,17 @@ _PREFS_PROMPTS = {
         "• *yes* — show due dates (e.g. \"Buy milk  (due 2026-04-15)\")\n"
         "• *no* — hide due dates for a cleaner look\n\n"
         "Type *skip* to keep the current setting (yes)."
+    ),
+    "snooze_duration": (
+        "How long should I snooze a reminder when you tap Snooze?\n\n"
+        "Options: *5*, *10*, *15*, or *30* minutes\n\n"
+        "Type *skip* for the default (10 minutes)."
+    ),
+    "weekly_summary_sections": (
+        "Which sections should appear in your weekly summary?\n\n"
+        "Available: *habits*, *calendar*, *todos*\n\n"
+        "Type as comma-separated list — e.g. *habits, calendar*\n"
+        "Type *all* to include everything, or *skip* to keep defaults (all three)."
     ),
     "weekly_summary": (
         "When should I deliver your weekly AI summary?\n\n"
@@ -1182,6 +1198,29 @@ async def _save_prefs_answer(
                 )
                 return
 
+    # ── snooze_duration ───────────────────────────────────────────────────────
+    elif key == "snooze_duration":
+        if not skip:
+            from core.data import get_reminder_settings
+            raw = answer.strip()
+            try:
+                mins = int(raw)
+                if mins not in (5, 10, 15, 30):
+                    await msg.reply_text(
+                        "Please choose *5*, *10*, *15*, or *30* minutes.",
+                        parse_mode="Markdown",
+                    )
+                    return
+                get_reminder_settings(data)["snooze_minutes"] = mins
+                save_data(data)
+                feedback = f"✓ Reminders will snooze for {mins} minutes."
+            except ValueError:
+                await msg.reply_text(
+                    "Please enter a number: *5*, *10*, *15*, or *30*.",
+                    parse_mode="Markdown",
+                )
+                return
+
     # ── weekly_summary ────────────────────────────────────────────────────────
     elif key == "weekly_summary":
         if not skip:
@@ -1386,6 +1425,29 @@ async def _save_prefs_answer(
                 feedback = f"✓ Smart suggestions enabled for: {', '.join(areas)}."
             else:
                 feedback = "✓ Smart suggestions disabled."
+
+    # ── weekly_summary_sections ───────────────────────────────────────────────
+    elif key == "weekly_summary_sections":
+        if not skip:
+            valid_sections = {"habits", "calendar", "todos"}
+            lower = answer.strip().lower()
+            if lower == "all":
+                sections = list(valid_sections)
+            else:
+                sections = [s.strip() for s in lower.split(",") if s.strip() in valid_sections]
+            if not sections and lower != "none":
+                await msg.reply_text(
+                    "Please choose from: *habits*, *calendar*, *todos* — or type *all*.",
+                    parse_mode="Markdown",
+                )
+                return
+            ws = get_weekly_summary_settings(data)
+            ws["enabled_sections"] = sections
+            save_data(data)
+            if sections:
+                feedback = f"✓ Weekly summary sections: {', '.join(sections)}."
+            else:
+                feedback = "✓ Weekly summary will show a brief overview only (all sections disabled)."
 
     # ── Advance state ─────────────────────────────────────────────────────────
     if skip:
