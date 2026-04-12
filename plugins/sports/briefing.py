@@ -54,17 +54,85 @@ REDDIT_HEADERS = {"User-Agent": "alfred-bot/1.0 (personal morning briefing)"}
 
 # League → subreddit
 LEAGUE_SUBREDDITS: Dict[str, str] = {
-    "nba":        "nba",
-    "nfl":        "nfl",
-    "mlb":        "baseball",
-    "nhl":        "hockey",
-    "ncaaf":      "CFB",
-    "ncaab":      "CollegeBasketball",
-    "epl":        "PremierLeague",
-    "mls":        "MLS",
-    "bundesliga": "Bundesliga",
-    "laliga":     "LaLiga",
+    "nba":             "nba",
+    "nfl":             "nfl",
+    "mlb":             "baseball",
+    "nhl":             "hockey",
+    "ncaaf":           "CFB",
+    "ncaab":           "CollegeBasketball",
+    "epl":             "PremierLeague",
+    "mls":             "MLS",
+    "bundesliga":      "Bundesliga",
+    "laliga":          "LaLiga",
+    "soccer":          "soccer",
+    "ucl":             "Champions_League",
 }
+
+# Per-subreddit flair keywords — a post must match at least one (case-insensitive)
+# r/baseball uses "Video", r/hockey uses "[Video]" — widen from "highlight"-only
+SUBREDDIT_FLAIR_KEYWORDS: Dict[str, List[str]] = {
+    "nba":              ["highlight"],
+    "nfl":              ["highlight"],
+    "baseball":         ["video", "highlight"],
+    "hockey":           ["video", "highlight"],
+    "CFB":              ["highlight"],
+    "CollegeBasketball":["highlight"],
+    "PremierLeague":    ["highlight", "match thread"],
+    "MLS":              ["highlight"],
+    "Bundesliga":       ["highlight"],
+    "LaLiga":           ["highlight"],
+    "soccer":           ["highlight"],
+    "Champions_League": ["highlight"],
+}
+
+# Per-subreddit minimum upvote floor — balances sub size vs. noise
+SUBREDDIT_MIN_SCORE: Dict[str, int] = {
+    "nba":              2000,
+    "nfl":              1500,
+    "baseball":         500,
+    "hockey":           500,
+    "CFB":              500,
+    "CollegeBasketball":200,
+    "PremierLeague":    1000,
+    "MLS":              150,
+    "Bundesliga":       300,
+    "LaLiga":           300,
+    "soccer":           500,
+    "Champions_League": 500,
+    "sports":           1000,   # catch-all
+}
+
+# ── Title scoring — boosts plays, penalises controversy/non-play content ───────
+# Adjusted score = raw_score * multiplier
+# Clips matching a PLAY word get boosted; clips matching a CONTROVERSY or NOISE
+# word get penalised so they rank below real plays even if they got more upvotes.
+
+_TITLE_PLAY_WORDS = [
+    "dunk", "dunk!", "alley-oop", "layup", "three", "3-pointer", "buzzer",
+    "touchdown", "td", "interception", "catch", "sack", "field goal",
+    "goal", "goals", "finish", "finishes", "shot", "save", "assist",
+    "homer", "home run", "grand slam", "strikeout", "catch",
+    "slam", "block", "steal", "run", "pass", "score", "scores",
+    "hit", "hits", "throw", "throws", "kick", "kicks",
+]
+_TITLE_CONTROVERSY_WORDS = [
+    "fight", "altercation", "brawl", "questionable", "dirty", "flagrant",
+    "ejected", "ejection", "suspended", "suspension", "hit on", "incident",
+    "injured", "injury", "unsportsmanlike", "misconduct", "technical",
+]
+_TITLE_NOISE_WORDS = [
+    "interview", "press conference", "mic'd up", "micd up", "podcast",
+    "documentary", "behind the scenes", "practice", "warmup", "warm up",
+    "ceremony", "signing", "reaction", "breakdown", "analysis",
+    "preview", "trailer", "best of", "weekly", "monthly",
+    "this week", "all goals", "every goal", "every time",
+    "postgame", "post-game", "pregame", "pre-game", "recap",
+    "says", "on why", "rewatch", "years ago", "anniversary",
+    "wedding", "years old", "still playing", "recalls", "announcer",
+    "halftime show", "kids", "shinny", "bullied", "worm",
+]
+
+_VXREDDIT_BASE = "https://vxreddit.com"
 
 # ── YouTube ───────────────────────────────────────────────────────────────────
 
@@ -343,83 +411,113 @@ async def _fetch_reddit_highlights(
 # ── YouTube domain set for sorting top plays ──────────────────────────────────
 _YOUTUBE_DOMAINS = {"youtu.be", "youtube.com", "www.youtube.com"}
 
-# ── Domains that reliably auto-embed as playable video in Discord ──────────────
-# v.redd.it uses DASH streams (separate audio/video) → no inline playback
-# instagram.com, twitter.com, x.com → require login or don't embed
-# gfycat.com → shut down
-# medal.tv → inconsistent embed support
-_DISCORD_INLINE_DOMAINS = {
-    "youtu.be", "youtube.com", "www.youtube.com",
-    "streamable.com", "www.streamable.com",
-    "clips.twitch.tv",
-}
+
+
+def _score_title(title: str, raw_score: int) -> float:
+    """
+    Adjust raw upvote score based on title content.
+    - Posts with play keywords get a 1.5× boost
+    - Posts with controversy keywords get a 0.25× penalty
+    - Posts with noise/non-play keywords are dropped entirely (return 0)
+    Returns the adjusted float score (0 means discard).
+    """
+    t = title.lower()
+
+    # Hard drop — non-play content
+    for word in _TITLE_NOISE_WORDS:
+        if word in t:
+            return 0.0
+
+    # Controversy penalty — real moment but not a highlight play
+    for word in _TITLE_CONTROVERSY_WORDS:
+        if word in t:
+            return raw_score * 0.25
+
+    # Play boost
+    for word in _TITLE_PLAY_WORDS:
+        if word in t:
+            return raw_score * 1.5
+
+    # Neutral — keep as-is
+    return float(raw_score)
 
 
 async def _fetch_reddit_top_plays_sub(
     subreddit: str,
-    limit: int = 25,
-    highlight_flair_only: bool = True,
+    limit: int = 50,
+    use_flair_config: bool = True,
     min_score: int = 0,
+    time_range: str = "day",
 ) -> List[Dict[str, Any]]:
     """
     Fetch highlight clips from a subreddit for the Top Plays section.
 
-    When highlight_flair_only=True (league subs): only posts where
-    link_flair_text contains "highlight" are returned — filters out
-    interviews, quotes, news, and other non-play content.
+    use_flair_config=True  — uses SUBREDDIT_FLAIR_KEYWORDS to filter by flair
+    use_flair_config=False — catch-all mode (r/sports): domain filter only
+    time_range             — Reddit t= param: "day" (default) or "week" (72hr fallback)
 
-    When highlight_flair_only=False (r/sports catch-all): falls back to
-    any post with a video domain that clears min_score.
+    v.redd.it URLs are converted to vxreddit.com so Discord can embed them.
 
-    Returns list of dicts: {title, url, score, domain, subreddit}
-    url = the actual video link the post points to (not the Reddit permalink).
+    Returns list of dicts: {title, url, score, adj_score, domain, subreddit}
     """
     VIDEO_DOMAINS = {
-        "streamable.com", "v.redd.it", "youtu.be", "youtube.com",
-        "www.youtube.com", "twitter.com", "x.com", "instagram.com",
-        "clips.twitch.tv", "gfycat.com", "medal.tv",
+        "streamable.com", "www.streamable.com",
+        "v.redd.it",
+        "youtu.be", "youtube.com", "www.youtube.com",
+        "clips.twitch.tv",
     }
 
     data = await _fetch_json(
         REDDIT_TOP_URL.format(sub=subreddit),
         headers=REDDIT_HEADERS,
-        params={"t": "day", "limit": str(limit)},
+        params={"t": time_range, "limit": str(limit)},
     )
     if not data:
         return []
 
+    flair_keywords = SUBREDDIT_FLAIR_KEYWORDS.get(subreddit, ["highlight"])
     posts = []
     try:
         for child in data.get("data", {}).get("children", []):
-            post   = child.get("data", {})
-            flair  = (post.get("link_flair_text") or "").lower()
-            title  = post.get("title", "")
-            domain = post.get("domain", "")
-            score  = post.get("score", 0)
-            url    = post.get("url", "")  # actual video URL, not permalink
+            post      = child.get("data", {})
+            flair     = (post.get("link_flair_text") or "").lower()
+            title     = post.get("title", "")
+            domain    = post.get("domain", "")
+            score     = post.get("score", 0)
+            url       = post.get("url", "")
+            permalink = post.get("permalink", "")  # e.g. /r/nba/comments/abc/title
 
             if not url or score < min_score:
                 continue
 
-            if highlight_flair_only:
-                if "highlight" not in flair:
+            if use_flair_config:
+                if not any(kw in flair for kw in flair_keywords):
                     continue
             else:
-                # Catch-all: require a known video domain
                 if domain not in VIDEO_DOMAINS:
                     continue
+
+            # Title-based scoring — drops noise, penalises controversy, boosts plays
+            adj_score = _score_title(title, score)
+            if adj_score == 0.0:
+                continue
+
+            # Convert v.redd.it → vxreddit so Discord can embed inline
+            if domain == "v.redd.it" and permalink:
+                url = f"{_VXREDDIT_BASE}{permalink}"
 
             posts.append({
                 "title":     title,
                 "url":       url,
                 "score":     score,
+                "adj_score": adj_score,
                 "domain":    domain,
                 "subreddit": subreddit,
             })
     except Exception as e:
         logger.error(f"Reddit top plays parse error (r/{subreddit}): {e}")
 
-    posts.sort(key=lambda p: p["score"], reverse=True)
+    posts.sort(key=lambda p: p["adj_score"], reverse=True)
     return posts
 
 
@@ -430,54 +528,65 @@ async def _build_top_plays(
     """
     Assemble a cross-sport top plays list for the briefing.
 
-    1. Fetches Highlight-flair posts from each configured league's subreddit.
-    2. Fetches r/sports as a catch-all for sports not covered by a specific
-       subreddit (tennis, cricket, Olympics, etc.) — requires ≥1000 upvotes.
-    3. Deduplicates by URL.
-    4. Sorts YouTube links first (they auto-embed inline in Discord/Telegram),
-       then all others — both groups sorted by score descending.
-    5. Returns top `total` clips.
+    1. Fetches posts from each configured league subreddit using per-sub flair
+       keywords and upvote floors from SUBREDDIT_FLAIR_KEYWORDS / SUBREDDIT_MIN_SCORE.
+    2. Fetches r/sports catch-all for sports without a dedicated sub.
+    3. Applies title boost/penalty scoring (_score_title) to rank plays over
+       controversy and noise.
+    4. Deduplicates by URL.
+    5. If fewer than 5 clips pass after filtering, automatically retries with
+       t=week (72-hour fallback) to cover All-Star breaks, bye weeks, etc.
+    6. Converts v.redd.it URLs → vxreddit.com for Discord inline embedding.
+    7. Returns top `total` clips sorted by adj_score descending.
     """
-    CATCHALL_MIN_SCORE = 1000
+    async def _fetch_all(time_range: str) -> List[Dict[str, Any]]:
+        seen_urls: set = set()
+        clips: List[Dict[str, Any]] = []
 
-    seen_urls: set = set()
-    all_clips: List[Dict[str, Any]] = []
+        # ── League-specific subreddits ────────────────────────────────────
+        tasks, subs = [], []
+        for league_slug in leagues:
+            sub = LEAGUE_SUBREDDITS.get(league_slug.lower())
+            if sub:
+                min_sc = SUBREDDIT_MIN_SCORE.get(sub, 200)
+                tasks.append(_fetch_reddit_top_plays_sub(
+                    sub, limit=50, use_flair_config=True,
+                    min_score=min_sc, time_range=time_range,
+                ))
+                subs.append(sub)
 
-    # ── League-specific subreddits (Highlight flair only) ─────────────────
-    tasks = []
-    slugs = []
-    for league_slug in leagues:
-        sub = LEAGUE_SUBREDDITS.get(league_slug.lower())
-        if sub:
-            tasks.append(_fetch_reddit_top_plays_sub(sub, limit=25, highlight_flair_only=True))
-            slugs.append(league_slug)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for posts in results:
+            if isinstance(posts, list):
+                for p in posts:
+                    if p["url"] not in seen_urls:
+                        seen_urls.add(p["url"])
+                        clips.append(p)
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for posts in results:
-        if isinstance(posts, list):
-            for p in posts:
-                if p["url"] not in seen_urls:
-                    seen_urls.add(p["url"])
-                    all_clips.append(p)
+        # ── r/sports catch-all ────────────────────────────────────────────
+        catchall = await _fetch_reddit_top_plays_sub(
+            "sports", limit=50, use_flair_config=False,
+            min_score=SUBREDDIT_MIN_SCORE["sports"],
+            time_range=time_range,
+        )
+        for p in catchall:
+            if p["url"] not in seen_urls:
+                seen_urls.add(p["url"])
+                clips.append(p)
 
-    # ── r/sports catch-all (any video domain, ≥1000 upvotes) ─────────────
-    catchall = await _fetch_reddit_top_plays_sub(
-        "sports", limit=50,
-        highlight_flair_only=False,
-        min_score=CATCHALL_MIN_SCORE,
-    )
-    for p in catchall:
-        if p["url"] not in seen_urls:
-            seen_urls.add(p["url"])
-            all_clips.append(p)
+        return clips
 
-    # ── Sort: YouTube links first (inline embed), then others — both by score
-    yt_clips    = sorted([p for p in all_clips if p["domain"] in _YOUTUBE_DOMAINS],
-                         key=lambda p: p["score"], reverse=True)
-    other_clips = sorted([p for p in all_clips if p["domain"] not in _YOUTUBE_DOMAINS],
-                         key=lambda p: p["score"], reverse=True)
+    # ── Primary fetch (today) ─────────────────────────────────────────────
+    all_clips = await _fetch_all("day")
 
-    return (yt_clips + other_clips)[:total]
+    # ── 72-hour fallback if pool is too thin ──────────────────────────────
+    if len(all_clips) < 5:
+        logger.info("Top plays: thin daily pool (%d clips), expanding to week", len(all_clips))
+        all_clips = await _fetch_all("week")
+
+    # ── Sort by adjusted score and return top N ───────────────────────────
+    all_clips.sort(key=lambda p: p["adj_score"], reverse=True)
+    return all_clips[:total]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -794,24 +903,23 @@ async def section_sports_briefing(_now, platform: str = "telegram") -> str:
     # Sources Reddit highlight-flair clips from league subreddits + r/sports
     # catch-all. YouTube links sorted first for inline embed in Discord.
     if reddit_enabled:
-        # On Discord, fetch a larger pool so we have enough after filtering to
-        # inline-playable domains (v.redd.it and others don't embed in Discord).
-        _reddit_fetch_total = 25 if platform == "discord" else 10
-        clips = await _build_top_plays(leagues_to_show, total=_reddit_fetch_total)
-        if platform == "discord":
-            # Keep only clips that will actually play inline in Discord
-            clips = [c for c in clips if c["domain"] in _DISCORD_INLINE_DOMAINS][:10]
+        clips = await _build_top_plays(leagues_to_show, total=10)
         if clips:
             plays_lines = ["\n🎬 <b>Top Plays</b>"]
-            for i, clip in enumerate(clips, 1):
-                title = clip["title"]
-                if len(title) > 80:
-                    title = title[:77] + "…"
-                if platform == "discord":
-                    # Discord auto-embeds raw video URLs for supported domains
+            if platform == "discord":
+                # v.redd.it URLs already converted to vxreddit.com — post as bare
+                # URLs so Discord auto-embeds them as inline playable video.
+                for i, clip in enumerate(clips, 1):
+                    title = clip["title"]
+                    if len(title) > 80:
+                        title = title[:77] + "…"
                     plays_lines.append(f"{i}. {title}")
                     plays_lines.append(clip["url"])
-                else:
+            else:
+                for i, clip in enumerate(clips, 1):
+                    title = clip["title"]
+                    if len(title) > 80:
+                        title = title[:77] + "…"
                     plays_lines.append(f'  {i}. <a href="{clip["url"]}">{_html_escape.escape(title)}</a>')
             section_lines.extend(plays_lines)
 

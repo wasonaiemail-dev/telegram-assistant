@@ -574,9 +574,7 @@ async def _discord_briefing(ctx) -> None:
 async def _discord_topplays(ctx) -> None:
     """!topplays — fetch Reddit top plays for user's configured leagues (Discord inline-only)."""
     try:
-        from plugins.sports.briefing import (
-            _build_top_plays, _DISCORD_INLINE_DOMAINS, LEAGUE_SUBREDDITS,
-        )
+        from plugins.sports.briefing import _build_top_plays, LEAGUE_SUBREDDITS
         from plugins.sports.config import load_sports_settings
 
         settings = load_sports_settings()
@@ -596,15 +594,15 @@ async def _discord_topplays(ctx) -> None:
 
         await ctx.reply_html("🎬 <b>Fetching top plays…</b>")
 
-        clips = await _build_top_plays(leagues_to_show, total=25)
-        inline_clips = [c for c in clips if c["domain"] in _DISCORD_INLINE_DOMAINS][:10]
+        clips = await _build_top_plays(leagues_to_show, total=10)
 
-        if not inline_clips:
-            await ctx.reply_html("😔 No inline-playable clips found right now. Try again later.")
+        if not clips:
+            await ctx.reply_html("😔 No top plays found right now. Try again later.")
             return
 
+        # v.redd.it URLs already converted to vxreddit.com inside _build_top_plays
         lines = ["🎬 **Top Plays**"]
-        for i, clip in enumerate(inline_clips, 1):
+        for i, clip in enumerate(clips, 1):
             title = clip["title"]
             if len(title) > 80:
                 title = title[:77] + "…"
