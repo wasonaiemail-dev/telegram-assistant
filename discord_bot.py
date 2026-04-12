@@ -577,16 +577,22 @@ async def _discord_topplays(ctx) -> None:
         from plugins.sports.briefing import (
             _build_top_plays, _DISCORD_INLINE_DOMAINS, LEAGUE_SUBREDDITS,
         )
-        from core.userdata import load_user_data
+        from plugins.sports.config import load_sports_settings
 
-        uid      = str(ctx.user_id)
-        udata    = load_user_data()
-        settings = udata.get(uid, {}).get("settings", {})
+        settings = load_sports_settings()
 
         # Resolve leagues — same logic as briefing
-        fav_leagues = settings.get("favorite_leagues", [])
-        all_league_slugs = list(LEAGUE_SUBREDDITS.keys())
-        leagues_to_show = fav_leagues if fav_leagues else all_league_slugs
+        favorite_leagues = settings.get("favorite_leagues", [])
+        favorite_teams   = settings.get("favorite_teams", [])
+        leagues_to_show  = list(favorite_leagues)
+        for ft in favorite_teams:
+            league = ft.get("league", "").lower()
+            if league and league not in leagues_to_show:
+                leagues_to_show.append(league)
+
+        # Fall back to all Reddit-sourced leagues if none configured
+        if not leagues_to_show:
+            leagues_to_show = list(LEAGUE_SUBREDDITS.keys())
 
         await ctx.reply_html("🎬 <b>Fetching top plays…</b>")
 
