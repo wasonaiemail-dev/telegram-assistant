@@ -319,6 +319,10 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
         await _discord_topplays(ctx)
         return True
 
+    if cmd == "topplaysdebug":
+        await _discord_topplays_debug(ctx)
+        return True
+
     if cmd == "help":
         await _discord_help(ctx, loaded_plugins)
         return True
@@ -613,6 +617,130 @@ async def _discord_topplays(ctx) -> None:
     except Exception as e:
         logger.error(f"discord !topplays error: {e}", exc_info=True)
         await ctx.reply("❌ Could not fetch top plays right now.")
+
+
+async def _discord_topplays_debug(ctx) -> None:
+    """
+    !topplaysdebug — diagnostic command that shows exactly what Reddit returns
+    for each subreddit from Railway's servers. Use this to diagnose IP blocks,
+    rate limits, or filter issues.
+    """
+    import aiohttp
+    import asyncio
+
+    try:
+        from plugins.sports.briefing import (
+            LEAGUE_SUBREDDITS, SUBREDDIT_MIN_SCORE,
+            REDDIT_HEADERS, _score_title,
+        )
+    except Exception as e:
+        await ctx.reply(f"❌ Import error: {e}")
+        return
+
+    await ctx.reply_html("🔍 <b>Running top plays diagnostics…</b>")
+
+    VIDEO_DOMAINS = {
+        "streamable.com", "www.streamable.com",
+        "v.redd.it",
+        "youtu.be", "youtube.com", "www.youtube.com",
+        "clips.twitch.tv",
+    }
+
+    timeout = aiohttp.ClientTimeout(total=20)
+    lines = ["🔍 **Top Plays Debug** — per-subreddit results\n"]
+
+    # Test a focused set of subreddits
+    test_subs = [
+        ("nba", "nba"), ("nfl", "nfl"), ("mlb", "baseball"),
+        ("nhl", "hockey"), ("soccer", "soccer"), ("", "sports"),
+    ]
+
+    async def probe_sub(label: str, sub: str) -> str:
+        url = f"https://www.reddit.com/r/{sub}/top.json"
+        url_old = f"https://old.reddit.com/r/{sub}/top.json"
+        status_www = "?"
+        status_old = "?"
+        raw_count = 0
+        domain_count = 0
+        score_count = 0
+        title_count = 0
+        min_sc = SUBREDDIT_MIN_SCORE.get(sub, 200)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # Try www.reddit.com
+                try:
+                    async with session.get(
+                        url,
+                        headers=REDDIT_HEADERS,
+                        params={"t": "day", "limit": "50"},
+                        ssl=False,
+                    ) as resp:
+                        status_www = resp.status
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            children = data.get("data", {}).get("children", [])
+                            raw_count = len(children)
+                            for child in children:
+                                p = child.get("data", {})
+                                dom = p.get("domain", "")
+                                sc = p.get("score", 0)
+                                title = p.get("title", "")
+                                if dom in VIDEO_DOMAINS:
+                                    domain_count += 1
+                                    if sc >= min_sc:
+                                        score_count += 1
+                                        if _score_title(title, sc) > 0.0:
+                                            title_count += 1
+                except Exception as e_www:
+                    status_www = f"ERR:{e_www}"
+
+                # Try old.reddit.com only if www failed
+                if status_www != 200:
+                    try:
+                        async with session.get(
+                            url_old,
+                            headers=REDDIT_HEADERS,
+                            params={"t": "day", "limit": "50"},
+                            ssl=False,
+                        ) as resp2:
+                            status_old = resp2.status
+                            if resp2.status == 200:
+                                data2 = await resp2.json(content_type=None)
+                                children2 = data2.get("data", {}).get("children", [])
+                                raw_count = len(children2)
+                                for child in children2:
+                                    p = child.get("data", {})
+                                    dom = p.get("domain", "")
+                                    sc = p.get("score", 0)
+                                    title = p.get("title", "")
+                                    if dom in VIDEO_DOMAINS:
+                                        domain_count += 1
+                                        if sc >= min_sc:
+                                            score_count += 1
+                                            if _score_title(title, sc) > 0.0:
+                                                title_count += 1
+                    except Exception as e_old:
+                        status_old = f"ERR:{e_old}"
+        except Exception as e_outer:
+            return f"r/{sub}: OUTER ERR {e_outer}"
+
+        tag = label or sub
+        old_note = f" | old:{status_old}" if status_www != 200 else ""
+        return (
+            f"r/{sub} ({tag}): HTTP {status_www}{old_note} | "
+            f"raw={raw_count} | domain={domain_count} | "
+            f"score≥{min_sc}: {score_count} | title_pass={title_count}"
+        )
+
+    tasks = [probe_sub(label, sub) for label, sub in test_subs]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for r in results:
+        lines.append(str(r))
+
+    lines.append("\n_Done. If HTTP is 200 but clips=0, the score floor is too high. If HTTP ≠ 200, Railway IP is blocked._")
+    await ctx.reply("\n".join(lines))
 
 
 async def _discord_help(ctx, loaded_plugins) -> None:

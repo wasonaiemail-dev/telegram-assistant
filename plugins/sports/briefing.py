@@ -48,9 +48,19 @@ ESPN_SUMMARY_URL = (
 
 # ── Reddit ────────────────────────────────────────────────────────────────────
 
-REDDIT_TOP_URL = "https://www.reddit.com/r/{sub}/top.json"
-REDDIT_HEADERS = {"User-Agent": "alfred-bot/1.0 (personal morning briefing)"}
-# Reddit requires a User-Agent header to avoid 429 rate-limit responses.
+REDDIT_TOP_URL     = "https://www.reddit.com/r/{sub}/top.json"
+REDDIT_TOP_URL_OLD = "https://old.reddit.com/r/{sub}/top.json"
+# Reddit requires a meaningful User-Agent. The format Reddit recommends for
+# bots is: <platform>:<app_id>:<version> (by /u/<username>)
+# Using a browser-style UA increases success rate from cloud IP ranges.
+REDDIT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (compatible; AlfredBot/1.0; "
+        "+https://github.com/alfred-bot; personal morning briefing)"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 # League → subreddit
 LEAGUE_SUBREDDITS: Dict[str, str] = {
@@ -183,7 +193,7 @@ TOP_PLAYERS_MAX       = 6
 COMPOSITE_THRESHOLD   = 25.0   # extra players shown only if score >= this
 
 # HTTP timeout
-_TIMEOUT = aiohttp.ClientTimeout(total=10)
+_TIMEOUT = aiohttp.ClientTimeout(total=20)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -198,10 +208,12 @@ async def _fetch_json(
     """Fetch URL and return parsed JSON. Returns None on any failure."""
     try:
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.get(url, headers=headers, params=params) as resp:
+            async with session.get(
+                url, headers=headers, params=params, ssl=False
+            ) as resp:
                 if resp.status == 200:
                     return await resp.json(content_type=None)
-                logger.warning(f"HTTP {resp.status}: {url}")
+                logger.warning(f"HTTP {resp.status} from {url}")
     except asyncio.TimeoutError:
         logger.warning(f"Timeout fetching: {url}")
     except Exception as e:
@@ -482,7 +494,17 @@ async def _fetch_reddit_top_plays_sub(
         headers=REDDIT_HEADERS,
         params={"t": time_range, "limit": str(limit)},
     )
+    # Fallback: old.reddit.com bypasses some Cloudflare/IP restrictions that
+    # www.reddit.com enforces more aggressively on cloud server IP ranges.
     if not data:
+        logger.info(f"Reddit www failed for r/{subreddit}, trying old.reddit.com")
+        data = await _fetch_json(
+            REDDIT_TOP_URL_OLD.format(sub=subreddit),
+            headers=REDDIT_HEADERS,
+            params={"t": time_range, "limit": str(limit)},
+        )
+    if not data:
+        logger.warning(f"Reddit fetch failed for r/{subreddit} (both www and old)")
         return []
 
     posts = []
