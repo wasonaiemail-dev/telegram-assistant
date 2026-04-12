@@ -26,9 +26,11 @@ API QUOTA NOTES (shown to buyer in /sports → Briefing Settings):
 
 import asyncio
 import aiohttp
+import base64
 import html as _html_escape
 import logging
 import os
+import time as _time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote_plus
@@ -48,11 +50,18 @@ ESPN_SUMMARY_URL = (
 
 # ── Reddit ────────────────────────────────────────────────────────────────────
 
-REDDIT_TOP_URL     = "https://www.reddit.com/r/{sub}/top.json"
-REDDIT_TOP_URL_OLD = "https://old.reddit.com/r/{sub}/top.json"
-# Reddit requires a meaningful User-Agent. The format Reddit recommends for
-# bots is: <platform>:<app_id>:<version> (by /u/<username>)
-# Using a browser-style UA increases success rate from cloud IP ranges.
+REDDIT_TOP_URL      = "https://www.reddit.com/r/{sub}/top.json"
+REDDIT_TOP_URL_OLD  = "https://old.reddit.com/r/{sub}/top.json"
+REDDIT_OAUTH_URL    = "https://oauth.reddit.com/r/{sub}/top.json"
+REDDIT_TOKEN_URL    = "https://www.reddit.com/api/v1/access_token"
+
+# OAuth credentials — set REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET in Railway.
+# When present, requests route through oauth.reddit.com which is NOT blocked
+# by Reddit's Cloudflare IP-range enforcement on cloud servers.
+REDDIT_CLIENT_ID     = os.environ.get("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "")
+
+# Reddit requires a meaningful User-Agent for all requests (OAuth and anon).
 REDDIT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (compatible; AlfredBot/1.0; "
@@ -61,6 +70,58 @@ REDDIT_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
 }
+
+# ── OAuth token cache (module-level, refreshed every ~1 hour) ─────────────────
+_reddit_access_token: Optional[str] = None
+_reddit_token_expiry: float = 0.0
+
+
+async def _get_reddit_oauth_token() -> Optional[str]:
+    """
+    Fetch (or return cached) a Reddit OAuth2 application-only access token.
+
+    Uses the "client_credentials" grant — no user login required, just the
+    app's client_id and client_secret. Token is valid for ~1 hour and is
+    cached at module level so we don't re-auth on every subreddit fetch.
+
+    Returns None if credentials are missing or the token request fails.
+    """
+    global _reddit_access_token, _reddit_token_expiry
+
+    if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET:
+        return None
+
+    # Return cached token if still valid (with 60s safety buffer)
+    if _reddit_access_token and _time.time() < _reddit_token_expiry - 60:
+        return _reddit_access_token
+
+    auth_str = base64.b64encode(
+        f"{REDDIT_CLIENT_ID}:{REDDIT_CLIENT_SECRET}".encode()
+    ).decode()
+
+    try:
+        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
+            async with session.post(
+                REDDIT_TOKEN_URL,
+                headers={
+                    "Authorization": f"Basic {auth_str}",
+                    "User-Agent": REDDIT_HEADERS["User-Agent"],
+                },
+                data={"grant_type": "client_credentials"},
+                ssl=False,
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    _reddit_access_token = data.get("access_token")
+                    _reddit_token_expiry = _time.time() + data.get("expires_in", 3600)
+                    logger.info("Reddit OAuth token refreshed successfully")
+                    return _reddit_access_token
+                else:
+                    logger.warning(f"Reddit OAuth token fetch failed: HTTP {resp.status}")
+    except Exception as e:
+        logger.error(f"Reddit OAuth token error: {e}")
+
+    return None
 
 # League → subreddit
 LEAGUE_SUBREDDITS: Dict[str, str] = {
@@ -489,22 +550,45 @@ async def _fetch_reddit_top_plays_sub(
         "clips.twitch.tv",
     }
 
-    data = await _fetch_json(
-        REDDIT_TOP_URL.format(sub=subreddit),
-        headers=REDDIT_HEADERS,
-        params={"t": time_range, "limit": str(limit)},
-    )
-    # Fallback: old.reddit.com bypasses some Cloudflare/IP restrictions that
-    # www.reddit.com enforces more aggressively on cloud server IP ranges.
+    params = {"t": time_range, "limit": str(limit)}
+
+    # ── Preferred path: Reddit OAuth (bypasses cloud IP blocks) ──────────────
+    # oauth.reddit.com routes through a different CDN path that is NOT blocked
+    # for cloud server IP ranges (Railway, AWS, etc.) the way www.reddit.com is.
+    token = await _get_reddit_oauth_token()
+    if token:
+        oauth_headers = {**REDDIT_HEADERS, "Authorization": f"Bearer {token}"}
+        data = await _fetch_json(
+            REDDIT_OAUTH_URL.format(sub=subreddit),
+            headers=oauth_headers,
+            params=params,
+        )
+        if data:
+            logger.debug(f"Reddit OAuth fetch OK for r/{subreddit}")
+        else:
+            logger.warning(f"Reddit OAuth fetch failed for r/{subreddit}, falling back to anon")
+    else:
+        data = None
+
+    # ── Fallback path: anonymous www.reddit.com (works locally, 403 on Railway) ──
+    if not data:
+        data = await _fetch_json(
+            REDDIT_TOP_URL.format(sub=subreddit),
+            headers=REDDIT_HEADERS,
+            params=params,
+        )
+
+    # ── Last resort: old.reddit.com (different CDN path, sometimes less blocked) ──
     if not data:
         logger.info(f"Reddit www failed for r/{subreddit}, trying old.reddit.com")
         data = await _fetch_json(
             REDDIT_TOP_URL_OLD.format(sub=subreddit),
             headers=REDDIT_HEADERS,
-            params={"t": time_range, "limit": str(limit)},
+            params=params,
         )
+
     if not data:
-        logger.warning(f"Reddit fetch failed for r/{subreddit} (both www and old)")
+        logger.warning(f"Reddit fetch failed for r/{subreddit} (OAuth + www + old all failed)")
         return []
 
     posts = []

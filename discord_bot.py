@@ -637,7 +637,13 @@ async def _discord_topplays_debug(ctx) -> None:
         await ctx.reply(f"❌ Import error: {e}")
         return
 
-    await ctx.reply_html("🔍 <b>Running top plays diagnostics…</b>")
+    # Check OAuth status first
+    from plugins.sports.briefing import REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, _get_reddit_oauth_token
+    has_creds = bool(REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET)
+    oauth_token = await _get_reddit_oauth_token() if has_creds else None
+    oauth_status = "✅ token OK" if oauth_token else ("❌ fetch failed" if has_creds else "⚠️ no credentials (set REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET in Railway)")
+
+    await ctx.reply_html(f"🔍 <b>Running top plays diagnostics…</b>\nOAuth: {oauth_status}")
 
     VIDEO_DOMAINS = {
         "streamable.com", "www.streamable.com",
@@ -656,8 +662,10 @@ async def _discord_topplays_debug(ctx) -> None:
     ]
 
     async def probe_sub(label: str, sub: str) -> str:
+        url_oauth = f"https://oauth.reddit.com/r/{sub}/top.json"
         url = f"https://www.reddit.com/r/{sub}/top.json"
         url_old = f"https://old.reddit.com/r/{sub}/top.json"
+        status_oauth = "-"
         status_www = "?"
         status_old = "?"
         raw_count = 0
@@ -666,71 +674,73 @@ async def _discord_topplays_debug(ctx) -> None:
         title_count = 0
         min_sc = SUBREDDIT_MIN_SCORE.get(sub, 200)
 
+        def _tally(children_list):
+            nonlocal raw_count, domain_count, score_count, title_count
+            raw_count = len(children_list)
+            for child in children_list:
+                p = child.get("data", {})
+                dom = p.get("domain", "")
+                sc = p.get("score", 0)
+                title = p.get("title", "")
+                if dom in VIDEO_DOMAINS:
+                    domain_count += 1
+                    if sc >= min_sc:
+                        score_count += 1
+                        if _score_title(title, sc) > 0.0:
+                            title_count += 1
+
+        params_r = {"t": "day", "limit": "50"}
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                # Try www.reddit.com
-                try:
-                    async with session.get(
-                        url,
-                        headers=REDDIT_HEADERS,
-                        params={"t": "day", "limit": "50"},
-                        ssl=False,
-                    ) as resp:
-                        status_www = resp.status
-                        if resp.status == 200:
-                            data = await resp.json(content_type=None)
-                            children = data.get("data", {}).get("children", [])
-                            raw_count = len(children)
-                            for child in children:
-                                p = child.get("data", {})
-                                dom = p.get("domain", "")
-                                sc = p.get("score", 0)
-                                title = p.get("title", "")
-                                if dom in VIDEO_DOMAINS:
-                                    domain_count += 1
-                                    if sc >= min_sc:
-                                        score_count += 1
-                                        if _score_title(title, sc) > 0.0:
-                                            title_count += 1
-                except Exception as e_www:
-                    status_www = f"ERR:{e_www}"
-
-                # Try old.reddit.com only if www failed
-                if status_www != 200:
+                # 1. OAuth (bypasses cloud IP blocks)
+                if oauth_token:
                     try:
-                        async with session.get(
-                            url_old,
-                            headers=REDDIT_HEADERS,
-                            params={"t": "day", "limit": "50"},
-                            ssl=False,
-                        ) as resp2:
-                            status_old = resp2.status
-                            if resp2.status == 200:
-                                data2 = await resp2.json(content_type=None)
-                                children2 = data2.get("data", {}).get("children", [])
-                                raw_count = len(children2)
-                                for child in children2:
-                                    p = child.get("data", {})
-                                    dom = p.get("domain", "")
-                                    sc = p.get("score", 0)
-                                    title = p.get("title", "")
-                                    if dom in VIDEO_DOMAINS:
-                                        domain_count += 1
-                                        if sc >= min_sc:
-                                            score_count += 1
-                                            if _score_title(title, sc) > 0.0:
-                                                title_count += 1
-                    except Exception as e_old:
-                        status_old = f"ERR:{e_old}"
+                        oauth_h = {**REDDIT_HEADERS, "Authorization": f"Bearer {oauth_token}"}
+                        async with session.get(url_oauth, headers=oauth_h, params=params_r, ssl=False) as r:
+                            status_oauth = r.status
+                            if r.status == 200:
+                                d = await r.json(content_type=None)
+                                _tally(d.get("data", {}).get("children", []))
+                    except Exception as e_o:
+                        status_oauth = f"ERR"
+
+                # 2. Anonymous www.reddit.com
+                if status_oauth not in (200,) or not oauth_token:
+                    try:
+                        async with session.get(url, headers=REDDIT_HEADERS, params=params_r, ssl=False) as r:
+                            status_www = r.status
+                            if r.status == 200:
+                                d = await r.json(content_type=None)
+                                _tally(d.get("data", {}).get("children", []))
+                    except Exception as e_w:
+                        status_www = "ERR"
+
+                # 3. old.reddit.com last resort
+                if status_oauth not in (200,) and status_www != 200:
+                    try:
+                        async with session.get(url_old, headers=REDDIT_HEADERS, params=params_r, ssl=False) as r:
+                            status_old = r.status
+                            if r.status == 200:
+                                d = await r.json(content_type=None)
+                                _tally(d.get("data", {}).get("children", []))
+                    except Exception as e_ol:
+                        status_old = "ERR"
         except Exception as e_outer:
             return f"r/{sub}: OUTER ERR {e_outer}"
 
         tag = label or sub
-        old_note = f" | old:{status_old}" if status_www != 200 else ""
+        parts = []
+        if oauth_token:
+            parts.append(f"oauth:{status_oauth}")
+        if status_oauth not in (200,) or not oauth_token:
+            parts.append(f"www:{status_www}")
+        if status_oauth not in (200,) and status_www != 200:
+            parts.append(f"old:{status_old}")
+        status_str = " | ".join(parts)
         return (
-            f"r/{sub} ({tag}): HTTP {status_www}{old_note} | "
-            f"raw={raw_count} | domain={domain_count} | "
-            f"score≥{min_sc}: {score_count} | title_pass={title_count}"
+            f"r/{sub} ({tag}): {status_str} | "
+            f"raw={raw_count} domain={domain_count} "
+            f"score≥{min_sc}:{score_count} title✓:{title_count}"
         )
 
     tasks = [probe_sub(label, sub) for label, sub in test_subs]

@@ -747,6 +747,13 @@ async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _f(update, context)
 
 
+async def cmd_synctasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.sync_tasks import cmd_synctasks as _f
+    await _f(update, context)
+
+
 async def cmd_habits(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update):
         return
@@ -877,6 +884,9 @@ async def _job_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def _job_event_prep(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
+        from core.data import load_data, get_event_prep_settings
+        if not get_event_prep_settings(load_data()).get("enabled", True):
+            return  # Buyer disabled nightly event prep in /setup
         from features.event_prep import send_event_prep
         await send_event_prep(context, ALLOWED_USER_ID)
     except Exception as e:
@@ -936,6 +946,15 @@ async def _job_meal_adherence_check(context: ContextTypes.DEFAULT_TYPE) -> None:
         await send_meal_adherence_check(ctx)
     except Exception as e:
         logger.error(f"job_meal_adherence error: {e}")
+
+
+async def _job_auto_sync_tasks(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """7:05 AM job — sends a consolidated Google Tasks list summary."""
+    try:
+        from features.sync_tasks import auto_sync_tasks
+        await auto_sync_tasks(context)
+    except Exception as e:
+        logger.error(f"job_auto_sync_tasks error: {e}")
 
 
 async def _job_advance_recurring(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -998,6 +1017,15 @@ def _schedule_jobs(job_queue: JobQueue) -> None:
         job_google_health_check,
         time=dtime(_briefing_h, max(0, _briefing_m - 10), tzinfo=tz),
         name="google_health_check",
+    )
+    # auto_sync_tasks fires 5 minutes after the morning briefing
+    _sync_m = _briefing_m + 5
+    _sync_h = _briefing_h + _sync_m // 60
+    _sync_m = _sync_m % 60
+    job_queue.run_daily(
+        _job_auto_sync_tasks,
+        time=dtime(_sync_h % 24, _sync_m, tzinfo=tz),
+        name="auto_sync_tasks",
     )
     job_queue.run_daily(
         _job_habit_nudge,
@@ -1209,6 +1237,7 @@ def main() -> None:
     app.add_handler(CommandHandler("help",       cmd_help))
     app.add_handler(CommandHandler("briefing",   cmd_briefing))
     app.add_handler(CommandHandler("todos",      cmd_todos))
+    app.add_handler(CommandHandler("synctasks",  cmd_synctasks))
     app.add_handler(CommandHandler("notes",      cmd_notes))
     app.add_handler(CommandHandler("shopping",   cmd_shopping))
     app.add_handler(CommandHandler("reminders",  cmd_reminders))
