@@ -27,28 +27,28 @@ UNMIGRATED section will be empty.
 
 MIGRATION CHECKLIST
 -------------------
-  MIGRATED (Phase 4):
+  MIGRATED (Phase 4 / 4C — all features work on Discord via !command and NL):
     [x] Sports plugin (via plugin_loader dispatch)
-    [ ] ask / unknown
-    [ ] todos
-    [ ] notes
-    [ ] reminders
-    [ ] shopping
-    [ ] calendar
-    [ ] habits
-    [ ] gifts
-    [ ] contacts
-    [ ] meals
-    [ ] workout
-    [ ] journal
-    [ ] reply_assist
-    [ ] mood
-    [ ] links
-    [ ] export
-    [ ] memory
-    [ ] briefing
-    [ ] weather
-    [ ] weekly_summary
+    [x] ask / unknown
+    [x] todos
+    [x] notes
+    [x] reminders
+    [x] shopping
+    [x] calendar
+    [x] habits
+    [x] gifts
+    [x] contacts
+    [x] meals          — Phase 4C: !meals added to discord_bot.py
+    [x] workout        — Phase 4C: !workout added to discord_bot.py
+    [x] journal        — Phase 4C: !journal added to discord_bot.py
+    [x] reply_assist   — Phase 4C: !reply added to discord_bot.py
+    [x] mood
+    [x] links
+    [x] export
+    [x] memory
+    [x] briefing
+    [x] weather
+    [x] weekly_summary — Phase 4C: !weekly added to discord_bot.py
 """
 
 from __future__ import annotations

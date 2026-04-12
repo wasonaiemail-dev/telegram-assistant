@@ -343,6 +343,72 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
         await _discord_setup(ctx)
         return True
 
+    # ── Phase 4C commands ────────────────────────────────────────────────────
+
+    if cmd == "meals":
+        try:
+            from features.meals import cmd_meals
+            await cmd_meals(ctx)
+        except Exception as e:
+            logger.error(f"Discord !meals error: {e}")
+            await ctx.reply("❌ Could not load meal plan right now.")
+        return True
+
+    if cmd == "workout":
+        try:
+            from features.workout import cmd_workout
+            await cmd_workout(ctx)
+        except Exception as e:
+            logger.error(f"Discord !workout error: {e}")
+            await ctx.reply("❌ Could not load workout info right now.")
+        return True
+
+    if cmd == "journal":
+        try:
+            from features.journal import cmd_journal
+            await cmd_journal(ctx)
+        except Exception as e:
+            logger.error(f"Discord !journal error: {e}")
+            await ctx.reply("❌ Could not start journal right now.")
+        return True
+
+    if cmd == "reply":
+        # Reply Assist — pass message text through the intent classifier
+        if args_str:
+            try:
+                from core.intent import classify
+                from core.alfred_dispatch import alfred_dispatch
+                intent_result = await classify(f"draft a reply to: {args_str}")
+                await alfred_dispatch(intent_result, ctx, loaded_plugins)
+            except Exception as e:
+                logger.error(f"Discord !reply error: {e}")
+                await ctx.reply("❌ Could not draft a reply right now.")
+        else:
+            await ctx.reply(
+                "Paste the message you want to reply to after `!reply`.\n"
+                "Example: `!reply Hey, can we reschedule tomorrow's meeting?`"
+            )
+        return True
+
+    if cmd in ("weekly", "weeklysummary", "summary"):
+        try:
+            from features.summary import send_weekly_summary
+            await ctx.reply("⏳ Building weekly summary…")
+            await send_weekly_summary(ctx)
+        except Exception as e:
+            logger.error(f"Discord !weekly error: {e}")
+            await ctx.reply("❌ Could not generate weekly summary right now.")
+        return True
+
+    if cmd == "synctasks":
+        try:
+            from features.sync_tasks import cmd_synctasks
+            await cmd_synctasks(ctx)
+        except Exception as e:
+            logger.error(f"Discord !synctasks error: {e}")
+            await ctx.reply("❌ Could not load task summary right now.")
+        return True
+
     # Unknown command — fall through to intent classifier
     return False
 
@@ -768,15 +834,27 @@ async def _discord_help(ctx, loaded_plugins) -> None:
         "  !standings [league]    — current standings\n"
         "  !schedule [league]     — upcoming games\n"
         "  !stats [player/team]   — stats lookup\n"
-        "  !leaders [league]      — league leaders\n\n"
-        "<b>Assistant</b>\n"
+        "  !leaders [league]      — league leaders\n"
+        "  !topplays              — Reddit top plays (inline video)\n\n"
+        "<b>Daily Assistant</b>\n"
         "  !ask [question]        — ask me anything\n"
         "  !briefing              — morning briefing\n"
-        "  !topplays              — Reddit top plays (inline video)\n\n"
+        "  !weekly                — weekly summary\n"
+        "  !journal               — start or view journal\n"
+        "  !reply [message]       — draft a reply to a message\n\n"
+        "<b>Health & Fitness</b>\n"
+        "  !workout               — workout program overview\n"
+        "  !meals                 — today's meal plan\n\n"
         "<b>Lists & Tasks</b>\n"
-        "  !todos / !notes / !reminders — coming soon\n\n"
-        "<b>Natural Language</b>\n"
-        "  Just type naturally — \"who leads the NBA in points?\" works.\n\n"
+        "  !todos                 — open todo list\n"
+        "  !notes                 — saved notes\n"
+        "  !reminders             — active reminders\n"
+        "  !synctasks             — full Google Tasks summary\n\n"
+        "<b>Settings</b>\n"
+        "  !setup                 — preferences wizard\n\n"
+        + (f"<b>Plugins</b>\n{plugin_cmds}\n\n" if plugin_cmds else "")
+        + "<b>Natural Language</b>\n"
+        "  Just type naturally — <i>\"log chest day\"</i>, <i>\"what's my todo list?\"</i>, etc.\n\n"
         "Use <code>!</code> or <code>/</code> prefix for commands."
     )
 

@@ -36,7 +36,7 @@
 ### 🔴 Core Build Priorities (after quick wins)
 1. ✅ **Google Tasks Two-Way Sync** — done April 12. `/synctasks` command + `auto_sync_tasks` job at 7:05am. Inherently two-way since Alfred writes directly to Google Tasks.
 2. **Reddit OAuth Setup** — see Immediate Blocker above. One-time config, no code needed.
-3. **Discord Phase 4C** — Meals, Workout, Journal, Reply Assist, Weekly Summary. Full parity required before sale.
+3. ✅ **Discord Phase 4C** — done April 12. Discord now at full feature parity.
 4. **Expense Tracking** — was a core feature, never ported. See Master Plan.
 5. **Sleep Tracking** — `"slept 7 hours"` bypass + `/sleep`. See Master Plan.
 
@@ -126,6 +126,13 @@
   - `/synctasks` command — reads all Alfred Google Tasks lists and returns a consolidated summary: todos (total, overdue, high-priority), each shopping list (count + first 5 items), gift ideas count. Useful after adding items on phone to confirm Alfred sees them.
   - `auto_sync_tasks()` scheduled job — fires 5 minutes after the morning briefing (floats with briefing time, so always 5 min after even if Tyler changes his briefing time in `/setup`). Sends the same list summary automatically each morning.
   - `_job_auto_sync_tasks` wrapper added to `bot.py`. Scheduled in `_schedule_jobs` using `_briefing_h` and `_briefing_m + 5` (with hour rollover). `/synctasks` command handler added and registered.
+
+### Session 12 (cont.) — Discord Phase 4C Complete
+- **Diagnosed Phase 4C gap:** All feature files (meals, workout, journal, reply_assist, summary) already use `ctx: AlfredContext` pattern with zero Telegram-specific code. NL dispatch in `alfred_dispatch.py` already routed all these intents on Discord. The ONLY missing piece was the `!command` fast-path routing in `discord_bot.py`.
+- **Added to `_handle_discord_command`:** `!meals`, `!workout`, `!journal`, `!reply [message]`, `!weekly` (also `!weeklysummary`, `!summary`), `!synctasks` — all with proper error handling.
+- **Rewrote `!help`** to list all commands in categorized sections: Sports, Daily Assistant, Health & Fitness, Lists & Tasks, Settings, Natural Language. Removed stale "coming soon" lines.
+- **Updated `alfred_dispatch.py`** comment checkboxes from `[ ]` to `[x]` for all features — they were already dispatching correctly, just needed a doc update.
+- **Discord is now at full feature parity with Telegram.** Every command and NL intent works on both platforms.
 
 ---
 
