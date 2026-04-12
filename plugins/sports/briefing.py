@@ -343,6 +343,17 @@ async def _fetch_reddit_highlights(
 # ── YouTube domain set for sorting top plays ──────────────────────────────────
 _YOUTUBE_DOMAINS = {"youtu.be", "youtube.com", "www.youtube.com"}
 
+# ── Domains that reliably auto-embed as playable video in Discord ──────────────
+# v.redd.it uses DASH streams (separate audio/video) → no inline playback
+# instagram.com, twitter.com, x.com → require login or don't embed
+# gfycat.com → shut down
+# medal.tv → inconsistent embed support
+_DISCORD_INLINE_DOMAINS = {
+    "youtu.be", "youtube.com", "www.youtube.com",
+    "streamable.com", "www.streamable.com",
+    "clips.twitch.tv",
+}
+
 
 async def _fetch_reddit_top_plays_sub(
     subreddit: str,
@@ -783,7 +794,13 @@ async def section_sports_briefing(_now, platform: str = "telegram") -> str:
     # Sources Reddit highlight-flair clips from league subreddits + r/sports
     # catch-all. YouTube links sorted first for inline embed in Discord.
     if reddit_enabled:
-        clips = await _build_top_plays(leagues_to_show, total=10)
+        # On Discord, fetch a larger pool so we have enough after filtering to
+        # inline-playable domains (v.redd.it and others don't embed in Discord).
+        _reddit_fetch_total = 25 if platform == "discord" else 10
+        clips = await _build_top_plays(leagues_to_show, total=_reddit_fetch_total)
+        if platform == "discord":
+            # Keep only clips that will actually play inline in Discord
+            clips = [c for c in clips if c["domain"] in _DISCORD_INLINE_DOMAINS][:10]
         if clips:
             plays_lines = ["\n🎬 <b>Top Plays</b>"]
             for i, clip in enumerate(clips, 1):
@@ -791,7 +808,7 @@ async def section_sports_briefing(_now, platform: str = "telegram") -> str:
                 if len(title) > 80:
                     title = title[:77] + "…"
                 if platform == "discord":
-                    # Discord auto-embeds raw video URLs
+                    # Discord auto-embeds raw video URLs for supported domains
                     plays_lines.append(f"{i}. {title}")
                     plays_lines.append(clip["url"])
                 else:
