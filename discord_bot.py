@@ -315,6 +315,10 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
         await _discord_briefing(ctx)
         return True
 
+    if cmd == "topplays":
+        await _discord_topplays(ctx)
+        return True
+
     if cmd == "help":
         await _discord_help(ctx, loaded_plugins)
         return True
@@ -567,6 +571,46 @@ async def _discord_briefing(ctx) -> None:
         await ctx.reply("❌ Could not generate briefing right now.")
 
 
+async def _discord_topplays(ctx) -> None:
+    """!topplays — fetch Reddit top plays for user's configured leagues (Discord inline-only)."""
+    try:
+        from plugins.sports.briefing import (
+            _build_top_plays, _DISCORD_INLINE_DOMAINS, LEAGUE_SUBREDDITS,
+        )
+        from core.userdata import load_user_data
+
+        uid      = str(ctx.user_id)
+        udata    = load_user_data()
+        settings = udata.get(uid, {}).get("settings", {})
+
+        # Resolve leagues — same logic as briefing
+        fav_leagues = settings.get("favorite_leagues", [])
+        all_league_slugs = list(LEAGUE_SUBREDDITS.keys())
+        leagues_to_show = fav_leagues if fav_leagues else all_league_slugs
+
+        await ctx.reply_html("🎬 <b>Fetching top plays…</b>")
+
+        clips = await _build_top_plays(leagues_to_show, total=25)
+        inline_clips = [c for c in clips if c["domain"] in _DISCORD_INLINE_DOMAINS][:10]
+
+        if not inline_clips:
+            await ctx.reply_html("😔 No inline-playable clips found right now. Try again later.")
+            return
+
+        lines = ["🎬 **Top Plays**"]
+        for i, clip in enumerate(inline_clips, 1):
+            title = clip["title"]
+            if len(title) > 80:
+                title = title[:77] + "…"
+            lines.append(f"{i}. {title}")
+            lines.append(clip["url"])
+
+        await ctx.reply_html("\n".join(lines))
+    except Exception as e:
+        logger.error(f"discord !topplays error: {e}", exc_info=True)
+        await ctx.reply("❌ Could not fetch top plays right now.")
+
+
 async def _discord_help(ctx, loaded_plugins) -> None:
     """!help — show available commands."""
     plugin_cmds = ""
@@ -585,7 +629,8 @@ async def _discord_help(ctx, loaded_plugins) -> None:
         "  !leaders [league]      — league leaders\n\n"
         "<b>Assistant</b>\n"
         "  !ask [question]        — ask me anything\n"
-        "  !briefing              — morning briefing\n\n"
+        "  !briefing              — morning briefing\n"
+        "  !topplays              — Reddit top plays (inline video)\n\n"
         "<b>Lists & Tasks</b>\n"
         "  !todos / !notes / !reminders — coming soon\n\n"
         "<b>Natural Language</b>\n"
