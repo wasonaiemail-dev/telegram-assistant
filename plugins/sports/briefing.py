@@ -68,22 +68,6 @@ LEAGUE_SUBREDDITS: Dict[str, str] = {
     "ucl":             "Champions_League",
 }
 
-# Per-subreddit flair keywords — a post must match at least one (case-insensitive)
-# r/baseball uses "Video", r/hockey uses "[Video]" — widen from "highlight"-only
-SUBREDDIT_FLAIR_KEYWORDS: Dict[str, List[str]] = {
-    "nba":              ["highlight"],
-    "nfl":              ["highlight"],
-    "baseball":         ["video", "highlight"],
-    "hockey":           ["video", "highlight"],
-    "CFB":              ["highlight"],
-    "CollegeBasketball":["highlight"],
-    "PremierLeague":    ["highlight", "match thread"],
-    "MLS":              ["highlight"],
-    "Bundesliga":       ["highlight"],
-    "LaLiga":           ["highlight"],
-    "soccer":           ["highlight"],
-    "Champions_League": ["highlight"],
-}
 
 # Per-subreddit minimum upvote floor — balances sub size vs. noise
 SUBREDDIT_MIN_SCORE: Dict[str, int] = {
@@ -108,28 +92,52 @@ SUBREDDIT_MIN_SCORE: Dict[str, int] = {
 # word get penalised so they rank below real plays even if they got more upvotes.
 
 _TITLE_PLAY_WORDS = [
-    "dunk", "dunk!", "alley-oop", "layup", "three", "3-pointer", "buzzer",
-    "touchdown", "td", "interception", "catch", "sack", "field goal",
-    "goal", "goals", "finish", "finishes", "shot", "save", "assist",
-    "homer", "home run", "grand slam", "strikeout", "catch",
-    "slam", "block", "steal", "run", "pass", "score", "scores",
-    "hit", "hits", "throw", "throws", "kick", "kicks",
+    # Basketball
+    "dunk", "alley-oop", "layup", "three", "3-pointer", "buzzer",
+    "slam", "block", "steal", "assist",
+    # Football
+    "touchdown", " td ", "interception", "catch", "sack", "field goal",
+    # Baseball
+    "homer", "home run", "grand slam", "strikeout", "walkoff", "walk-off",
+    "walks off", "cycle", "no-hitter", "perfect game",
+    # Hockey
+    "goal", "goals", "hat trick", "save",
+    # Soccer
+    "finish", "finishes", "volley", "free kick", "penalty",
+    # Generic plays
+    "shot", "score", "scores", "hit", "hits", "throw", "throws",
+    "kick", "kicks", "run", "pass", "ot winner", "overtime winner",
 ]
 _TITLE_CONTROVERSY_WORDS = [
-    "fight", "altercation", "brawl", "questionable", "dirty", "flagrant",
-    "ejected", "ejection", "suspended", "suspension", "hit on", "incident",
-    "injured", "injury", "unsportsmanlike", "misconduct", "technical",
+    "fight", "altercation", "brawl", "tussle", "scuffle",
+    "questionable", "dirty", "flagrant",
+    "ejected", "ejection", "suspended", "suspension",
+    "hit on", "jumps off the bench", "incident",
+    "injured", "injury", "unsportsmanlike", "misconduct", "technical foul",
 ]
 _TITLE_NOISE_WORDS = [
+    # Interviews / media
     "interview", "press conference", "mic'd up", "micd up", "podcast",
-    "documentary", "behind the scenes", "practice", "warmup", "warm up",
-    "ceremony", "signing", "reaction", "breakdown", "analysis",
-    "preview", "trailer", "best of", "weekly", "monthly",
-    "this week", "all goals", "every goal", "every time",
-    "postgame", "post-game", "pregame", "pre-game", "recap",
-    "says", "on why", "rewatch", "years ago", "anniversary",
-    "wedding", "years old", "still playing", "recalls", "announcer",
-    "halftime show", "kids", "shinny", "bullied", "worm",
+    "documentary", "behind the scenes", "breakdown", "analysis",
+    "preview", "trailer", "on why", "on what", "on how",
+    # Ceremonies / off-field
+    "ceremony", "signing", "retirement", "farewell", "tribute",
+    "hall of fame", "inducted", "ovation", "speech", "memories",
+    "anniversary", "rewatch", "years ago", "throwback",
+    "warmup", "warm up", "practice", "pregame", "pre-game",
+    # Compilations
+    "best of", "weekly", "monthly", "this week",
+    "all goals", "every goal", "every time",
+    # Post-game talking heads
+    "postgame", "post-game", "recap",
+    "says", "recalls", "still playing",
+    # Viral non-play moments
+    "wedding", "years old", "announcer",
+    "halftime show", "shinny", "bullied", "worm",
+    "greets", "airport", "locker room visit",
+    "national anthem", "performs the", "band performs",
+    "gender reveal", "wore ", "pink laces",
+    "scoreboard entertainment", "umpire",
 ]
 
 _VXREDDIT_BASE = "https://vxreddit.com"
@@ -445,18 +453,20 @@ def _score_title(title: str, raw_score: int) -> float:
 async def _fetch_reddit_top_plays_sub(
     subreddit: str,
     limit: int = 50,
-    use_flair_config: bool = True,
     min_score: int = 0,
     time_range: str = "day",
 ) -> List[Dict[str, Any]]:
     """
     Fetch highlight clips from a subreddit for the Top Plays section.
 
-    use_flair_config=True  — uses SUBREDDIT_FLAIR_KEYWORDS to filter by flair
-    use_flair_config=False — catch-all mode (r/sports): domain filter only
-    time_range             — Reddit t= param: "day" (default) or "week" (72hr fallback)
+    Uses domain filtering (not flair) as the primary gate — flair is applied
+    inconsistently across subreddits and days so it's unreliable as a hard filter.
+    Title scoring (_score_title) handles quality: boosts plays, penalises
+    controversy, drops noise/non-play content entirely.
 
-    v.redd.it URLs are converted to vxreddit.com so Discord can embed them.
+    time_range — Reddit t= param: "day" (default) or "week" (72hr fallback)
+
+    v.redd.it URLs are converted to vxreddit.com so Discord can embed them inline.
 
     Returns list of dicts: {title, url, score, adj_score, domain, subreddit}
     """
@@ -475,27 +485,22 @@ async def _fetch_reddit_top_plays_sub(
     if not data:
         return []
 
-    flair_keywords = SUBREDDIT_FLAIR_KEYWORDS.get(subreddit, ["highlight"])
     posts = []
     try:
         for child in data.get("data", {}).get("children", []):
             post      = child.get("data", {})
-            flair     = (post.get("link_flair_text") or "").lower()
             title     = post.get("title", "")
             domain    = post.get("domain", "")
             score     = post.get("score", 0)
             url       = post.get("url", "")
-            permalink = post.get("permalink", "")  # e.g. /r/nba/comments/abc/title
+            permalink = post.get("permalink", "")
 
             if not url or score < min_score:
                 continue
 
-            if use_flair_config:
-                if not any(kw in flair for kw in flair_keywords):
-                    continue
-            else:
-                if domain not in VIDEO_DOMAINS:
-                    continue
+            # Domain is the reliable gate — flair is too inconsistently applied
+            if domain not in VIDEO_DOMAINS:
+                continue
 
             # Title-based scoring — drops noise, penalises controversy, boosts plays
             adj_score = _score_title(title, score)
@@ -550,7 +555,7 @@ async def _build_top_plays(
             if sub:
                 min_sc = SUBREDDIT_MIN_SCORE.get(sub, 200)
                 tasks.append(_fetch_reddit_top_plays_sub(
-                    sub, limit=50, use_flair_config=True,
+                    sub, limit=50,
                     min_score=min_sc, time_range=time_range,
                 ))
                 subs.append(sub)
@@ -565,7 +570,7 @@ async def _build_top_plays(
 
         # ── r/sports catch-all ────────────────────────────────────────────
         catchall = await _fetch_reddit_top_plays_sub(
-            "sports", limit=50, use_flair_config=False,
+            "sports", limit=50,
             min_score=SUBREDDIT_MIN_SCORE["sports"],
             time_range=time_range,
         )
