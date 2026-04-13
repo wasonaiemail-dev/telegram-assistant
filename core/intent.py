@@ -281,6 +281,23 @@ def _build_keyword_rules() -> list:
     """
     rules: list = []
 
+    # ── SLEEP — LOG (must come BEFORE habit rules so "slept 7 hours" → sleep_log
+    #    not habit_log, since "slept" is a sleep habit keyword that would match first)
+    _p_sleep_log_early = _r(
+        r"^(?:slept|sleep|got|logged?)\s+(?:for\s+)?(\d+(?:\.\d)?)\s*(?:hours?\s+(?:of\s+)?(?:sleep)?|hrs?)"
+        r"|^(\d+(?:\.\d)?)\s*(?:hours?\s+(?:of\s+)?sleep|hrs?\s+sleep)"
+    )
+
+    def _sleep_log_early(m, t):
+        hours = float(m.group(1) or m.group(2))
+        return IntentResult(
+            intent=SLEEP_LOG,
+            entities={"hours": hours},
+            confidence="keyword", raw=t,
+        )
+
+    rules.append((_p_sleep_log_early, _sleep_log_early))
+
     # ── HABIT LOGGING ─────────────────────────────────────────────────────────
     # Built dynamically from HABIT_KEYWORDS so they stay in sync with config.
     # Match whole words only (word-boundary anchors).
