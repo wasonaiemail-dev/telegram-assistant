@@ -283,9 +283,10 @@ def _build_keyword_rules() -> list:
 
     # ── SLEEP — LOG (must come BEFORE habit rules so "slept 7 hours" → sleep_log
     #    not habit_log, since "slept" is a sleep habit keyword that would match first)
+    # Pattern deliberately requires a number so plain "slept" still hits habit_log.
     _p_sleep_log_early = _r(
-        r"^(?:slept|sleep|got|logged?)\s+(?:for\s+)?(\d+(?:\.\d)?)\s*(?:hours?\s+(?:of\s+)?(?:sleep)?|hrs?)"
-        r"|^(\d+(?:\.\d)?)\s*(?:hours?\s+(?:of\s+)?sleep|hrs?\s+sleep)"
+        r"^(?:slept|sleep|got|logged?)\s+(?:for\s+)?(\d+(?:\.\d)?)\s*(?:hours?|hrs?)(?:\s+(?:of\s+)?sleep)?\s*$"
+        r"|^(\d+(?:\.\d)?)\s*(?:hours?|hrs?)\s+(?:of\s+)?sleep\s*$"
     )
 
     def _sleep_log_early(m, t):
