@@ -190,6 +190,68 @@ def main() -> None:
         return _rate_count[0] <= RATE_LIMIT_COUNT
 
     # ─────────────────────────────────────────────────────────────────────────
+    # PHOTO / ATTACHMENT HANDLER
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _handle_discord_photo(attachment, ctx, message) -> None:
+        """
+        Download a Discord image attachment and route it through the same
+        photo pipeline as Telegram: receipt → shopping check,
+        screenshot → reply draft, general → description.
+        """
+        import tempfile
+        import aiohttp
+        from bot import _detect_photo_type, _analyse_photo_file
+
+        # Download the attachment to a temp file
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(attachment.url) as resp:
+                    data = await resp.read()
+            suffix = os.path.splitext(attachment.filename.lower())[1] or ".jpg"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
+        except Exception as e:
+            logger.error(f"Discord: failed to download attachment: {e}")
+            await message.channel.send("Couldn't download that image. Try again.")
+            return
+
+        try:
+            photo_type = await _detect_photo_type(tmp_path)
+
+            if photo_type == "receipt":
+                # Build a duck-typed shim that routes reply_text → ctx.reply
+                # (handle_receipt_photo was written for Telegram's update.message.reply_text)
+                class _ReplyShim:
+                    async def reply_text(self, text, **kw):
+                        await ctx.reply(text)
+
+                class _FakeUpdate:
+                    def __init__(self):
+                        self.message = _ReplyShim()
+
+                from features.shopping import handle_receipt_photo
+                await handle_receipt_photo(tmp_path, _FakeUpdate(), None)
+
+            elif photo_type == "screenshot":
+                from features.reply_assist import handle_photo_for_reply
+                await handle_photo_for_reply(tmp_path, ctx, is_email=False)
+
+            else:
+                # General photo — describe it
+                description = await _analyse_photo_file(tmp_path)
+                if description:
+                    await ctx.reply(description)
+                else:
+                    await ctx.reply("I can see the image but couldn't describe it. Try sending with a caption.")
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    # ─────────────────────────────────────────────────────────────────────────
     # EVENT HANDLERS
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -215,9 +277,24 @@ def main() -> None:
         if DISCORD_ALLOWED_ID and message.author.id != DISCORD_ALLOWED_ID:
             return
 
-        # Ignore empty messages
+        # Ignore empty messages — but check for image attachments first
         text = (message.content or "").strip()
         if not text:
+            # Handle photo/image attachments (receipt, screenshot, general)
+            if message.attachments:
+                image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+                for att in message.attachments:
+                    ext = os.path.splitext(att.filename.lower())[1]
+                    if ext in image_exts:
+                        if not _check_rate_limit():
+                            await message.channel.send(
+                                "You're sending messages very quickly — slow down a little."
+                            )
+                            return
+                        from adapters.discord_adapter import make_context
+                        ctx = make_context(message)
+                        await _handle_discord_photo(att, ctx, message)
+                        return
             return
 
         # In prefix-only mode, only respond to messages starting with the prefix
@@ -241,6 +318,16 @@ def main() -> None:
         ctx = make_context(message)
         # Override text with normalised version
         ctx = _rebuild_ctx_with_text(ctx, text)
+
+        # If text is present but there's also an image attachment, route to photo handler
+        # (e.g. user sends "check this receipt" + image)
+        if message.attachments and not has_prefix:
+            image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+            for att in message.attachments:
+                ext = os.path.splitext(att.filename.lower())[1]
+                if ext in image_exts:
+                    await _handle_discord_photo(att, ctx, message)
+                    return
 
         # Route commands directly to avoid classification overhead
         if has_prefix:
