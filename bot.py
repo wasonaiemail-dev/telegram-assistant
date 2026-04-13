@@ -823,6 +823,43 @@ async def cmd_braindump(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _f(ctx, args=args)
 
 
+async def cmd_proactive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show proactive layer toggle settings."""
+    if not _is_allowed(update):
+        return
+    from features.proactive import cmd_proactive as _f
+    ctx = _make_telegram_ctx(update, context)
+    await _f(ctx)
+
+
+async def cmd_travel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show upcoming detected travel events."""
+    if not _is_allowed(update):
+        return
+    from features.travel import cmd_travel as _f
+    ctx = _make_telegram_ctx(update, context)
+    await _f(ctx)
+
+
+async def cmd_vacation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show vacation mode status or toggle it."""
+    if not _is_allowed(update):
+        return
+    from features.vacation import cmd_vacation as _f
+    ctx  = _make_telegram_ctx(update, context)
+    args = list(context.args) if context.args else []
+    await _f(ctx, args=args)
+
+
+async def cmd_tomorrow_prep(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Manually trigger the night-before briefing."""
+    if not _is_allowed(update):
+        return
+    from features.tomorrow_prep import cmd_tomorrow_prep as _f
+    ctx = _make_telegram_ctx(update, context)
+    await _f(ctx)
+
+
 async def cmd_gifts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update):
         return
@@ -1089,6 +1126,53 @@ async def _job_auto_sync_tasks(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"job_auto_sync_tasks error: {e}")
 
 
+async def _job_proactive_daily(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Daily proactive intelligence job — runs all 25 checks and fires relevant
+    nudges. Default time: 8:30 AM (configurable in proactive settings).
+    """
+    try:
+        from adapters.telegram_adapter import TelegramContext
+        ctx = TelegramContext(context, ALLOWED_USER_ID)
+        from features.proactive import run_daily_checks
+        await run_daily_checks(ctx)
+        from features.travel import run_travel_alerts
+        await run_travel_alerts(ctx)
+        from features.vacation import check_vacation_auto_detect, check_vacation_auto_resume
+        await check_vacation_auto_resume(ctx)
+        await check_vacation_auto_detect(ctx)
+    except Exception as e:
+        logger.error(f"job_proactive_daily error: {e}")
+
+
+async def _job_proactive_weekly(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Weekly pattern-recognition job — runs cross-data correlations.
+    Fires Monday morning, shortly after the daily briefing.
+    """
+    try:
+        from adapters.telegram_adapter import TelegramContext
+        ctx = TelegramContext(context, ALLOWED_USER_ID)
+        from features.proactive import run_weekly_analysis
+        await run_weekly_analysis(ctx)
+    except Exception as e:
+        logger.error(f"job_proactive_weekly error: {e}")
+
+
+async def _job_tomorrow_prep(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Nightly job — fires at configurable time (default 9pm).
+    Sends a night-before briefing if tomorrow is a busy day.
+    """
+    try:
+        from adapters.telegram_adapter import TelegramContext
+        ctx = TelegramContext(context, ALLOWED_USER_ID)
+        from features.tomorrow_prep import run_tomorrow_prep
+        await run_tomorrow_prep(ctx)
+    except Exception as e:
+        logger.error(f"job_tomorrow_prep error: {e}")
+
+
 async def _job_advance_recurring(context: ContextTypes.DEFAULT_TYPE) -> None:
     """12:01 AM job to roll recurring todos/reminders to their next date."""
     try:
@@ -1235,6 +1319,37 @@ def _schedule_jobs(job_queue: JobQueue) -> None:
         job_queue.run_daily(_job_meal_adherence_check, time=dtime(ah, am, tzinfo=tz), name="meal_adherence")
     except Exception:
         job_queue.run_daily(_job_meal_adherence_check, time=dtime(20, 0, tzinfo=tz), name="meal_adherence")
+
+    # ── Proactive intelligence layer ─────────────────────────────────────────
+    try:
+        from core.data import load_data, get_proactive_settings
+        _ps = get_proactive_settings(load_data())
+        _proactive_h = 8
+        _proactive_m = 30
+    except Exception:
+        _ps = {}
+        _proactive_h, _proactive_m = 8, 30
+
+    job_queue.run_daily(
+        _job_proactive_daily,
+        time=dtime(_proactive_h, _proactive_m, tzinfo=tz),
+        name="proactive_daily",
+    )
+    # Weekly analysis fires Monday morning, 15 min after briefing
+    job_queue.run_daily(
+        _job_proactive_weekly,
+        time=dtime(_briefing_h, min(59, _briefing_m + 15), tzinfo=tz),
+        days=(0,),   # Monday only
+        name="proactive_weekly",
+    )
+    # Night-before briefing — configurable, default 9pm
+    _tp_h = _ps.get("tomorrow_prep_hour",   21)
+    _tp_m = _ps.get("tomorrow_prep_minute",  0)
+    job_queue.run_daily(
+        _job_tomorrow_prep,
+        time=dtime(_tp_h, _tp_m, tzinfo=tz),
+        name="tomorrow_prep",
+    )
 
     # ── Plugin jobs ──────────────────────────────────────────────────────────
     if _loaded_plugins:
@@ -1397,12 +1512,16 @@ def main() -> None:
     app.add_handler(CommandHandler("rl",        cmd_readlater))
     app.add_handler(CommandHandler("export",    cmd_export))
     app.add_handler(CommandHandler("expenses",   cmd_expenses))
-    app.add_handler(CommandHandler("sleep",      cmd_sleep))
-    app.add_handler(CommandHandler("braindump",  cmd_braindump))
-    app.add_handler(CommandHandler("today",      cmd_today))
-    app.add_handler(CommandHandler("week",       cmd_week))
-    app.add_handler(CommandHandler("weekend",    cmd_weekend))
-    app.add_handler(CommandHandler("restofday",  cmd_restofday))
+    app.add_handler(CommandHandler("sleep",        cmd_sleep))
+    app.add_handler(CommandHandler("braindump",    cmd_braindump))
+    app.add_handler(CommandHandler("today",        cmd_today))
+    app.add_handler(CommandHandler("week",         cmd_week))
+    app.add_handler(CommandHandler("weekend",      cmd_weekend))
+    app.add_handler(CommandHandler("restofday",    cmd_restofday))
+    app.add_handler(CommandHandler("proactive",    cmd_proactive))
+    app.add_handler(CommandHandler("travel",       cmd_travel))
+    app.add_handler(CommandHandler("vacation",     cmd_vacation))
+    app.add_handler(CommandHandler("tomorrowprep", cmd_tomorrow_prep))
 
     # ── Plugin auto-discovery ────────────────────────────────────────────
     global _loaded_plugins

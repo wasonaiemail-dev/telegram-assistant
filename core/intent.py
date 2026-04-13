@@ -191,6 +191,11 @@ BRAINDUMP       = "braindump"
 # Undo
 UNDO            = "undo"
 
+# Proactive layer
+PROACTIVE_TOGGLE    = "proactive_toggle"       # "turn off habit streak risk"
+VACATION_MODE       = "vacation_mode"          # "vacation on until June 20"
+PACKING_OVERRIDE    = "packing_override"       # "add sunscreen to beach packing list"
+
 # Catch-all
 ASK             = "ask"
 UNKNOWN         = "unknown"
@@ -218,6 +223,7 @@ _ALL_INTENTS = {
     EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
     SLEEP_LOG, SLEEP_VIEW,
     BRAINDUMP, UNDO,
+    PROACTIVE_TOGGLE, VACATION_MODE, PACKING_OVERRIDE,
     BRIEFING, WEATHER, WEEKLY_SUMMARY,
     ASK, UNKNOWN,
 }
@@ -327,6 +333,125 @@ def _build_keyword_rules() -> list:
         )
 
     rules.append((p, _braindump))
+
+    # ── VACATION MODE ─────────────────────────────────────────────────────────
+    # "vacation on", "vacation on until June 20", "going on vacation"
+    # "vacation off", "I'm back", "back from vacation"
+    # "pause running on vacation", "keep tracking water on vacation"
+    p_vac_on = _r(
+        r"^(?:vacation\s+(?:mode\s+)?on|(?:turn\s+on|enable|start)\s+vacation(?:\s+mode)?|"
+        r"going\s+on\s+vacation|i'?m\s+(?:going\s+)?on\s+vacation)"
+        r"(?:\s+until\s+(.+))?$"
+    )
+
+    def _vac_on(m, t):
+        end_date = (m.group(1) or "").strip()
+        return IntentResult(
+            intent=VACATION_MODE,
+            entities={"action": "on", "end_date": end_date},
+            confidence="keyword", raw=t,
+        )
+
+    rules.append((p_vac_on, _vac_on))
+
+    p_vac_off = _r(
+        r"^(?:vacation\s+(?:mode\s+)?off|(?:turn\s+off|disable|end|stop)\s+vacation(?:\s+mode)?|"
+        r"i'?m\s+back(?:\s+from\s+vacation)?|back\s+from\s+vacation|home\s+from\s+vacation)$"
+    )
+
+    def _vac_off(m, t):
+        return IntentResult(
+            intent=VACATION_MODE,
+            entities={"action": "off"},
+            confidence="keyword", raw=t,
+        )
+
+    rules.append((p_vac_off, _vac_off))
+
+    # "pause [habit] on vacation" / "keep tracking [habit] on vacation"
+    p_vac_habit = _r(
+        r"^(pause|keep\s+tracking|keep)\s+(.+?)\s+(?:on\s+vacation|during\s+vacation)$"
+    )
+
+    def _vac_habit(m, t):
+        action_raw = m.group(1).lower()
+        action = "pause" if "pause" in action_raw else "keep"
+        habit  = m.group(2).strip().lower().replace(" ", "_")
+        return IntentResult(
+            intent=VACATION_MODE,
+            entities={"action": action, "habit": habit},
+            confidence="keyword", raw=t,
+        )
+
+    rules.append((p_vac_habit, _vac_habit))
+
+    # "vacation on until June 20" — explicit until form
+    p_vac_until = _r(r"^(?:vacation|holiday|away)\s+until\s+(.+)$")
+
+    def _vac_until(m, t):
+        return IntentResult(
+            intent=VACATION_MODE,
+            entities={"action": "on", "end_date": m.group(1).strip()},
+            confidence="keyword", raw=t,
+        )
+
+    rules.append((p_vac_until, _vac_until))
+
+    # ── PACKING OVERRIDE ─────────────────────────────────────────────────────
+    # "add [item] to [trip type] packing list"
+    # "add [item] to my packing list"
+    p_pack = _r(
+        r"^add\s+(.+?)\s+to\s+(?:my\s+)?(?:(\w+(?:\s+\w+)?)\s+)?packing\s+list$"
+    )
+
+    def _packing(m, t):
+        item      = m.group(1).strip()
+        trip_type = (m.group(2) or "generic").strip().lower().replace(" ", "_")
+        return IntentResult(
+            intent=PACKING_OVERRIDE,
+            entities={"item": item, "trip_type": trip_type},
+            confidence="keyword", raw=t,
+        )
+
+    rules.append((p_pack, _packing))
+
+    # ── PROACTIVE TOGGLE ──────────────────────────────────────────────────────
+    # "turn off habit streak risk", "enable expense spike alerts",
+    # "disable back to back meetings", "turn on meeting prep"
+    p_proactive_toggle = _r(
+        r"^(?:(turn\s+off|disable|stop|mute)\s+|(turn\s+on|enable|unmute|resume)\s+)"
+        r"([\w\s]+?)(?:\s+(?:alerts?|notifications?|check|nudge|reminder))?$"
+    )
+
+    def _proactive_toggle(m, t):
+        action = "off" if m.group(1) else "on"
+        label  = (m.group(3) or "").strip().lower()
+        return IntentResult(
+            intent=PROACTIVE_TOGGLE,
+            entities={"action": action, "label": label},
+            confidence="keyword", raw=t,
+        )
+
+    # Only append if the text contains "proactive", "alerts", or one of the
+    # known toggle labels — avoids stealing generic "turn off X" phrases
+    _PROACTIVE_HINT_WORDS = [
+        "habit streak", "overdue todo", "priority todo", "back to back",
+        "reminder overload", "sleep mood", "sleep declining", "workout frequency",
+        "expense spike", "mood trend", "todo bloat", "recurring todo",
+        "mood habit", "expense pacing", "meeting prep", "calendar gap",
+        "travel time", "sleep event", "empty calendar", "monday planning",
+        "weekly completion", "habit best day", "streak recognition",
+        "shopping weekend", "smart note", "proactive", "travel alert",
+        "vacation alert", "tomorrow prep", "night brief",
+    ]
+
+    def _proactive_toggle_guarded(m, t):
+        tl = t.lower()
+        if not any(h in tl for h in _PROACTIVE_HINT_WORDS):
+            return None   # let GPT handle unrelated "turn off X" phrases
+        return _proactive_toggle(m, t)
+
+    rules.append((p_proactive_toggle, _proactive_toggle_guarded))
 
     # ── HABIT LOGGING ─────────────────────────────────────────────────────────
     # Built dynamically from HABIT_KEYWORDS so they stay in sync with config.

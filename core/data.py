@@ -172,6 +172,7 @@ def load_data():
         data.setdefault("undo_stack",       [])
         data.setdefault("_last_deleted",    [])
         data.setdefault("resurfaced_notes", {})
+        data.setdefault("proactive_sent",   {})  # tracks last-sent date per check key
 
         return data
 
@@ -220,6 +221,7 @@ def _empty_data():
         "undo_stack":       [],
         "_last_deleted":    [],
         "resurfaced_notes": {},
+        "proactive_sent":   {},
     }
 
 
@@ -1156,6 +1158,109 @@ def get_base_sports_settings(data: dict) -> dict:
     ss = s.setdefault("base_sports", {})
     ss.setdefault("enabled",        False)   # Off by default — buyer must configure teams
     ss.setdefault("favorite_teams", [])      # [{league: "nfl", team_name: "Chiefs"}, ...]
+    return ss
+
+
+def get_proactive_settings(data: dict) -> dict:
+    """
+    Return proactive layer toggle settings.
+
+    All 25 notification types + module flags, each individually
+    toggled on/off. Stored in settings["proactive"].
+    Default: everything on except vacation_active (that's runtime state).
+    """
+    s  = data.setdefault("settings", {})
+    ps = s.setdefault("proactive", {})
+
+    # ── Daily checks ──────────────────────────────────────────────────────────
+    ps.setdefault("habit_streak_risk",      True)   # 1
+    ps.setdefault("overdue_todos",          True)   # 2
+    ps.setdefault("priority_todos",         True)   # 3
+    ps.setdefault("back_to_back_meetings",  True)   # 4
+    ps.setdefault("reminder_overload",      True)   # 5
+
+    # ── Weekly pattern recognition ────────────────────────────────────────────
+    ps.setdefault("sleep_mood_correlation", True)   # 6
+    ps.setdefault("sleep_declining",        True)   # 7
+    ps.setdefault("workout_frequency",      True)   # 8
+    ps.setdefault("expense_spike",          True)   # 9
+    ps.setdefault("mood_trend_low",         True)   # 10
+    ps.setdefault("todo_bloat",             True)   # 11
+    ps.setdefault("recurring_todo_stuck",   True)   # 12
+    ps.setdefault("mood_habit_correlation", True)   # 13
+    ps.setdefault("expense_pacing",         True)   # 14
+
+    # ── Calendar intelligence ─────────────────────────────────────────────────
+    ps.setdefault("meeting_prep",           True)   # 15
+    ps.setdefault("calendar_gap_workout",   True)   # 16
+    ps.setdefault("travel_time_missing",    True)   # 17
+    ps.setdefault("sleep_important_event",  True)   # 18
+    ps.setdefault("empty_calendar",         True)   # 19
+
+    # ── Weekly reflections ────────────────────────────────────────────────────
+    ps.setdefault("monday_planning",        True)   # 20
+    ps.setdefault("weekly_completion",      True)   # 21
+    ps.setdefault("habit_best_day",         True)   # 22
+    ps.setdefault("streak_recognition",     True)   # 23
+    ps.setdefault("shopping_weekend",       True)   # 24
+    ps.setdefault("smart_note_resurface",   True)   # 25
+
+    # ── Module toggles ────────────────────────────────────────────────────────
+    ps.setdefault("tomorrow_prep",          True)   # night-before briefing
+    ps.setdefault("tomorrow_prep_hour",     21)     # 9pm default
+    ps.setdefault("tomorrow_prep_minute",   0)
+    ps.setdefault("busy_day_threshold",     3)      # events count to trigger tomorrow prep
+    ps.setdefault("travel_alerts",          True)   # smart travel system
+    ps.setdefault("vacation_mode",          True)   # vacation mode (auto-detect + manual)
+    ps.setdefault("vacation_active",        False)  # runtime state: is vacation mode on now?
+    ps.setdefault("vacation_paused_habits", [])     # habit ids snoozed during vacation
+    ps.setdefault("vacation_end_date",      "")     # ISO date when vacation ends
+    ps.setdefault("pre_meeting_brief",      True)   # 30-min pre-meeting contact prep
+
+    return ps
+
+
+def get_sleep_schedule_settings(data: dict) -> dict:
+    """
+    Return the buyer's personal sleep & schedule preferences.
+
+    These drive:
+      - tomorrow_prep bedtime suggestion (replaces hardcoded 7hr / 11pm logic)
+      - proactive DND window (no nudges during quiet hours)
+      - chronotype-aware job timing (night owls don't get 6am alerts)
+      - weekend briefing toggle
+
+    Stored in settings["sleep_schedule"].
+    Configured via /setup → Sleep & Schedule (two steps).
+    """
+    s  = data.setdefault("settings", {})
+    ss = s.setdefault("sleep_schedule", {})
+
+    # Weekday targets
+    ss.setdefault("weekday_bed_time",   "23:00")   # 11pm
+    ss.setdefault("weekday_wake_time",  "07:00")   # 7am
+
+    # Weekend targets
+    ss.setdefault("weekend_bed_time",   "00:00")   # midnight
+    ss.setdefault("weekend_wake_time",  "09:00")   # 9am
+
+    # Sleep goal — used for bedtime math and sleep-debt tracking
+    ss.setdefault("sleep_goal_hours",   7.5)
+
+    # Chronotype — affects when proactive nudges are allowed
+    # "early"     → up before 6am, nudges can start 6am
+    # "normal"    → up around 7am, nudges start 7am (default)
+    # "night_owl" → up after 9am, nudges start 9am
+    ss.setdefault("chronotype",         "normal")
+
+    # Do-Not-Disturb window — no proactive messages during these hours
+    ss.setdefault("dnd_enabled",        True)
+    ss.setdefault("dnd_start",          "22:00")   # 10pm
+    ss.setdefault("dnd_end",            "07:00")   # 7am
+
+    # Weekend briefing toggle — separate from weekday
+    ss.setdefault("weekend_briefing",   True)
+
     return ss
 
 

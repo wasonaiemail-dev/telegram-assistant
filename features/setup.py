@@ -69,6 +69,7 @@ from core.data import (
     get_base_sports_settings,
     get_event_prep_settings,
     get_weekly_summary_settings,
+    get_sleep_schedule_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -672,6 +673,8 @@ _PREFS_STEPS = [
     "journal_prompts",
     "meal_nutrition",
     "event_prep",
+    "sleep_schedule",           # bed/wake times + sleep goal (weekday vs weekend)
+    "quiet_hours",              # DND window + chronotype
     "smart_suggestions",
     "weekly_summary_sections",  # HP3: weekly summary section toggles
 ]
@@ -695,6 +698,8 @@ _PREFS_TITLES = {
     "journal_prompts":        "✏️ Journal Questions",
     "meal_nutrition":         "🥗 Meal Nutrition Goals",
     "event_prep":             "📋 Event Prep",
+    "sleep_schedule":         "😴 Sleep & Schedule",
+    "quiet_hours":            "🔕 Quiet Hours",
     "smart_suggestions":          "💡 Smart Pattern Suggestions",
     "weekly_summary_sections":    "📊 Weekly Summary Sections",
 }
@@ -823,6 +828,28 @@ _PREFS_PROMPTS = {
         "• *yes* — enable (I'll prep you each night before significant events)\n"
         "• *no* — disable (you can still trigger manually with /eventprep)\n\n"
         "Type *skip* to keep current setting."
+    ),
+    "sleep_schedule": (
+        "What are your target sleep times? Alfred uses these to give accurate "
+        "bedtime suggestions and time morning nudges correctly.\n\n"
+        "Format: *weekday bed, weekday wake, weekend bed, weekend wake, sleep goal (hrs)*\n\n"
+        "Example: *11pm, 7am, midnight, 9am, 7.5*\n\n"
+        "You can also set just some values:\n"
+        "• *bed 10:30pm wake 6:30am* — weekday only\n"
+        "• *sleep goal 8* — just the goal\n\n"
+        "Type *skip* to keep defaults (11pm / 7am weekday, midnight / 9am weekend, 7.5 hrs)."
+    ),
+    "quiet_hours": (
+        "When should Alfred go quiet? No proactive nudges, alerts, or reminders "
+        "will be sent during this window.\n\n"
+        "Format: *start time – end time*\n"
+        "Example: *10pm – 7am*\n\n"
+        "Also, what's your chronotype?\n"
+        "• *early* — you're up before 6am\n"
+        "• *normal* — up around 7am (default)\n"
+        "• *night_owl* — up after 9am\n\n"
+        "You can combine both: *10pm – 7am, night_owl*\n"
+        "Or type *off* to disable quiet hours, or *skip* for defaults."
     ),
     "smart_suggestions": (
         "Alfred can proactively spot patterns and nudge you. Which areas?\n\n"
@@ -1404,6 +1431,131 @@ async def _save_prefs_answer(
                     parse_mode="Markdown",
                 )
                 return
+
+    # ── sleep_schedule ────────────────────────────────────────────────────────
+    elif key == "sleep_schedule":
+        if not skip:
+            ss = get_sleep_schedule_settings(data)
+            raw = answer.strip().lower()
+            changed = []
+
+            # Try full format: "11pm, 7am, midnight, 9am, 7.5"
+            parts = [p.strip() for p in _re.split(r"[,;]", raw)]
+
+            # Helper: parse "midnight" / "noon" special cases + normal times
+            def _parse_time_extended(s: str):
+                s = s.strip().lower()
+                if s in ("midnight", "12am", "12:00am"):
+                    return (0, 0)
+                if s in ("noon", "12pm", "12:00pm"):
+                    return (12, 0)
+                return _parse_time(s)
+
+            if len(parts) >= 4:
+                t_wb = _parse_time_extended(parts[0])
+                t_ww = _parse_time_extended(parts[1])
+                t_eb = _parse_time_extended(parts[2])
+                t_ew = _parse_time_extended(parts[3])
+                goal = None
+                if len(parts) >= 5:
+                    try:
+                        goal = float(parts[4])
+                    except ValueError:
+                        pass
+                if all([t_wb, t_ww, t_eb, t_ew]):
+                    ss["weekday_bed_time"]  = f"{t_wb[0]:02d}:{t_wb[1]:02d}"
+                    ss["weekday_wake_time"] = f"{t_ww[0]:02d}:{t_ww[1]:02d}"
+                    ss["weekend_bed_time"]  = f"{t_eb[0]:02d}:{t_eb[1]:02d}"
+                    ss["weekend_wake_time"] = f"{t_ew[0]:02d}:{t_ew[1]:02d}"
+                    changed += ["weekday/weekend bed & wake times"]
+                    if goal and 4 <= goal <= 12:
+                        ss["sleep_goal_hours"] = goal
+                        changed.append(f"sleep goal {goal} hrs")
+                    save_data(data)
+                else:
+                    await msg.reply_text(
+                        "Couldn't parse those times. Use format: *11pm, 7am, midnight, 9am, 7.5*",
+                        parse_mode="Markdown",
+                    )
+                    return
+            else:
+                # Parse partial forms: "bed 10:30pm wake 6:30am", "sleep goal 8"
+                m_bed  = _re.search(r"bed\s+(\S+)", raw)
+                m_wake = _re.search(r"wake\s+(\S+)", raw)
+                m_goal = _re.search(r"(?:sleep\s+)?goal\s+(\d+(?:\.\d)?)", raw)
+                if m_bed:
+                    t = _parse_time_extended(m_bed.group(1))
+                    if t:
+                        ss["weekday_bed_time"] = f"{t[0]:02d}:{t[1]:02d}"
+                        changed.append(f"weekday bed {_fmt_time(*t)}")
+                if m_wake:
+                    t = _parse_time_extended(m_wake.group(1))
+                    if t:
+                        ss["weekday_wake_time"] = f"{t[0]:02d}:{t[1]:02d}"
+                        changed.append(f"weekday wake {_fmt_time(*t)}")
+                if m_goal:
+                    g = float(m_goal.group(1))
+                    if 4 <= g <= 12:
+                        ss["sleep_goal_hours"] = g
+                        changed.append(f"sleep goal {g} hrs")
+                if changed:
+                    save_data(data)
+                else:
+                    await msg.reply_text(
+                        "Couldn't parse that. Try: *11pm, 7am, midnight, 9am, 7.5* "
+                        "or *bed 10:30pm wake 6:30am* or type *skip*.",
+                        parse_mode="Markdown",
+                    )
+                    return
+
+            feedback = "✓ Sleep schedule: " + "; ".join(changed) + "."
+
+    # ── quiet_hours ───────────────────────────────────────────────────────────
+    elif key == "quiet_hours":
+        if not skip:
+            ss  = get_sleep_schedule_settings(data)
+            raw = answer.strip().lower()
+
+            if raw in ("off", "disable", "none"):
+                ss["dnd_enabled"] = False
+                save_data(data)
+                feedback = "✓ Quiet hours disabled — Alfred will nudge any time."
+            else:
+                changed = []
+
+                # Chronotype
+                for ct in ("early", "normal", "night_owl", "night owl"):
+                    if ct in raw:
+                        ss["chronotype"] = ct.replace(" ", "_")
+                        changed.append(f"chronotype: {ss['chronotype']}")
+                        break
+
+                # DND window: "10pm – 7am" or "10pm to 7am"
+                m = _re.search(
+                    r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:–|-|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
+                    raw
+                )
+                if m:
+                    t_start = _parse_time(m.group(1))
+                    t_end   = _parse_time(m.group(2))
+                    if t_start and t_end:
+                        ss["dnd_enabled"] = True
+                        ss["dnd_start"]   = f"{t_start[0]:02d}:{t_start[1]:02d}"
+                        ss["dnd_end"]     = f"{t_end[0]:02d}:{t_end[1]:02d}"
+                        changed.append(
+                            f"quiet hours {_fmt_time(*t_start)} – {_fmt_time(*t_end)}"
+                        )
+
+                if changed:
+                    save_data(data)
+                    feedback = "✓ " + "; ".join(c.capitalize() for c in changed) + "."
+                else:
+                    await msg.reply_text(
+                        "Couldn't parse that. Try: *10pm – 7am* or *10pm – 7am, night_owl* "
+                        "or *off* to disable, or *skip*.",
+                        parse_mode="Markdown",
+                    )
+                    return
 
     # ── smart_suggestions ─────────────────────────────────────────────────────
     elif key == "smart_suggestions":

@@ -476,6 +476,43 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
             await ctx.reply("❌ Could not process sleep command right now.")
         return True
 
+    if cmd == "proactive":
+        try:
+            from features.proactive import cmd_proactive
+            await cmd_proactive(ctx)
+        except Exception as e:
+            logger.error(f"Discord !proactive error: {e}")
+            await ctx.reply("❌ Could not load proactive settings right now.")
+        return True
+
+    if cmd == "travel":
+        try:
+            from features.travel import cmd_travel
+            await cmd_travel(ctx)
+        except Exception as e:
+            logger.error(f"Discord !travel error: {e}")
+            await ctx.reply("❌ Could not load travel info right now.")
+        return True
+
+    if cmd == "vacation":
+        try:
+            from features.vacation import cmd_vacation
+            args_list = args_str.strip().split() if args_str.strip() else []
+            await cmd_vacation(ctx, args=args_list)
+        except Exception as e:
+            logger.error(f"Discord !vacation error: {e}")
+            await ctx.reply("❌ Could not process vacation command right now.")
+        return True
+
+    if cmd == "tomorrowprep":
+        try:
+            from features.tomorrow_prep import cmd_tomorrow_prep
+            await cmd_tomorrow_prep(ctx)
+        except Exception as e:
+            logger.error(f"Discord !tomorrowprep error: {e}")
+            await ctx.reply("❌ Could not build tonight's briefing right now.")
+        return True
+
     # Unknown command — fall through to intent classifier
     return False
 
@@ -923,6 +960,11 @@ async def _discord_help(ctx, loaded_plugins) -> None:
         "  !notes                 — saved notes\n"
         "  !reminders             — active reminders\n"
         "  !synctasks             — full Google Tasks summary\n\n"
+        "<b>Proactive &amp; Travel</b>\n"
+        "  !proactive             — view/toggle all proactive alerts\n"
+        "  !travel                — upcoming trips Alfred detected\n"
+        "  !vacation [on|off]     — vacation mode (pauses most alerts)\n"
+        "  !tomorrowprep          — tonight's night-before briefing\n\n"
         "<b>Settings</b>\n"
         "  !setup                 — preferences wizard\n\n"
         + (f"<b>Plugins</b>\n{plugin_cmds}\n\n" if plugin_cmds else "")

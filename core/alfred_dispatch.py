@@ -51,6 +51,10 @@ MIGRATION CHECKLIST
     [x] weekly_summary — Phase 4C: !weekly added to discord_bot.py
     [x] expenses       — !expenses added to discord_bot.py
     [x] sleep          — !sleep added to discord_bot.py
+    [x] proactive      — !proactive added to discord_bot.py
+    [x] vacation       — "vacation on/off" NL on both platforms
+    [x] travel         — /travel command on both platforms
+    [x] tomorrow_prep  — /tomorrowprep command on both platforms
 """
 
 from __future__ import annotations
@@ -104,11 +108,13 @@ async def alfred_dispatch(
         EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
         SLEEP_LOG, SLEEP_VIEW,
         BRAINDUMP, UNDO,
+        PROACTIVE_TOGGLE, VACATION_MODE, PACKING_OVERRIDE,
         BRIEFING, WEATHER, WEEKLY_SUMMARY,
         ASK, UNKNOWN,
     )
 
     from core.plugin_loader import dispatch_plugin_intent
+
 
     intent = intent_result.intent
     ents   = intent_result.entities
@@ -290,6 +296,16 @@ async def alfred_dispatch(
             from features.sleep import handle_sleep_intent
             await handle_sleep_intent(intent, ents, ctx)
 
+        # ── PROACTIVE TOGGLE ──────────────────────────────────────────────────
+        elif intent == PROACTIVE_TOGGLE:
+            from features.proactive import handle_proactive_toggle
+            await handle_proactive_toggle(intent, ents, ctx)
+
+        # ── VACATION MODE ─────────────────────────────────────────────────────
+        elif intent in (VACATION_MODE, PACKING_OVERRIDE):
+            from features.vacation import handle_vacation_intent
+            await handle_vacation_intent(intent, ents, ctx)
+
         # ── PLUGIN INTENTS (fallback) ─────────────────────────────────────────
         else:
             update  = ctx._update
@@ -388,6 +404,7 @@ def _build_core_intents():
             EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
             SLEEP_LOG, SLEEP_VIEW,
             BRAINDUMP, UNDO,
+            PROACTIVE_TOGGLE, VACATION_MODE, PACKING_OVERRIDE,
             BRIEFING, WEATHER, WEEKLY_SUMMARY,
             ASK, UNKNOWN,
         )
@@ -413,6 +430,7 @@ def _build_core_intents():
             EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
             SLEEP_LOG, SLEEP_VIEW,
             BRAINDUMP, UNDO,
+            PROACTIVE_TOGGLE, VACATION_MODE, PACKING_OVERRIDE,
             BRIEFING, WEATHER, WEEKLY_SUMMARY,
             ASK, UNKNOWN,
         }
