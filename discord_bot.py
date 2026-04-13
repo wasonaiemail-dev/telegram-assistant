@@ -196,8 +196,13 @@ def main() -> None:
     async def _handle_discord_photo(attachment, ctx, message) -> None:
         """
         Download a Discord image attachment and route it through the same
-        photo pipeline as Telegram: receipt → shopping check,
-        screenshot → reply draft, general → description.
+        photo pipeline as Telegram:
+          receipt   → shopping check
+          screenshot → reply draft
+          calendar  → add to Google Calendar
+          whiteboard → save as note
+          food      → log to meal tracker
+          general   → describe the image
         """
         import tempfile
         import aiohttp
@@ -237,6 +242,18 @@ def main() -> None:
             elif photo_type == "screenshot":
                 from features.reply_assist import handle_photo_for_reply
                 await handle_photo_for_reply(tmp_path, ctx, is_email=False)
+
+            elif photo_type == "calendar":
+                from features.photo_handlers import handle_calendar_photo
+                await handle_calendar_photo(tmp_path, ctx)
+
+            elif photo_type == "whiteboard":
+                from features.photo_handlers import handle_whiteboard_photo
+                await handle_whiteboard_photo(tmp_path, ctx)
+
+            elif photo_type == "food":
+                from features.photo_handlers import handle_food_photo
+                await handle_food_photo(tmp_path, ctx)
 
             else:
                 # General photo — describe it

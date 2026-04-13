@@ -431,6 +431,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await handle_receipt_photo(tmp_path, update, context)
             elif photo_type == "screenshot":
                 await handle_photo_for_reply(tmp_path, ctx, is_email=False)
+            elif photo_type == "calendar":
+                from features.photo_handlers import handle_calendar_photo
+                await handle_calendar_photo(tmp_path, ctx)
+            elif photo_type == "whiteboard":
+                from features.photo_handlers import handle_whiteboard_photo
+                await handle_whiteboard_photo(tmp_path, ctx)
+            elif photo_type == "food":
+                from features.photo_handlers import handle_food_photo
+                await handle_food_photo(tmp_path, ctx)
             else:
                 # General photo — existing analysis
                 description = await _analyse_photo_file(tmp_path)
@@ -541,7 +550,15 @@ async def _transcribe_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 # =============================================================================
 
 async def _detect_photo_type(file_path: str) -> str:
-    """Use GPT-4o vision to classify photo as 'receipt', 'screenshot', or 'general'."""
+    """
+    Use GPT-4o vision to classify a photo into one of six categories:
+      receipt    — store/restaurant receipt with items and prices
+      screenshot — screenshot of messages, emails, social media, apps
+      calendar   — event flyer, invitation, ticket, or calendar screenshot with a date/event
+      whiteboard — whiteboard, handwritten notes, sticky note, blackboard
+      food       — plate of food, meal, or restaurant menu
+      general    — anything else
+    """
     import base64
     from openai import AsyncOpenAI
     from core.config import OPENAI_API_KEY
@@ -555,14 +572,23 @@ async def _detect_photo_type(file_path: str) -> str:
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Classify this image as exactly one of: 'receipt' (store/restaurant receipt showing purchased items and prices), 'screenshot' (screenshot of text messages, emails, social media, apps), or 'general' (anything else like photos of people, places, food, objects). Reply with ONLY the single word."},
+                    {"type": "text", "text": (
+                        "Classify this image as exactly one of these six types and reply with ONLY that single word:\n"
+                        "'receipt' — store or restaurant receipt showing purchased items and prices\n"
+                        "'screenshot' — screenshot of text messages, emails, social media, or apps\n"
+                        "'calendar' — event flyer, party/concert invitation, event ticket, or calendar screenshot containing a date and event name\n"
+                        "'whiteboard' — whiteboard, blackboard, handwritten notes on paper, or sticky note\n"
+                        "'food' — plate of food someone is eating, a prepared meal, or a restaurant menu\n"
+                        "'general' — anything else (people, places, objects, nature, etc.)\n"
+                        "Reply with ONLY the single lowercase word."
+                    )},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"}}
                 ]
             }],
             max_tokens=10,
         )
         classification = resp.choices[0].message.content.strip().lower()
-        if classification in {"receipt", "screenshot", "general"}:
+        if classification in {"receipt", "screenshot", "calendar", "whiteboard", "food", "general"}:
             return classification
     except Exception as e:
         logger.warning(f"Photo type detection failed: {e}")
