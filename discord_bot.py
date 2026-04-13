@@ -409,6 +409,25 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
             await ctx.reply("❌ Could not load task summary right now.")
         return True
 
+    if cmd == "expenses":
+        try:
+            from features.expenses import cmd_expenses
+            period = args_str.strip().lower() or "month"
+            await cmd_expenses(ctx, period=period)
+        except Exception as e:
+            logger.error(f"Discord !expenses error: {e}")
+            await ctx.reply("❌ Could not load expenses right now.")
+        return True
+
+    if cmd == "sleep":
+        try:
+            from features.sleep import cmd_sleep
+            await cmd_sleep(ctx, args=args_str.strip())
+        except Exception as e:
+            logger.error(f"Discord !sleep error: {e}")
+            await ctx.reply("❌ Could not process sleep command right now.")
+        return True
+
     # Unknown command — fall through to intent classifier
     return False
 
@@ -844,7 +863,9 @@ async def _discord_help(ctx, loaded_plugins) -> None:
         "  !reply [message]       — draft a reply to a message\n\n"
         "<b>Health & Fitness</b>\n"
         "  !workout               — workout program overview\n"
-        "  !meals                 — today's meal plan\n\n"
+        "  !meals                 — today's meal plan\n"
+        "  !sleep [hrs]           — log sleep or view history\n"
+        "  !expenses [today|week] — view expense summary\n\n"
         "<b>Lists & Tasks</b>\n"
         "  !todos                 — open todo list\n"
         "  !notes                 — saved notes\n"

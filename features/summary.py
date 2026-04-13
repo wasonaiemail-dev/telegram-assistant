@@ -132,6 +132,10 @@ _SUMMARY_USER = """Here's the data from this week ({week_start} to {week_end}):
 
 {todos_block}
 
+{sleep_block}
+
+{expense_block}
+
 {memory_block}
 
 Write the weekly summary now."""
@@ -144,6 +148,8 @@ async def _generate_summary(
     calendar_block: str,
     todos_block:    str,
     memory_block:   str,
+    sleep_block:    str = "",
+    expense_block:  str = "",
 ) -> str:
     from openai import AsyncOpenAI
     client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -155,6 +161,8 @@ async def _generate_summary(
         habit_block=habit_block or "No habit data.",
         calendar_block=calendar_block or "No calendar data.",
         todos_block=todos_block or "No completed todos.",
+        sleep_block=sleep_block or "No sleep data logged.",
+        expense_block=expense_block or "No expenses logged.",
         memory_block=(
             f"User context:\n{memory_block}" if memory_block else ""
         ),
@@ -226,6 +234,21 @@ async def send_weekly_summary(ctx) -> None:
     # Memory context is always included (not buyer-toggleable)
     memory_block = get_full_context()
 
+    # Sleep and expense blocks — always included when data exists
+    data_fresh = load_data()
+    sleep_block   = ""
+    expense_block = ""
+    try:
+        from features.sleep import get_sleep_weekly_section
+        sleep_block = get_sleep_weekly_section(data_fresh)
+    except Exception:
+        pass
+    try:
+        from features.expenses import get_expense_weekly_section
+        expense_block = get_expense_weekly_section(data_fresh)
+    except Exception:
+        pass
+
     # Generate GPT summary
     summary = await _generate_summary(
         week_start=week_start,
@@ -234,7 +257,14 @@ async def send_weekly_summary(ctx) -> None:
         calendar_block=calendar_block,
         todos_block=todos_block,
         memory_block=memory_block,
+        sleep_block=sleep_block,
+        expense_block=expense_block,
     )
 
     header = f"📊 *Weekly Summary — Week of {week_start}*\n\n"
     await ctx.reply_markdown(header + summary)
+
+    # Append raw sleep + expense data blocks as HTML (they're data, not narrative)
+    html_blocks = [b for b in [sleep_block, expense_block] if b]
+    if html_blocks:
+        await ctx.reply_html("\n\n".join(html_blocks))

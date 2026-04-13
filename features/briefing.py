@@ -493,6 +493,37 @@ async def _section_workout_stats(_now):
         return ""
 
 
+async def _section_expenses(_now):
+    """Yesterday's expense recap — only shown if expenses were logged."""
+    try:
+        import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+        from core.config import TIMEZONE as _TZ
+        from core.data import load_data
+        from features.expenses import EXPENSE_CATEGORIES, _label
+
+        data     = load_data()
+        expenses = data.get("expenses", [])
+        yesterday = (_now.date() - _dt.timedelta(days=1)).isoformat()
+
+        day_expenses = [e for e in expenses if e.get("date") == yesterday]
+        if not day_expenses:
+            return ""
+
+        totals: dict = {}
+        for e in day_expenses:
+            totals[e["category"]] = totals.get(e["category"], 0.0) + e["amount"]
+        grand_total = sum(totals.values())
+
+        lines = [f"💰 *Yesterday's Spending — ${grand_total:.2f}*"]
+        for cat in EXPENSE_CATEGORIES:
+            if cat in totals:
+                lines.append(f"  {_label(cat)}: ${totals[cat]:.2f}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 async def _build_base_sports_recap(_now) -> str:
     """
     Base sports recap — runs when the Sports Pack plugin is NOT installed.
@@ -613,6 +644,7 @@ _SECTION_BUILDERS = {
     "meals":             _section_meals_today,
     "journal_highlight": _section_journal_highlight,
     "workout_stats":     _section_workout_stats,
+    "expenses":          _section_expenses,
     "quote":             _section_quote,
     "word_of_day":       _section_word_of_day,
     "sports":            _section_sports,

@@ -49,6 +49,8 @@ MIGRATION CHECKLIST
     [x] briefing
     [x] weather
     [x] weekly_summary — Phase 4C: !weekly added to discord_bot.py
+    [x] expenses       — !expenses added to discord_bot.py
+    [x] sleep          — !sleep added to discord_bot.py
 """
 
 from __future__ import annotations
@@ -99,6 +101,8 @@ async def alfred_dispatch(
         MOOD_LOG, MOOD_VIEW,
         LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
         EXPORT_DATA,
+        EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
+        SLEEP_LOG, SLEEP_VIEW,
         BRIEFING, WEATHER, WEEKLY_SUMMARY,
         ASK, UNKNOWN,
     )
@@ -265,6 +269,16 @@ async def alfred_dispatch(
             from features.reply_assist import handle_reply_intent
             await handle_reply_intent(intent, ents, ctx)
 
+        # ── EXPENSES ──────────────────────────────────────────────────────────
+        elif intent in (EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE):
+            from features.expenses import handle_expense_intent
+            await handle_expense_intent(intent, ents, ctx)
+
+        # ── SLEEP ─────────────────────────────────────────────────────────────
+        elif intent in (SLEEP_LOG, SLEEP_VIEW):
+            from features.sleep import handle_sleep_intent
+            await handle_sleep_intent(intent, ents, ctx)
+
         # ── PLUGIN INTENTS (fallback) ─────────────────────────────────────────
         else:
             update  = ctx._update
@@ -360,6 +374,8 @@ def _build_core_intents():
             MOOD_LOG, MOOD_VIEW,
             LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
             EXPORT_DATA,
+            EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
+            SLEEP_LOG, SLEEP_VIEW,
             BRIEFING, WEATHER, WEEKLY_SUMMARY,
             ASK, UNKNOWN,
         )
@@ -382,6 +398,8 @@ def _build_core_intents():
             MOOD_LOG, MOOD_VIEW,
             LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
             EXPORT_DATA,
+            EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
+            SLEEP_LOG, SLEEP_VIEW,
             BRIEFING, WEATHER, WEEKLY_SUMMARY,
             ASK, UNKNOWN,
         }

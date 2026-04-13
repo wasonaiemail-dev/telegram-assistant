@@ -168,6 +168,7 @@ def load_data():
         data.setdefault("habit_log",      [])
         data.setdefault("sleep_log",      [])
         data.setdefault("mood_log",       [])
+        data.setdefault("expenses",       [])
         data.setdefault("undo_stack",     [])
 
         return data
@@ -213,6 +214,7 @@ def _empty_data():
         "habit_log":      [],
         "sleep_log":      [],
         "mood_log":       [],
+        "expenses":       [],
         "undo_stack":     [],
     }
 

@@ -754,6 +754,24 @@ async def cmd_synctasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _f(update, context)
 
 
+async def cmd_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.expenses import cmd_expenses as _f
+    ctx  = _make_telegram_ctx(update, context)
+    args = " ".join(context.args) if context.args else ""
+    await _f(ctx, period=args or "month")
+
+
+async def cmd_sleep(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.sleep import cmd_sleep as _f
+    ctx  = _make_telegram_ctx(update, context)
+    args = " ".join(context.args) if context.args else ""
+    await _f(ctx, args=args)
+
+
 async def cmd_habits(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update):
         return
@@ -1259,6 +1277,8 @@ def main() -> None:
     app.add_handler(CommandHandler("readlater", cmd_readlater))
     app.add_handler(CommandHandler("rl",        cmd_readlater))
     app.add_handler(CommandHandler("export",    cmd_export))
+    app.add_handler(CommandHandler("expenses",  cmd_expenses))
+    app.add_handler(CommandHandler("sleep",     cmd_sleep))
 
     # ── Plugin auto-discovery ────────────────────────────────────────────
     global _loaded_plugins

@@ -37,8 +37,8 @@
 1. ✅ **Google Tasks Two-Way Sync** — done April 12. `/synctasks` command + `auto_sync_tasks` job at 7:05am. Inherently two-way since Alfred writes directly to Google Tasks.
 2. **Reddit OAuth Setup** — see Immediate Blocker above. One-time config, no code needed.
 3. ✅ **Discord Phase 4C** — done April 12. Discord now at full feature parity.
-4. **Expense Tracking** — was a core feature, never ported. See Master Plan.
-5. **Sleep Tracking** — `"slept 7 hours"` bypass + `/sleep`. See Master Plan.
+4. ✅ **Expense Tracking** — done April 12. `features/expenses.py`. NL bypass, `/expenses`, briefing section (yesterday's spending), weekly summary integration.
+5. ✅ **Sleep Tracking** — done April 12. `features/sleep.py`. NL bypass, `/sleep [hrs]`, weekly summary integration.
 
 ---
 
@@ -126,6 +126,34 @@
   - `/synctasks` command — reads all Alfred Google Tasks lists and returns a consolidated summary: todos (total, overdue, high-priority), each shopping list (count + first 5 items), gift ideas count. Useful after adding items on phone to confirm Alfred sees them.
   - `auto_sync_tasks()` scheduled job — fires 5 minutes after the morning briefing (floats with briefing time, so always 5 min after even if Tyler changes his briefing time in `/setup`). Sends the same list summary automatically each morning.
   - `_job_auto_sync_tasks` wrapper added to `bot.py`. Scheduled in `_schedule_jobs` using `_briefing_h` and `_briefing_m + 5` (with hour rollover). `/synctasks` command handler added and registered.
+
+### Session 13 (April 12, 2026) — Expense Tracking + Sleep Tracking
+
+- **Built Expense Tracking — `features/expenses.py`:**
+  - `EXPENSE_ADD`, `EXPENSE_VIEW`, `EXPENSE_DELETE` intents added to `core/intent.py`
+  - Layer 1 keyword bypass: `"$45 groceries"`, `"spent $12 on coffee"`, `"show my expenses"` all caught without GPT
+  - Categories: groceries, dining, transport, health, entertainment, shopping, household, subscriptions, other
+  - `/expenses [today|week|month]` — Telegram command with period arg
+  - `!expenses [today|week]` — Discord command
+  - NL intent dispatch: `handle_expense_intent()` in `alfred_dispatch.py`
+  - Storage: `userdata.json["expenses"]` list of `{id, amount, category, note, date}`
+  - Briefing integration: `_section_expenses()` shows yesterday's spending in morning briefing (appears when data exists)
+  - Weekly summary: `get_expense_weekly_section()` — passed to GPT as context AND appended as HTML block
+
+- **Built Sleep Tracking — `features/sleep.py`:**
+  - `SLEEP_LOG`, `SLEEP_VIEW` intents added to `core/intent.py`
+  - Layer 1 keyword bypass: `"slept 7 hours"`, `"got 6.5 hours of sleep"`, `"show my sleep"` all caught
+  - `/sleep` — view 7-day history. `/sleep 7.5` — log hours. `/sleep 7.5 3` — log hours + quality (1–5)
+  - `!sleep [hrs]` — Discord command
+  - NL intent dispatch: `handle_sleep_intent()` in `alfred_dispatch.py`
+  - Storage: `userdata.json["sleep_log"]` (already existed with `{hours, quality, date, note}` schema)
+  - Visual progress bar: `████████░░` showing hours vs 8-hr target
+  - Overwrites same-day entry if re-logged
+  - Weekly summary: `get_sleep_weekly_section()` — avg, low, high, nights logged; passed to GPT + appended as HTML block
+
+- **`core/alfred_dispatch.py`** updated — `EXPENSE_*` and `SLEEP_*` intents added to imports, dispatch blocks, and `_build_core_intents()` set
+- **`core/data.py`** updated — `"expenses": []` added to `load_data()` migration defaults and `_empty_data()`
+- **Discord `!help`** updated — expenses and sleep listed under Health & Fitness
 
 ### Session 12 (cont.) — Discord Phase 4C Complete
 - **Diagnosed Phase 4C gap:** All feature files (meals, workout, journal, reply_assist, summary) already use `ctx: AlfredContext` pattern with zero Telegram-specific code. NL dispatch in `alfred_dispatch.py` already routed all these intents on Discord. The ONLY missing piece was the `!command` fast-path routing in `discord_bot.py`.

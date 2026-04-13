@@ -176,6 +176,15 @@ LINK_SNOOZE    = "link_snooze"
 # Export
 EXPORT_DATA = "export_data"
 
+# Expense tracking
+EXPENSE_ADD     = "expense_add"
+EXPENSE_VIEW    = "expense_view"
+EXPENSE_DELETE  = "expense_delete"
+
+# Sleep tracking
+SLEEP_LOG       = "sleep_log"
+SLEEP_VIEW      = "sleep_view"
+
 # Catch-all
 ASK             = "ask"
 UNKNOWN         = "unknown"
@@ -200,6 +209,8 @@ _ALL_INTENTS = {
     MOOD_LOG, MOOD_VIEW,
     LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
     EXPORT_DATA,
+    EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
+    SLEEP_LOG, SLEEP_VIEW,
     BRIEFING, WEATHER, WEEKLY_SUMMARY,
     ASK, UNKNOWN,
 }
@@ -629,6 +640,79 @@ def _build_keyword_rules() -> list:
 
     rules.append((p, _export))
 
+    # ── EXPENSE — ADD ─────────────────────────────────────────────────────
+    # "$45 groceries" / "spent $12 on coffee" / "logged $100 dining"
+    # "expense $25 gas" / "$8.50 lunch"
+    _EXPENSE_CATS = r"(?:groceries|grocery|dining|restaurant|food|coffee|transport|uber|lyft|gas|health|gym|entertainment|shopping|household|subscriptions?|misc|other)"
+    p = _r(
+        rf"^\$(\d+(?:\.\d{{1,2}})?)\s+({_EXPENSE_CATS})(?:\s+(.+))?$"
+        rf"|^(?:spent|paid|logged?|expense)\s+\$?(\d+(?:\.\d{{1,2}})?)\s+(?:on\s+|for\s+)?(.+?)(?:\s+(.+))?$"
+        rf"|^(?:expense)\s+(.+?)\s+\$(\d+(?:\.\d{{1,2}})?)"
+    )
+
+    def _expense_add(m, t):
+        # Pattern 1: "$45 groceries [note]"
+        if m.group(1):
+            return IntentResult(
+                intent=EXPENSE_ADD,
+                entities={"amount": float(m.group(1)), "category": m.group(2).strip().lower(), "note": (m.group(3) or "").strip()},
+                confidence="keyword", raw=t,
+            )
+        # Pattern 2: "spent $25 on coffee [note]"
+        if m.group(4):
+            return IntentResult(
+                intent=EXPENSE_ADD,
+                entities={"amount": float(m.group(4)), "category": m.group(5).strip().lower(), "note": (m.group(6) or "").strip()},
+                confidence="keyword", raw=t,
+            )
+        # Pattern 3: "expense coffee $25"
+        return IntentResult(
+            intent=EXPENSE_ADD,
+            entities={"amount": float(m.group(8)), "category": m.group(7).strip().lower(), "note": ""},
+            confidence="keyword", raw=t,
+        )
+
+    rules.append((p, _expense_add))
+
+    # ── EXPENSE — VIEW ────────────────────────────────────────────────────
+    # "show my expenses" / "how much did I spend" / "expense summary"
+    p = _r(r"(?:show|view|list|check)\s+(?:my\s+)?expenses?"
+           r"|how\s+much\s+(?:did\s+i\s+|have\s+i\s+)?spent?"
+           r"|expense\s+(?:summary|report|history|total)"
+           r"|what\s+did\s+i\s+spend")
+
+    def _expense_view(m, t):
+        return IntentResult(intent=EXPENSE_VIEW, entities={}, confidence="keyword", raw=t)
+
+    rules.append((p, _expense_view))
+
+    # ── SLEEP — LOG ───────────────────────────────────────────────────────
+    # "slept 7 hours" / "slept for 6.5 hours" / "got 8 hours of sleep"
+    # "sleep 7" / "logged 7 hours sleep"
+    p = _r(r"^(?:slept|sleep|got|logged?)\s+(?:for\s+)?(\d+(?:\.\d)?)\s*(?:hours?\s+(?:of\s+)?(?:sleep)?|hrs?)"
+           r"|^(\d+(?:\.\d)?)\s*(?:hours?\s+(?:of\s+)?sleep|hrs?\s+sleep)")
+
+    def _sleep_log(m, t):
+        hours = float(m.group(1) or m.group(2))
+        return IntentResult(
+            intent=SLEEP_LOG,
+            entities={"hours": hours},
+            confidence="keyword", raw=t,
+        )
+
+    rules.append((p, _sleep_log))
+
+    # ── SLEEP — VIEW ──────────────────────────────────────────────────────
+    # "show my sleep" / "sleep history" / "how much did I sleep"
+    p = _r(r"(?:show|view|check|list)\s+(?:my\s+)?sleep(?:\s+(?:log|history|stats?))?"
+           r"|how\s+(?:much|well|long)\s+(?:did\s+i\s+|have\s+i\s+)?slept?"
+           r"|sleep\s+(?:summary|stats?|history|average)")
+
+    def _sleep_view(m, t):
+        return IntentResult(intent=SLEEP_VIEW, entities={}, confidence="keyword", raw=t)
+
+    rules.append((p, _sleep_view))
+
     return rules
 
 
@@ -897,6 +981,21 @@ link_snooze     Snooze a saved link for later.
 export_data     Export all user data (journal, habits, mood, etc.) to a file.
                 Entities: {{}}
 
+expense_add     Log a new expense.
+                Entities: amount (float, required), category (str: groceries|dining|transport|health|entertainment|shopping|household|subscriptions|other), note (str optional)
+
+expense_view    Show expense history or summary.
+                Entities: days (int, default 30), category (str optional)
+
+expense_delete  Delete a logged expense.
+                Entities: query (str)
+
+sleep_log       Log hours of sleep.
+                Entities: hours (float, required), quality (int 1-5, optional), note (str optional)
+
+sleep_view      Show recent sleep history or average.
+                Entities: days (int, default 7)
+
 briefing        Request the morning briefing right now.
                 Entities: {{}}
 
@@ -927,6 +1026,8 @@ DISAMBIGUATION:
 - "done with X" / "mark X done" / "finished X" → todo_complete (not workout_log unless it explicitly says "workout").
 - "forget X" → memory_remove. "remember X" → memory_add.
 - "mood 7" or "feeling 8" → mood_log. "how's my mood" / "mood history" → mood_view.
+- "$45 groceries" / "spent $12 on coffee" → expense_add. "show my expenses" / "how much did I spend" → expense_view.
+- "slept 7 hours" / "got 6 hours of sleep" → sleep_log. "show my sleep" / "sleep history" → sleep_view.
 
 EXAMPLES:
 {{"user": "what's on my calendar today", "response": {{"intent": "cal_view", "entities": {{"period": "today"}}}}}}
