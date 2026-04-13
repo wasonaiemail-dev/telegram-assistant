@@ -103,6 +103,7 @@ async def alfred_dispatch(
         EXPORT_DATA,
         EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
         SLEEP_LOG, SLEEP_VIEW,
+        BRAINDUMP, UNDO,
         BRIEFING, WEATHER, WEEKLY_SUMMARY,
         ASK, UNKNOWN,
     )
@@ -269,6 +270,16 @@ async def alfred_dispatch(
             from features.reply_assist import handle_reply_intent
             await handle_reply_intent(intent, ents, ctx)
 
+        # ── UNDO ──────────────────────────────────────────────────────────────
+        elif intent == UNDO:
+            from features.undo import handle_undo_intent
+            await handle_undo_intent(ctx)
+
+        # ── BRAIN DUMP ────────────────────────────────────────────────────────
+        elif intent == BRAINDUMP:
+            from features.braindump import handle_braindump_intent
+            await handle_braindump_intent(intent, ents, ctx)
+
         # ── EXPENSES ──────────────────────────────────────────────────────────
         elif intent in (EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE):
             from features.expenses import handle_expense_intent
@@ -376,6 +387,7 @@ def _build_core_intents():
             EXPORT_DATA,
             EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
             SLEEP_LOG, SLEEP_VIEW,
+            BRAINDUMP, UNDO,
             BRIEFING, WEATHER, WEEKLY_SUMMARY,
             ASK, UNKNOWN,
         )
@@ -400,6 +412,7 @@ def _build_core_intents():
             EXPORT_DATA,
             EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
             SLEEP_LOG, SLEEP_VIEW,
+            BRAINDUMP, UNDO,
             BRIEFING, WEATHER, WEEKLY_SUMMARY,
             ASK, UNKNOWN,
         }

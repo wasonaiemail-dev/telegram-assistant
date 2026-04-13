@@ -340,7 +340,11 @@ async def handle_shopping_intent(
             if match:
                 label = _get_lists()[key]
                 if delete_shopping_item(svc, key, match["id"]):
-                    await ctx.reply_markdown(f"✓ Removed *{match['title']}* from *{label}*.")
+                    # Record for undo
+                    from core.data import load_data, save_data
+                    from features.undo import record_deletion
+                    _ud = load_data(); record_deletion(_ud, "shopping", title=match["title"], list_key=key); save_data(_ud)
+                    await ctx.reply_markdown(f"✓ Removed *{match['title']}* from *{label}*.  _(\"undo\" to restore)_")
                 else:
                     await ctx.reply("Couldn't remove that. Try again.")
                 return

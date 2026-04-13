@@ -185,6 +185,12 @@ EXPENSE_DELETE  = "expense_delete"
 SLEEP_LOG       = "sleep_log"
 SLEEP_VIEW      = "sleep_view"
 
+# Brain dump
+BRAINDUMP       = "braindump"
+
+# Undo
+UNDO            = "undo"
+
 # Catch-all
 ASK             = "ask"
 UNKNOWN         = "unknown"
@@ -211,6 +217,7 @@ _ALL_INTENTS = {
     EXPORT_DATA,
     EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
     SLEEP_LOG, SLEEP_VIEW,
+    BRAINDUMP, UNDO,
     BRIEFING, WEATHER, WEEKLY_SUMMARY,
     ASK, UNKNOWN,
 }
@@ -298,6 +305,28 @@ def _build_keyword_rules() -> list:
         )
 
     rules.append((_p_sleep_log_early, _sleep_log_early))
+
+    # ── UNDO ──────────────────────────────────────────────────────────────────
+    # Must be before other rules — "undo" is short and could match other things
+    p = _r(r"^(?:undo|undo\s+that|take\s+it\s+back|restore\s+(?:last|that)|cancel\s+(?:last|that))$")
+
+    def _undo(m, t):
+        return IntentResult(intent=UNDO, entities={}, confidence="keyword", raw=t)
+
+    rules.append((p, _undo))
+
+    # ── BRAIN DUMP ────────────────────────────────────────────────────────────
+    # "brain dump: ..." / "dump this: ..." / "braindump: ..."
+    p = _r(r"^(?:brain\s*dump|dump\s+this)[:\s]+(.+)$")
+
+    def _braindump(m, t):
+        return IntentResult(
+            intent=BRAINDUMP,
+            entities={"text": m.group(1).strip()},
+            confidence="keyword", raw=t,
+        )
+
+    rules.append((p, _braindump))
 
     # ── HABIT LOGGING ─────────────────────────────────────────────────────────
     # Built dynamically from HABIT_KEYWORDS so they stay in sync with config.
@@ -999,6 +1028,12 @@ link_snooze     Snooze a saved link for later.
 export_data     Export all user data (journal, habits, mood, etc.) to a file.
                 Entities: {{}}
 
+braindump       Sort a messy stream-of-consciousness into todos, reminders, notes, and shopping.
+                Entities: text (the raw dump text)
+
+undo            Undo the last deletion (todo, note, shopping item, or expense).
+                Entities: {{}}
+
 expense_add     Log a new expense.
                 Entities: amount (float, required), category (str: groceries|dining|transport|health|entertainment|shopping|household|subscriptions|other), note (str optional)
 
@@ -1046,6 +1081,8 @@ DISAMBIGUATION:
 - "mood 7" or "feeling 8" → mood_log. "how's my mood" / "mood history" → mood_view.
 - "$45 groceries" / "spent $12 on coffee" → expense_add. "show my expenses" / "how much did I spend" → expense_view.
 - "slept 7 hours" / "got 6 hours of sleep" → sleep_log. "show my sleep" / "sleep history" → sleep_view.
+- "undo" / "undo that" / "take it back" → undo.
+- "brain dump:" or "dump this:" followed by text → braindump. "/braindump" alone → braindump with empty text.
 
 EXAMPLES:
 {{"user": "what's on my calendar today", "response": {{"intent": "cal_view", "entities": {{"period": "today"}}}}}}

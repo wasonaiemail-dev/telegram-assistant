@@ -285,7 +285,11 @@ async def handle_todo_intent(
             return
 
         if delete_todo(svc, match["id"]):
-            await ctx.reply_markdown(f"✓ Deleted: *{match['title']}*")
+            # Record for undo
+            from core.data import load_data, save_data
+            from features.undo import record_deletion
+            _ud = load_data(); record_deletion(_ud, "todo", title=match["title"]); save_data(_ud)
+            await ctx.reply_markdown(f"✓ Deleted: *{match['title']}*  _(say \"undo\" to restore)_")
         else:
             await ctx.reply("Couldn't delete that. Try again.")
         return

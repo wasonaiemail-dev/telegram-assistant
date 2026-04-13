@@ -66,7 +66,7 @@ def _now_local() -> datetime.datetime:
 def _parse_range(raw: str | None) -> tuple[datetime.datetime, datetime.datetime]:
     """
     Parse a range string into (start_dt, end_dt).
-    Supported: "today", "tomorrow", "week", "N days" (e.g. "3 days").
+    Supported: "today", "tomorrow", "week", "weekend", "restofday", "N days".
     Defaults to today.
     """
     import pytz
@@ -83,6 +83,18 @@ def _parse_range(raw: str | None) -> tuple[datetime.datetime, datetime.datetime]
         end   = start + datetime.timedelta(days=1)
     elif raw == "week":
         end = start + datetime.timedelta(days=7)
+    elif raw == "weekend":
+        # Next Saturday and Sunday from today
+        days_to_sat = (5 - now.weekday()) % 7
+        if days_to_sat == 0 and now.weekday() == 5:
+            days_to_sat = 0  # today is Saturday
+        sat   = start + datetime.timedelta(days=days_to_sat)
+        start = sat
+        end   = sat + datetime.timedelta(days=2)  # Sat + Sun
+    elif raw == "restofday":
+        # From right now until midnight
+        start = now
+        end   = now.replace(hour=23, minute=59, second=59, microsecond=0)
     else:
         # Try "N days"
         try:
@@ -102,6 +114,10 @@ def _format_range_label(raw: str | None) -> str:
         return "Tomorrow"
     if raw == "week":
         return "This Week"
+    if raw == "weekend":
+        return "This Weekend"
+    if raw == "restofday":
+        return "Rest of Today"
     return f"Next {raw}"
 
 
@@ -178,7 +194,7 @@ async def handle_calendar_intent(
     # ── CAL_VIEW ──────────────────────────────────────────────────────────────
     if intent == CAL_VIEW:
         raw_range = entities.get("range", "today")
-        await _send_calendar_view(update.message.reply_text, svc, raw_range)
+        await _send_calendar_view(ctx.reply, svc, raw_range)
         return
 
     # ── CAL_ADD ───────────────────────────────────────────────────────────────

@@ -168,8 +168,10 @@ def load_data():
         data.setdefault("habit_log",      [])
         data.setdefault("sleep_log",      [])
         data.setdefault("mood_log",       [])
-        data.setdefault("expenses",       [])
-        data.setdefault("undo_stack",     [])
+        data.setdefault("expenses",         [])
+        data.setdefault("undo_stack",       [])
+        data.setdefault("_last_deleted",    [])
+        data.setdefault("resurfaced_notes", {})
 
         return data
 
@@ -211,11 +213,13 @@ def _empty_data():
         "workouts":       [],
         "gifts":          {},
         "habits":         {},
-        "habit_log":      [],
-        "sleep_log":      [],
-        "mood_log":       [],
-        "expenses":       [],
-        "undo_stack":     [],
+        "habit_log":        [],
+        "sleep_log":        [],
+        "mood_log":         [],
+        "expenses":         [],
+        "undo_stack":       [],
+        "_last_deleted":    [],
+        "resurfaced_notes": {},
     }
 
 

@@ -229,18 +229,39 @@ async def _send_expense_summary(ctx: AlfredContext, data: dict, period: str) -> 
 # ════════════════════════════════════════════════════════════════════════════
 
 async def _delete_expense(ctx: AlfredContext, data: dict, ents: dict) -> None:
-    # Show recent expenses and ask user to specify by number
+    """Delete most recent expense, or match by query if provided."""
     expenses = data.get("expenses", [])
-    recent   = sorted(expenses, key=lambda x: x["date"], reverse=True)[:5]
-    if not recent:
+    if not expenses:
         await ctx.reply("No expenses logged yet.")
         return
 
-    lines = ["Which expense would you like to delete? Reply with the number.\n"]
-    for i, e in enumerate(recent, 1):
-        note_str = f" — {e['note']}" if e.get("note") else ""
-        lines.append(f"{i}. ${e['amount']:.2f} {_label(e['category'])} ({e['date']}){note_str}")
-    await ctx.reply_markdown("\n".join(lines))
+    query = (ents.get("query") or "").strip().lower()
+
+    if query:
+        # Try to match by category or note
+        match = next(
+            (e for e in reversed(expenses)
+             if query in e.get("category", "").lower() or query in e.get("note", "").lower()),
+            None
+        )
+        if not match:
+            await ctx.reply(f'No expense matching "{query}" found. Try `/expenses` to see your list.')
+            return
+    else:
+        # Delete the most recent one
+        match = sorted(expenses, key=lambda x: (x["date"], x["id"]), reverse=True)[0]
+
+    # Record for undo BEFORE deleting
+    from features.undo import record_deletion
+    record_deletion(data, "expense", expense=dict(match))
+
+    data["expenses"] = [e for e in expenses if e.get("id") != match.get("id")]
+    save_data(data)
+
+    note_str = f" — {match['note']}" if match.get("note") else ""
+    await ctx.reply_markdown(
+        f"✓ Deleted expense: *${match['amount']:.2f}* {_label(match['category'])}{note_str}  _(\"undo\" to restore)_"
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════════

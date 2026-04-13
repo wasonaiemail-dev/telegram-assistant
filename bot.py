@@ -786,6 +786,43 @@ async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await _f(update, context)
 
 
+async def _cmd_calendar_shortcut(update: Update, context: ContextTypes.DEFAULT_TYPE, period: str) -> None:
+    """Shared handler for /today, /week, /weekend, /restofday."""
+    if not _is_allowed(update):
+        return
+    from features.calendar import _send_calendar_view, _get_service, _auth_error_msg
+    svc = _get_service()
+    if not svc:
+        await update.message.reply_text(_auth_error_msg())
+        return
+    await _send_calendar_view(update.message.reply_text, svc, period)
+
+
+async def cmd_today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _cmd_calendar_shortcut(update, context, "today")
+
+
+async def cmd_week(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _cmd_calendar_shortcut(update, context, "week")
+
+
+async def cmd_weekend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _cmd_calendar_shortcut(update, context, "weekend")
+
+
+async def cmd_restofday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _cmd_calendar_shortcut(update, context, "restofday")
+
+
+async def cmd_braindump(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update):
+        return
+    from features.braindump import cmd_braindump as _f
+    ctx  = _make_telegram_ctx(update, context)
+    args = " ".join(context.args) if context.args else ""
+    await _f(ctx, args=args)
+
+
 async def cmd_gifts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update):
         return
@@ -917,6 +954,83 @@ async def _job_travel_weather(context: ContextTypes.DEFAULT_TYPE) -> None:
         await send_travel_weather(context, ALLOWED_USER_ID)
     except Exception as e:
         logger.error(f"job_travel_weather error: {e}")
+
+
+async def _job_resurface_notes(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Daily job: resurface notes that haven't been surfaced in 30+ days.
+    Only surfaces up to 2 notes per day to avoid spam.
+    Tracks last_surfaced per task_id in userdata.json["resurfaced_notes"].
+    """
+    import datetime
+    try:
+        from core.google_auth import is_authorized, get_tasks_service
+        from adapters.google_tasks import list_notes
+        from core.data import load_data, save_data
+
+        if not is_authorized():
+            return
+
+        svc   = get_tasks_service()
+        notes = list_notes(svc) if svc else []
+        if not notes:
+            return
+
+        data    = load_data()
+        surfaced = data.setdefault("resurfaced_notes", {})
+        today   = datetime.date.today().isoformat()
+        tz_now  = datetime.datetime.now(pytz.timezone(TIMEZONE))
+
+        surfaced_today = []
+
+        for note in notes:
+            if len(surfaced_today) >= 2:
+                break
+
+            task_id = note.get("id", "")
+            title   = (note.get("title") or "").strip()
+            if not title or not task_id:
+                continue
+
+            # Parse Google Tasks "updated" field (RFC 3339: "2026-01-15T10:30:00.000Z")
+            updated_str = note.get("updated", "")
+            if not updated_str:
+                continue
+            try:
+                updated_dt = datetime.datetime.fromisoformat(
+                    updated_str.replace("Z", "+00:00")
+                )
+                age_days = (tz_now - updated_dt).days
+            except Exception:
+                continue
+
+            # Only resurface notes older than 30 days
+            if age_days < 30:
+                continue
+
+            # Check when last surfaced
+            last = surfaced.get(task_id)
+            if last:
+                days_since = (datetime.date.today() - datetime.date.fromisoformat(last)).days
+                if days_since < 30:
+                    continue  # Already surfaced recently
+
+            # Surface it
+            preview = title[:120] + ("…" if len(title) > 120 else "")
+            ctx     = _make_bg_ctx(context, ALLOWED_USER_ID)
+            await ctx.reply_markdown(
+                f"📝 *Note from {age_days} days ago — still relevant?*\n\n_{preview}_\n\n"
+                f'_(Reply `/notes delete [#]` to remove, or just ignore to keep it.)_'
+            )
+            surfaced[task_id] = today
+            surfaced_today.append(task_id)
+
+        if surfaced_today:
+            data["resurfaced_notes"] = surfaced
+            save_data(data)
+
+    except Exception as e:
+        logger.error(f"job_resurface_notes error: {e}")
 
 
 async def _job_weekly_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1075,6 +1189,11 @@ def _schedule_jobs(job_queue: JobQueue) -> None:
         _job_advance_recurring,
         time=dtime(0, 1, tzinfo=tz),   # 12:01 AM avoids DST midnight ambiguity
         name="advance_recurring",
+    )
+    job_queue.run_daily(
+        _job_resurface_notes,
+        time=dtime(9, 0, tzinfo=tz),   # 9:00 AM — resurface old notes
+        name="resurface_notes",
     )
     # Journal reminders — read configured times from userdata at runtime
     # Default: 9pm reminder, 9:30pm follow-up
@@ -1277,8 +1396,13 @@ def main() -> None:
     app.add_handler(CommandHandler("readlater", cmd_readlater))
     app.add_handler(CommandHandler("rl",        cmd_readlater))
     app.add_handler(CommandHandler("export",    cmd_export))
-    app.add_handler(CommandHandler("expenses",  cmd_expenses))
-    app.add_handler(CommandHandler("sleep",     cmd_sleep))
+    app.add_handler(CommandHandler("expenses",   cmd_expenses))
+    app.add_handler(CommandHandler("sleep",      cmd_sleep))
+    app.add_handler(CommandHandler("braindump",  cmd_braindump))
+    app.add_handler(CommandHandler("today",      cmd_today))
+    app.add_handler(CommandHandler("week",       cmd_week))
+    app.add_handler(CommandHandler("weekend",    cmd_weekend))
+    app.add_handler(CommandHandler("restofday",  cmd_restofday))
 
     # ── Plugin auto-discovery ────────────────────────────────────────────
     global _loaded_plugins

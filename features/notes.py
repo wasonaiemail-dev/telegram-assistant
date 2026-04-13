@@ -241,7 +241,11 @@ async def handle_note_intent(
 
         if delete_note(svc, note["id"]):
             preview = note.get("title", "(note)")[:60]
-            await ctx.reply_markdown(f"✓ Deleted: _{preview}_")
+            # Record for undo
+            from core.data import load_data, save_data
+            from features.undo import record_deletion
+            _ud = load_data(); record_deletion(_ud, "note", title=note.get("title", "")); save_data(_ud)
+            await ctx.reply_markdown(f"✓ Deleted: _{preview}_  _(say \"undo\" to restore)_")
         else:
             await ctx.reply("Couldn't delete that. Try again.")
         return

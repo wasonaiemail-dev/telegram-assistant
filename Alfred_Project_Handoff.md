@@ -127,6 +127,18 @@
   - `auto_sync_tasks()` scheduled job — fires 5 minutes after the morning briefing (floats with briefing time, so always 5 min after even if Tyler changes his briefing time in `/setup`). Sends the same list summary automatically each morning.
   - `_job_auto_sync_tasks` wrapper added to `bot.py`. Scheduled in `_schedule_jobs` using `_briefing_h` and `_briefing_m + 5` (with hour rollover). `/synctasks` command handler added and registered.
 
+### Session 14 (April 12, 2026) — Brain Dump, Undo, Note Aging, Calendar Shortcuts
+
+- **Brain Dump (`features/braindump.py`):** `/braindump [text]` + NL `"brain dump: ..."`. GPT parses raw stream of consciousness → creates todos/reminders/notes/shopping automatically. Returns confirmation summary. Discord: `!braindump`. Intent: `BRAINDUMP`.
+
+- **Undo (`features/undo.py`):** `"undo"` / `"undo that"` restores last deleted item. Works for: todos (recreates in Google Tasks), notes (recreates in Google Tasks), shopping items (recreates in Google Tasks), expenses (restores to JSON). Stack stores up to 5 deletions. `record_deletion()` wired into `todos.py`, `notes.py`, `shopping.py`, `expenses.py` delete flows. Deleted items now say "undo to restore" in confirmation. Intent: `UNDO`.
+
+- **Note Aging (`bot.py: _job_resurface_notes`):** Daily job at 9am. Fetches all notes from Google Tasks, checks `updated` timestamp. Notes older than 30 days AND not resurfaced in 30+ days get surfaced to user (max 2/day). Resurfacing tracked in `userdata.json["resurfaced_notes"] = {task_id: ISO_date}`.
+
+- **Calendar Shortcuts:** `/today`, `/week`, `/weekend`, `/restofday` — Telegram commands, all wired. `!today`, `!week`, `!weekend` — Discord commands. Added `weekend` (next Sat+Sun) and `restofday` (now → midnight) to `_parse_range()` in `calendar.py`. **Fixed existing bug**: `handle_calendar_intent` CAL_VIEW was calling `update.message.reply_text` (wrong) → fixed to `ctx.reply`. Discord help updated.
+
+- **Data schema:** `_last_deleted` and `resurfaced_notes` added to `core/data.py` migrations and `_empty_data()`.
+
 ### Session 13 (April 12, 2026) — Expense Tracking + Sleep Tracking
 
 - **Built Expense Tracking — `features/expenses.py`:**

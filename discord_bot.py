@@ -409,6 +409,54 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
             await ctx.reply("❌ Could not load task summary right now.")
         return True
 
+    if cmd == "braindump":
+        try:
+            from features.braindump import cmd_braindump
+            await cmd_braindump(ctx, args=args_str.strip())
+        except Exception as e:
+            logger.error(f"Discord !braindump error: {e}")
+            await ctx.reply("❌ Could not process brain dump right now.")
+        return True
+
+    if cmd in ("today",):
+        try:
+            from features.calendar import _send_calendar_view, _get_service
+            svc = _get_service()
+            if svc:
+                await _send_calendar_view(ctx.reply, svc, "today")
+            else:
+                await ctx.reply("Not connected to Google Calendar.")
+        except Exception as e:
+            logger.error(f"Discord !today error: {e}")
+            await ctx.reply("❌ Could not load calendar.")
+        return True
+
+    if cmd in ("week",):
+        try:
+            from features.calendar import _send_calendar_view, _get_service
+            svc = _get_service()
+            if svc:
+                await _send_calendar_view(ctx.reply, svc, "week")
+            else:
+                await ctx.reply("Not connected to Google Calendar.")
+        except Exception as e:
+            logger.error(f"Discord !week error: {e}")
+            await ctx.reply("❌ Could not load calendar.")
+        return True
+
+    if cmd == "weekend":
+        try:
+            from features.calendar import _send_calendar_view, _get_service
+            svc = _get_service()
+            if svc:
+                await _send_calendar_view(ctx.reply, svc, "weekend")
+            else:
+                await ctx.reply("Not connected to Google Calendar.")
+        except Exception as e:
+            logger.error(f"Discord !weekend error: {e}")
+            await ctx.reply("❌ Could not load calendar.")
+        return True
+
     if cmd == "expenses":
         try:
             from features.expenses import cmd_expenses
@@ -860,7 +908,11 @@ async def _discord_help(ctx, loaded_plugins) -> None:
         "  !briefing              — morning briefing\n"
         "  !weekly                — weekly summary\n"
         "  !journal               — start or view journal\n"
-        "  !reply [message]       — draft a reply to a message\n\n"
+        "  !reply [message]       — draft a reply to a message\n"
+        "  !braindump [text]      — sort a brain dump into todos/reminders/notes\n"
+        "  !today                 — today's calendar\n"
+        "  !week                  — this week's calendar\n"
+        "  !weekend               — this weekend's events\n\n"
         "<b>Health & Fitness</b>\n"
         "  !workout               — workout program overview\n"
         "  !meals                 — today's meal plan\n"
