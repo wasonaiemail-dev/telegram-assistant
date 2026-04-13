@@ -1398,27 +1398,39 @@ async def cmd_proactive(ctx: AlfredContext) -> None:
 
 async def handle_proactive_toggle(intent: str, entities: dict, ctx: AlfredContext) -> None:
     """Handle NL toggle: 'turn off expense alerts', 'enable meeting prep'."""
-    text = (entities.get("text") or entities.get("raw") or "").lower()
+    # Keyword rule sets structured entities: {"action": "on"/"off", "label": "habit streak"}
+    # GPT fallback sets: {"text": "turn off habit streak alerts"}
+    kw_action = entities.get("action")   # "on" or "off" (keyword rule)
+    kw_label  = (entities.get("label") or "").lower().strip()
 
-    # Determine on/off
-    enable = any(w in text for w in ("enable", "turn on", "on", "activate"))
-    disable = any(w in text for w in ("disable", "turn off", "off", "deactivate", "pause", "stop"))
+    # Fall back to parsing raw text for GPT-classified intents
+    text = (entities.get("text") or "").lower()
 
-    if not enable and not disable:
-        await ctx.reply("Say \"turn off [feature]\" or \"enable [feature]\". Use /proactive to see all options.")
-        return
+    # Determine on/off — prefer structured action, then parse text
+    if kw_action:
+        new_val = (kw_action == "on")
+    else:
+        enable  = any(w in text for w in ("enable", "turn on", "on", "activate"))
+        disable = any(w in text for w in ("disable", "turn off", "off", "deactivate", "pause", "stop"))
+        if not enable and not disable:
+            await ctx.reply("Say \"turn off [feature]\" or \"enable [feature]\". Use /proactive to see all options.")
+            return
+        new_val = enable
+
+    # Build search term — prefer structured label, fall back to text
+    search = kw_label or text
 
     # Find matching key
     matched_key = None
     for alias, key in _NL_ALIASES.items():
-        if alias in text:
+        if alias in search:
             matched_key = key
             break
 
     # Fallback: scan toggle labels directly
     if not matched_key:
-        for key, label in _TOGGLE_LABELS.items():
-            if label.lower() in text or key.replace("_", " ") in text:
+        for key, lbl in _TOGGLE_LABELS.items():
+            if lbl.lower() in search or key.replace("_", " ") in search:
                 matched_key = key
                 break
 
@@ -1430,7 +1442,6 @@ async def handle_proactive_toggle(intent: str, entities: dict, ctx: AlfredContex
 
     data = load_data()
     ps   = get_proactive_settings(data)
-    new_val = enable
     ps[matched_key] = new_val
     save_data(data)
 

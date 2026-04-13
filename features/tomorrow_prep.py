@@ -415,6 +415,10 @@ async def _build_tomorrow_prep_message(data: dict) -> str | None:
     while lines and lines[-1] == "":
         lines.pop()
 
+    # If nothing was added beyond the header, treat as "not busy"
+    if len(lines) <= 1:
+        return None
+
     return "\n".join(lines)
 
 
