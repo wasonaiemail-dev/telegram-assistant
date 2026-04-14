@@ -1019,9 +1019,12 @@ cal_view        Show calendar events.
                 Entities: period ("today"|"tomorrow"|"week"|"upcoming"), days (int, optional for "upcoming")
 
 cal_add         Create a calendar event.
-                Entities: title (required), date (required), time (optional), duration_minutes (optional int),
-                          location (optional), recur (optional: "daily"|"weekdays"|"weekly"|"monthly"|"yearly"),
-                          all_day (bool, default false), attendees (list of emails, optional)
+                Entities: title (required), start (ISO "YYYY-MM-DDTHH:MM" — always resolve relative dates like "next Monday at noon" to absolute ISO using today={_today_str}),
+                          end (ISO, optional), location (optional), description (optional),
+                          recur (optional: "daily"|"weekdays"|"weekly"|"monthly"|"yearly"),
+                          all_day (bool, default false), attendees (list of emails, optional),
+                          calendar (optional — e.g. "work" or "family" if user specifies a calendar).
+                Note: "add X at time" (no "remind me") → cal_add. "schedule X" → cal_add. Only use reminder_add when user explicitly says "remind me".
 
 cal_delete      Delete / cancel a calendar event.
                 Entities: query
@@ -1234,6 +1237,8 @@ CLASSIFICATION RULES:
 - If the message is a general knowledge question (not about the user's data), use "ask".
 - If the message references the user's personal data (todos, calendar, habits, etc.), use the specific intent.
 - "remind me to X" always maps to reminder_add, not todo_add.
+- "add X at [time]" or "add X on [date]" or "schedule X" (without "remind me") → cal_add, not reminder_add.
+- "add daily X at [time]" where X is an activity → cal_add with recur="daily", not reminder_add.
 - "add X to my list" without a specific list → shop_add with list_key "grocery".
 - Always resolve dates/times to absolute ISO format. Today is {_today_str}. Use "YYYY-MM-DD" for date-only, "YYYY-MM-DDTHH:MM" for date+time. Example: "remind me tomorrow at 3pm" → due "YYYY-MM-DDTHH:MM" using tomorrow's date.
 
@@ -1254,7 +1259,10 @@ EXAMPLES:
 {{"user": "show me my calendar for May 10", "response": {{"intent": "cal_view", "entities": {{"range": "May 10"}}}}}}
 {{"user": "what's on my schedule this week", "response": {{"intent": "cal_view", "entities": {{"range": "week"}}}}}}
 {{"user": "add almond milk to the grocery list", "response": {{"intent": "shop_add", "entities": {{"item": "almond milk", "list_key": "grocery"}}}}}}
-{{"user": "schedule dentist next Tuesday at 2pm", "response": {{"intent": "cal_add", "entities": {{"title": "Dentist", "date": "next Tuesday", "time": "2:00 PM"}}}}}}
+{{"user": "schedule dentist next Tuesday at 2pm", "response": {{"intent": "cal_add", "entities": {{"title": "Dentist", "start": "2026-04-21T14:00"}}}}}}
+{{"user": "add lunch with Sarah next Monday at noon", "response": {{"intent": "cal_add", "entities": {{"title": "Lunch with Sarah", "start": "2026-04-20T12:00"}}}}}}
+{{"user": "add daily workout at 7am", "response": {{"intent": "cal_add", "entities": {{"title": "Workout", "start": "2026-04-14T07:00", "recur": "daily"}}}}}}
+{{"user": "add team standup every weekday at 9am", "response": {{"intent": "cal_add", "entities": {{"title": "Team Standup", "start": "2026-04-14T09:00", "recur": "weekdays"}}}}}}
 {{"user": "I worked out this morning", "response": {{"intent": "habit_log", "entities": {{"habit_id": "workout"}}}}}}
 {{"user": "remember that I'm lactose intolerant", "response": {{"intent": "memory_add", "entities": {{"category": "Me", "fact": "I am lactose intolerant"}}}}}}
 {{"user": "what have I done this week", "response": {{"intent": "weekly_summary", "entities": {{}}}}}}

@@ -333,7 +333,20 @@ async def handle_calendar_intent(
         # Resolve target calendar (defaults to primary)
         write_cal_id = _resolve_write_calendar(cal_hint)
 
-        # Use Quick Add if we don't have a clean start time
+        # GPT may return separate date + time instead of a unified start ISO string.
+        # Merge them into start_str so the flexible parser handles both paths.
+        if not start_str:
+            date_part = entities.get("date", "").strip()
+            time_part = entities.get("time", "").strip()
+            if date_part and time_part:
+                start_str = f"{date_part} at {time_part}"
+            elif date_part:
+                start_str = date_part
+            elif time_part:
+                start_str = time_part
+
+        # No date/time at all → Google Quick Add with full NL string
+        # Always pass the full phrase so Google's NL parser resolves the date correctly.
         if not start_str:
             from adapters.google_calendar import quick_add_event
             result = quick_add_event(svc, title, calendar_id=write_cal_id)
@@ -348,11 +361,22 @@ async def handle_calendar_intent(
                     f"\"add [title] on [date] at [time]\"")
             return
 
-        # We have a start time — use flexible parser (handles ISO + NL like "4pm")
+        # We have a start time string — use flexible parser (handles ISO + NL like "4pm")
         now = _now_local()
         start_dt = _parse_datetime_flexible(start_str, reference=now)
         if not start_dt:
-            await ctx.reply(f"I couldn't parse that date/time. Try: \"[title] on March 15 at 2pm\"")
+            # dateutil couldn't parse it — pass full phrase to Google quick_add as last resort
+            from adapters.google_calendar import quick_add_event, format_event_brief
+            quick_text = f"{title} {start_str}"
+            result = quick_add_event(svc, quick_text, calendar_id=write_cal_id)
+            if result:
+                cal_label = f" → _{cal_hint}_ calendar" if cal_hint else ""
+                await ctx.reply(f"✅ Added: *{format_event_brief(result)}*{cal_label}",
+                    parse_mode="Markdown",
+                )
+            else:
+                await ctx.reply(f"I couldn't parse \"{start_str}\" as a date/time. "
+                    "Try: \"[title] on March 15 at 2pm\"")
             return
 
         end_dt = _parse_datetime_flexible(end_str, reference=now) if end_str else None
