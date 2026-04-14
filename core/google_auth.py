@@ -474,38 +474,50 @@ async def job_google_health_check(context):
     Daily job: fires at HEALTH_CHECK_HOUR:HEALTH_CHECK_MINUTE.
 
     Silently passes if the token is healthy.
-    Sends a warning to the buyer if:
-      - No token exists (never authenticated)
-      - Token cannot be refreshed
-      - Token will expire within 48 hours
+    Sends a warning to the buyer ONLY if:
+      - No token exists (never authenticated), OR
+      - The refresh attempt failed (refresh token revoked/expired — user must /auth again)
+      - The token file is missing a refresh_token (next expiry will require /auth)
+
+    NOTE: access tokens expire every ~1 hour and are auto-refreshed silently by
+    get_creds(). We deliberately do NOT warn based on access-token hours remaining
+    because that would fire a false alarm every single morning.
     """
+    # get_creds() auto-refreshes the access token if needed.
+    # If it returns None, the refresh token itself is gone or revoked — real problem.
     creds = get_creds()
 
     if not creds:
         await context.bot.send_message(
             chat_id=ALLOWED_USER_ID,
             text=(
-                f"⚠️ <b>{BOT_NAME} is not connected to Google.</b>\n\n"
+                f"⚠️ <b>{BOT_NAME} lost its Google connection.</b>\n\n"
                 "Your morning briefing will be missing calendar and task data.\n\n"
-                "Run /auth now to reconnect before your briefing."
+                "Run /auth to reconnect."
             ),
             parse_mode="HTML",
         )
-        audit_log("HEALTH_CHECK: token missing or invalid")
+        audit_log("HEALTH_CHECK: token missing or refresh failed")
         return
 
-    hours_left = token_expires_in_hours()
-    if hours_left is not None and hours_left < 48:
-        await context.bot.send_message(
-            chat_id=ALLOWED_USER_ID,
-            text=(
-                f"⚠️ Your Google token expires in ~{hours_left:.0f} hours.\n\n"
-                "Run /auth to reconnect and avoid interruptions."
-            ),
-            parse_mode="HTML",
-        )
-        audit_log(f"HEALTH_CHECK: token expiring soon ({hours_left:.0f}h)")
-        return
+    # Check that a refresh_token is actually stored — without it, the next
+    # time the access token (1h) expires there's nothing to refresh with.
+    from google.oauth2.credentials import Credentials as _Creds
+    try:
+        raw = _Creds.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        if not raw.refresh_token:
+            await context.bot.send_message(
+                chat_id=ALLOWED_USER_ID,
+                text=(
+                    f"⚠️ <b>{BOT_NAME}'s Google token is missing its refresh key.</b>\n\n"
+                    "This will stop working within the hour. Run /auth to reconnect."
+                ),
+                parse_mode="HTML",
+            )
+            audit_log("HEALTH_CHECK: no refresh_token in token file")
+            return
+    except Exception as e:
+        logger.warning(f"job_google_health_check: could not inspect token file: {e}")
 
     # Token is fine — log quietly, do not message the user
     audit_log("HEALTH_CHECK: OK")
