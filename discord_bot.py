@@ -561,6 +561,34 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
             await ctx.reply("❌ Could not load calendar.")
         return True
 
+    if cmd == "restofday":
+        try:
+            from features.calendar import _send_calendar_view, _get_service
+            svc = _get_service()
+            if svc:
+                await _send_calendar_view(ctx.reply, svc, "restofday")
+            else:
+                await ctx.reply("Not connected to Google Calendar.")
+        except Exception as e:
+            logger.error(f"Discord !restofday error: {e}")
+            await ctx.reply("❌ Could not load calendar.")
+        return True
+
+    if cmd == "cal":
+        # /cal [range] — e.g. /cal week, /cal 30days, /cal tomorrow
+        try:
+            from features.calendar import _send_calendar_view, _get_service
+            svc = _get_service()
+            if svc:
+                range_arg = args_str.strip() or "today"
+                await _send_calendar_view(ctx.reply, svc, range_arg)
+            else:
+                await ctx.reply("Not connected to Google Calendar.")
+        except Exception as e:
+            logger.error(f"Discord !cal error: {e}")
+            await ctx.reply("❌ Could not load calendar.")
+        return True
+
     if cmd == "expenses":
         try:
             from features.expenses import cmd_expenses
