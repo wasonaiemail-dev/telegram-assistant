@@ -86,6 +86,7 @@ SHOP_CLEAR      = "shop_clear_done"
 NOTE_ADD        = "note_add"
 NOTE_LIST       = "note_list"
 NOTE_DELETE     = "note_delete"
+NOTE_SEARCH     = "note_search"
 
 # Calendar
 CAL_VIEW        = "cal_view"
@@ -204,7 +205,7 @@ UNKNOWN         = "unknown"
 _ALL_INTENTS = {
     TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
     SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
-    NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND,
+    NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND,
     CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
     HABIT_LOG, HABIT_VIEW,
     REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
@@ -651,6 +652,24 @@ def _build_keyword_rules() -> list:
 
     rules.append((p, _note_list))
 
+    # ── NOTES — SEARCH ────────────────────────────────────────────────────────
+    # "find notes about dentist" / "search notes for budget" / "notes about X"
+    p = _r(r"(?:find|search|look\s+(?:up|for))\s+(?:my\s+)?notes?\s+(?:about|for|on|with)\s+(.+)"
+           r"|notes?\s+(?:about|on|mentioning|with)\s+(.+)"
+           r"|(?:find|search)\s+(?:in\s+)?(?:my\s+)?notes?\s+(.+)")
+
+    def _note_search(m, t):
+        # Pull first non-None capture group
+        query = next((g for g in m.groups() if g), "").strip()
+        return IntentResult(
+            intent=NOTE_SEARCH,
+            entities={"query": query},
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _note_search))
+
     # ── WEATHER ───────────────────────────────────────────────────────────────
     p = _r(r"(?:what(?:'s| is)|how(?:'s)?)\s+the\s+weather"
            r"|weather\s+(?:today|forecast|report|tomorrow)"
@@ -993,6 +1012,9 @@ note_list       List saved notes.
 note_delete     Delete a note.
                 Entities: query
 
+note_search     Search notes by keyword.
+                Entities: query (required — the search term)
+
 cal_view        Show calendar events.
                 Entities: period ("today"|"tomorrow"|"week"|"upcoming"), days (int, optional for "upcoming")
 
@@ -1004,8 +1026,14 @@ cal_add         Create a calendar event.
 cal_delete      Delete / cancel a calendar event.
                 Entities: query
 
-cal_update      Modify a calendar event.
-                Entities: query, changes (dict with any of: title, date, time, location, duration_minutes)
+cal_update      Modify a calendar event — reschedule, rename, or change details.
+                Entities: title (required — event to find, the CURRENT name),
+                          new_start (ISO "YYYY-MM-DDTHH:MM" for new start time — always include date),
+                          new_end (ISO "YYYY-MM-DDTHH:MM" for new end time, optional),
+                          new_title (str — new event name, only if user wants to rename it),
+                          new_location (str — new location, only if changing location),
+                          new_description (str — new description, only if changing description).
+                Note: today is {_today_str}. Always resolve relative times like "4pm tomorrow" or "next Monday at 2pm" to absolute ISO datetime strings.
 
 habit_log       Log a habit as completed today.
                 Entities: habit_id (one of: {_HABIT_IDS})
@@ -1238,6 +1266,11 @@ EXAMPLES:
 {{"user": "got the milk", "response": {{"intent": "shop_complete", "entities": {{"item": "milk", "list_key": "grocery"}}}}}}
 {{"user": "did chest and triceps for 45 min", "response": {{"intent": "workout_log", "entities": {{"description": "chest and triceps", "duration_min": 45}}}}}}
 {{"user": "forget that I hate cilantro", "response": {{"intent": "memory_remove", "entities": {{"fact": "I hate cilantro"}}}}}}
+{{"user": "find notes about dentist", "response": {{"intent": "note_search", "entities": {{"query": "dentist"}}}}}}
+{{"user": "search my notes for budget", "response": {{"intent": "note_search", "entities": {{"query": "budget"}}}}}}
+{{"user": "move my dentist appointment to 4pm tomorrow", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_start": "{_today_str}T16:00"}}}}}}
+{{"user": "rename my 3pm meeting to Project Kickoff", "response": {{"intent": "cal_update", "entities": {{"title": "3pm meeting", "new_title": "Project Kickoff"}}}}}}
+{{"user": "change the location of my dentist appointment to 123 Main St", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_location": "123 Main St"}}}}}}
 
 Return only the JSON for the user's message — no wrapper keys like "response"."""
 

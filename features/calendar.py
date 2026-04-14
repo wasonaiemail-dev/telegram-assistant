@@ -41,7 +41,7 @@ from telegram import Update
 from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
-from core.config import BOT_NAME, TIMEZONE
+from core.config import BOT_NAME, TIMEZONE, CALENDAR_NAMES
 from core.intent import CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,59 @@ def _auth_error_msg() -> str:
 
 def _now_local() -> datetime.datetime:
     return datetime.datetime.now(ZoneInfo(TIMEZONE))
+
+
+def _parse_datetime_flexible(raw: str, reference: datetime.datetime | None = None) -> datetime.datetime | None:
+    """
+    Parse a datetime string that may be ISO, a natural-language time like "4pm",
+    or a relative expression like "tomorrow at 3pm".
+
+    Returns a timezone-aware datetime in TIMEZONE, or None on failure.
+    Uses dateutil.parser with today's date as the default so bare times like
+    "4pm" resolve to today-at-4pm rather than erroring.
+    """
+    if not raw:
+        return None
+    import pytz
+    from dateutil import parser as _du_parser
+    from dateutil.parser import ParserError
+
+    tz = pytz.timezone(TIMEZONE)
+    now = reference or datetime.datetime.now(tz)
+
+    # Strip common NL prefixes ("to ", "at ", "on ") so dateutil doesn't choke
+    clean = raw.strip()
+
+    try:
+        # dateutil handles ISO strings, "4pm", "4:30 PM", "Monday at 2pm", etc.
+        # default= sets the date component when only a time is given (e.g. "4pm")
+        default_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if default_dt.tzinfo is None:
+            default_dt = tz.localize(default_dt)
+        parsed = _du_parser.parse(clean, default=default_dt.replace(tzinfo=None))
+        if parsed.tzinfo is None:
+            parsed = tz.localize(parsed)
+        else:
+            parsed = parsed.astimezone(tz)
+        return parsed
+    except (ParserError, ValueError, OverflowError):
+        return None
+
+
+def _resolve_write_calendar(calendar_hint: str) -> str:
+    """
+    Resolve a friendly calendar name (e.g. "work", "family") to a Google Calendar ID.
+    Falls back to "primary" if the name isn't in CALENDAR_NAMES or the dict is empty.
+    """
+    if not calendar_hint:
+        return "primary"
+    key = calendar_hint.strip().lower()
+    # Check CALENDAR_NAMES first
+    for name, cal_id in CALENDAR_NAMES.items():
+        if key in name.lower() or name.lower() in key:
+            return cal_id
+    # Check CALENDAR_IDS by position ("second calendar", "calendar 2", etc.)
+    return "primary"
 
 
 def _try_parse_specific_date(
@@ -265,24 +318,29 @@ async def handle_calendar_intent(
 
     # ── CAL_ADD ───────────────────────────────────────────────────────────────
     if intent == CAL_ADD:
-        title       = entities.get("title", "").strip()
-        start_str   = entities.get("start", "").strip()
-        end_str     = entities.get("end", "").strip()
-        location    = entities.get("location", "")
-        description = entities.get("description", "")
-        recur       = entities.get("recur", "")
+        title        = entities.get("title", "").strip()
+        start_str    = entities.get("start", "").strip()
+        end_str      = entities.get("end", "").strip()
+        location     = entities.get("location", "")
+        description  = entities.get("description", "")
+        recur        = entities.get("recur", "")
+        cal_hint     = entities.get("calendar", "")   # e.g. "work", "family"
 
         if not title:
             await ctx.reply("What's the event title? Try: \"add [title] on [date] at [time]\"")
             return
 
+        # Resolve target calendar (defaults to primary)
+        write_cal_id = _resolve_write_calendar(cal_hint)
+
         # Use Quick Add if we don't have a clean start time
         if not start_str:
             from adapters.google_calendar import quick_add_event
-            result = quick_add_event(svc, title)
+            result = quick_add_event(svc, title, calendar_id=write_cal_id)
             if result:
                 from adapters.google_calendar import format_event_brief
-                await ctx.reply(f"✅ Added: *{format_event_brief(result)}*",
+                cal_label = f" → _{cal_hint}_ calendar" if cal_hint else ""
+                await ctx.reply(f"✅ Added: *{format_event_brief(result)}*{cal_label}",
                     parse_mode="Markdown",
                 )
             else:
@@ -290,38 +348,35 @@ async def handle_calendar_intent(
                     f"\"add [title] on [date] at [time]\"")
             return
 
-        # We have a start time — use create_event
-        try:
-            import pytz
-            tz        = pytz.timezone(TIMEZONE)
-            start_dt  = datetime.datetime.fromisoformat(start_str)
-            if start_dt.tzinfo is None:
-                start_dt = tz.localize(start_dt)
-
-            if end_str:
-                end_dt = datetime.datetime.fromisoformat(end_str)
-                if end_dt.tzinfo is None:
-                    end_dt = tz.localize(end_dt)
-            else:
-                end_dt = start_dt + datetime.timedelta(hours=1)  # default 1h
-
-        except ValueError as e:
+        # We have a start time — use flexible parser (handles ISO + NL like "4pm")
+        now = _now_local()
+        start_dt = _parse_datetime_flexible(start_str, reference=now)
+        if not start_dt:
             await ctx.reply(f"I couldn't parse that date/time. Try: \"[title] on March 15 at 2pm\"")
             return
+
+        end_dt = _parse_datetime_flexible(end_str, reference=now) if end_str else None
+        if not end_dt:
+            end_dt = start_dt + datetime.timedelta(hours=1)  # default 1h
 
         kwargs = {"location": location, "description": description}
         if recur:
             from adapters.google_calendar import create_recurring_event
             result = create_recurring_event(
-                svc, title, start_dt, end_dt, recur, **kwargs
+                svc, title, start_dt, end_dt, recur,
+                calendar_id=write_cal_id, **kwargs
             )
         else:
             from adapters.google_calendar import create_event
-            result = create_event(svc, title, start_dt, end_dt, **kwargs)
+            result = create_event(
+                svc, title, start_dt, end_dt,
+                calendar_id=write_cal_id, **kwargs
+            )
 
         if result:
             from adapters.google_calendar import format_event_brief
-            await ctx.reply(f"✅ Added: *{format_event_brief(result)}*",
+            cal_label = f" → _{cal_hint}_ calendar" if cal_hint else ""
+            await ctx.reply(f"✅ Added: *{format_event_brief(result)}*{cal_label}",
                 parse_mode="Markdown",
             )
         else:
@@ -360,19 +415,28 @@ async def handle_calendar_intent(
 
     # ── CAL_UPDATE ────────────────────────────────────────────────────────────
     if intent == CAL_UPDATE:
-        title     = entities.get("title", "").strip()
-        new_start = entities.get("new_start", "").strip()
-        new_end   = entities.get("new_end", "").strip()
+        title        = entities.get("title", "").strip()
+        new_start    = entities.get("new_start", "").strip()
+        new_end      = entities.get("new_end", "").strip()
+        new_title    = entities.get("new_title", "").strip()
+        new_location = entities.get("new_location", "").strip()
+        new_desc     = entities.get("new_description", "").strip()
 
         if not title:
-            await ctx.reply("Which event should I update? Try: \"move my 3pm meeting to 4pm\"")
+            await ctx.reply(
+                "Which event should I update?\n"
+                "Examples:\n"
+                "• \"move my 3pm meeting to 4pm\"\n"
+                "• \"rename dentist to Annual Checkup\"\n"
+                "• \"change location of dentist to 123 Main St\""
+            )
             return
 
         from adapters.google_calendar import find_event_by_title, update_event, format_event_brief
 
         now   = _now_local()
         start = now - datetime.timedelta(days=1)
-        end   = now + datetime.timedelta(days=7)
+        end   = now + datetime.timedelta(days=14)   # wider window than delete
 
         match = find_event_by_title(svc, title, start=start, end=end)
         if not match:
@@ -381,26 +445,54 @@ async def handle_calendar_intent(
             return
 
         update_fields: dict = {}
-        try:
-            import pytz
-            tz = pytz.timezone(TIMEZONE)
-            if new_start:
-                ns = datetime.datetime.fromisoformat(new_start)
-                if ns.tzinfo is None:
-                    ns = tz.localize(ns)
-                update_fields["start"] = ns
-            if new_end:
-                ne = datetime.datetime.fromisoformat(new_end)
-                if ne.tzinfo is None:
-                    ne = tz.localize(ne)
-                update_fields["end"] = ne
-        except ValueError:
-            await ctx.reply("I couldn't parse the new time. Try: \"move [title] to [time]\"")
-            return
+
+        # ── Time changes: use flexible parser so "4pm", "tomorrow at 3pm" all work
+        if new_start:
+            ns = _parse_datetime_flexible(new_start, reference=now)
+            if ns is None:
+                await ctx.reply(
+                    f"I couldn't parse \"{new_start}\" as a time. "
+                    "Try a format like \"4pm tomorrow\" or \"April 20 at 2pm\"."
+                )
+                return
+            update_fields["start"] = ns
+            # If a new end isn't specified, shift end by the same delta as start
+            if not new_end:
+                from adapters.google_calendar import get_event_start_dt, get_event_end_dt
+                import pytz
+                tz = pytz.timezone(TIMEZONE)
+                old_start = get_event_start_dt(match, tz)
+                old_end   = get_event_end_dt(match, tz)
+                if old_start and old_end:
+                    delta = old_end - old_start
+                    update_fields["end"] = ns + delta
+
+        if new_end:
+            ne = _parse_datetime_flexible(new_end, reference=now)
+            if ne is None:
+                await ctx.reply(
+                    f"I couldn't parse \"{new_end}\" as a time. "
+                    "Try a format like \"5pm tomorrow\"."
+                )
+                return
+            update_fields["end"] = ne
+
+        # ── Field changes: title, location, description
+        if new_title:
+            update_fields["summary"] = new_title
+        if new_location:
+            update_fields["location"] = new_location
+        if new_desc:
+            update_fields["description"] = new_desc
 
         if not update_fields:
-            await ctx.reply("What should I change? I can update the start time, end time, "
-                "title, or location. Try: \"move [event] to [new time]\"")
+            await ctx.reply(
+                "What should I change? I can update:\n"
+                "• Time: \"move [event] to 4pm\"\n"
+                "• Name: \"rename [event] to [new name]\"\n"
+                "• Location: \"change location of [event] to [place]\"\n"
+                "• Description: \"update description of [event] to [text]\""
+            )
             return
 
         cal_id = match.get("_calendar_id", "primary")

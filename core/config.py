@@ -263,6 +263,17 @@ NOTE_AGING_DAYS         = 30    # days before a note is resurfaced
 CALENDAR_IDS        = ["primary"]   # <-- CUSTOMIZE (add more if needed)
 MAX_EVENTS_PER_FETCH = 20
 
+# CALENDAR_NAMES: friendly name → Google Calendar ID for targeted event creation.
+# Say "add to work calendar" and Alfred will write to the mapped calendar ID.
+# The key is what you'd say to Alfred (lowercase), the value is the calendar ID.
+# Find a calendar's ID in Google Calendar → gear → Settings → click calendar →
+# scroll to "Integrate calendar" → copy the Calendar ID.
+# Leave empty dict ({}) if you only use one calendar.
+CALENDAR_NAMES: dict[str, str] = {
+    # "work":   "your-work-calendar-id@group.calendar.google.com",  # <-- CUSTOMIZE
+    # "family": "your-family-calendar-id@group.calendar.google.com", # <-- CUSTOMIZE
+}
+
 
 # ---------------------------------------------------------------------------
 # EVENT PREP BRIEFING                                        # <-- CUSTOMIZE

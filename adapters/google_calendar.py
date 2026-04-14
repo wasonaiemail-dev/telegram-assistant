@@ -185,6 +185,7 @@ def create_event(
     location:    str  = "",
     attendees:   list[str] = None,    # list of email strings
     all_day:     bool = False,
+    calendar_id: str  = None,         # override write target; None → _PRIMARY_CALENDAR
 ) -> dict | None:
     """
     Create a new calendar event on the primary calendar.
@@ -223,12 +224,13 @@ def create_event(
     if attendees:
         body["attendees"] = [{"email": e} for e in attendees]
 
+    target_cal = calendar_id or _PRIMARY_CALENDAR
     try:
         event = service.events().insert(
-            calendarId=_PRIMARY_CALENDAR,
+            calendarId=target_cal,
             body=body,
         ).execute()
-        logger.info(f"Created event: '{title}' (id={event.get('id')})")
+        logger.info(f"Created event: '{title}' (id={event.get('id')}) on cal={target_cal}")
         return event
     except Exception as e:
         logger.error(f"create_event('{title}'): {e}")
@@ -245,6 +247,7 @@ def create_recurring_event(
     location:    str  = "",
     count:       int  | None = None,   # stop after N occurrences (None = forever)
     until:       str  | None = None,   # stop on this date "YYYY-MM-DD" (None = forever)
+    calendar_id: str  = None,          # override write target; None → _PRIMARY_CALENDAR
 ) -> dict | None:
     """
     Create a recurring calendar event.
@@ -298,19 +301,20 @@ def create_recurring_event(
     if location:
         body["location"] = location
 
+    target_cal = calendar_id or _PRIMARY_CALENDAR
     try:
         event = service.events().insert(
-            calendarId=_PRIMARY_CALENDAR,
+            calendarId=target_cal,
             body=body,
         ).execute()
-        logger.info(f"Created recurring event: '{title}' ({recurrence})")
+        logger.info(f"Created recurring event: '{title}' ({recurrence}) on cal={target_cal}")
         return event
     except Exception as e:
         logger.error(f"create_recurring_event('{title}'): {e}")
         return None
 
 
-def quick_add_event(service, text: str) -> dict | None:
+def quick_add_event(service, text: str, calendar_id: str = None) -> dict | None:
     """
     Create an event using Google Calendar's natural language quick-add API.
 
@@ -324,12 +328,13 @@ def quick_add_event(service, text: str) -> dict | None:
 
     Note: quick_add only works with the primary calendar.
     """
+    target_cal = calendar_id or _PRIMARY_CALENDAR
     try:
         event = service.events().quickAdd(
-            calendarId=_PRIMARY_CALENDAR,
+            calendarId=target_cal,
             text=text,
         ).execute()
-        logger.info(f"Quick-added event: '{text}' → id={event.get('id')}")
+        logger.info(f"Quick-added event: '{text}' → id={event.get('id')} on cal={target_cal}")
         return event
     except Exception as e:
         logger.error(f"quick_add_event('{text}'): {e}")

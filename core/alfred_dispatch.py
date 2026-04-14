@@ -89,7 +89,7 @@ async def alfred_dispatch(
     from core.intent import (
         TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
         SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
-        NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND,
+        NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND,
         CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
         HABIT_LOG, HABIT_VIEW,
         REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
@@ -138,7 +138,7 @@ async def alfred_dispatch(
             await handle_todo_intent(intent, ents, ctx)
 
         # -- NOTES ------------------------------------------------------------
-        elif intent in (NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND):
+        elif intent in (NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND):
             from features.notes import handle_note_intent
             await handle_note_intent(intent, ents, ctx)
 
@@ -385,7 +385,7 @@ def _build_core_intents():
         from core.intent import (
             TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
             SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
-            NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND,
+            NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND,
             CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
             HABIT_LOG, HABIT_VIEW,
             REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
@@ -411,7 +411,7 @@ def _build_core_intents():
         return {
             TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
             SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
-            NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND,
+            NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND,
             CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
             HABIT_LOG, HABIT_VIEW,
             REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,

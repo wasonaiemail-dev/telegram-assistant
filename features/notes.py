@@ -33,7 +33,7 @@ from telegram.ext import ContextTypes
 
 from core.alfred_context import AlfredContext
 from core.config import BOT_NAME
-from core.intent import NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_EDIT, NOTE_APPEND
+from core.intent import NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +248,36 @@ async def handle_note_intent(
             await ctx.reply_markdown(f"✓ Deleted: _{preview}_  _(say \"undo\" to restore)_")
         else:
             await ctx.reply("Couldn't delete that. Try again.")
+        return
+
+    # ── NOTE_SEARCH ───────────────────────────────────────────────────────────
+    if intent == NOTE_SEARCH:
+        query = entities.get("query", "").strip()
+        if not query:
+            await ctx.reply('What should I search for? Try: "find notes about dentist"')
+            return
+
+        from adapters.google_tasks import list_notes
+        notes = list_notes(svc)
+
+        if not notes:
+            await ctx.reply("📝 No notes saved yet.")
+            return
+
+        q = query.lower()
+        matches = [n for n in notes if q in n.get("title", "").lower()]
+
+        if not matches:
+            await ctx.reply_markdown(f"📝 No notes found matching *\"{query}\"*.")
+            return
+
+        lines = [f"📝 *Notes matching \"{query}\"* ({len(matches)})"]
+        for i, n in enumerate(matches, 1):
+            title = n.get("title", "(empty)")
+            if len(title) > 120:
+                title = title[:117] + "…"
+            lines.append(f"  {i}. {title}")
+        await ctx.reply_markdown("\n".join(lines))
         return
 
     # ── NOTE_EDIT ──────────────────────────────────────────────────────────────
