@@ -63,10 +63,54 @@ def _now_local() -> datetime.datetime:
     return datetime.datetime.now(ZoneInfo(TIMEZONE))
 
 
+def _try_parse_specific_date(
+    raw: str,
+    now: datetime.datetime,
+    tz,
+) -> datetime.datetime | None:
+    """
+    Try to parse a specific date string like "May 10", "May 10th", "2026-05-10".
+    Returns a timezone-aware midnight datetime, or None if it can't be parsed.
+    """
+    import re
+    # Strip ordinal suffixes: "10th" → "10", "3rd" → "3"
+    clean = re.sub(r"(\d+)(?:st|nd|rd|th)\b", r"\1", raw.strip())
+
+    # ISO date: "2026-05-10"
+    try:
+        d = datetime.datetime.strptime(clean, "%Y-%m-%d")
+        return tz.localize(d)
+    except ValueError:
+        pass
+
+    # "Month D" or "Month DD": "May 10", "january 3"
+    for fmt in ("%B %d", "%b %d"):
+        try:
+            d = datetime.datetime.strptime(clean.title(), fmt)
+            d = d.replace(year=now.year)
+            # If the date is already past this year, assume next year
+            if d.date() < now.date():
+                d = d.replace(year=now.year + 1)
+            return tz.localize(d)
+        except ValueError:
+            pass
+
+    # "Month DD YYYY": "May 10 2026"
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            d = datetime.datetime.strptime(clean.title(), fmt)
+            return tz.localize(d)
+        except ValueError:
+            pass
+
+    return None
+
+
 def _parse_range(raw: str | None) -> tuple[datetime.datetime, datetime.datetime]:
     """
     Parse a range string into (start_dt, end_dt).
-    Supported: "today", "tomorrow", "week", "weekend", "restofday", "N days".
+    Supported: "today", "tomorrow", "week", "weekend", "restofday", "N days",
+               specific dates ("May 10", "may 10th", "2026-05-10").
     Defaults to today.
     """
     import pytz
@@ -96,17 +140,24 @@ def _parse_range(raw: str | None) -> tuple[datetime.datetime, datetime.datetime]
         start = now
         end   = now.replace(hour=23, minute=59, second=59, microsecond=0)
     else:
-        # Try "N days"
+        # Try "N days" first
         try:
             n   = int(raw.replace("days", "").replace("day", "").strip())
             end = start + datetime.timedelta(days=max(1, n))
         except ValueError:
-            end = start + datetime.timedelta(days=1)
+            # Try specific date ("May 10", "2026-05-10", etc.)
+            parsed = _try_parse_specific_date(raw, now, tz)
+            if parsed:
+                start = parsed.replace(hour=0, minute=0, second=0, microsecond=0)
+                end   = start + datetime.timedelta(days=1)
+            else:
+                end = start + datetime.timedelta(days=1)
 
     return start, end
 
 
 def _format_range_label(raw: str | None) -> str:
+    import pytz, re
     raw = (raw or "today").lower().strip()
     if raw == "today":
         return "Today"
@@ -118,7 +169,21 @@ def _format_range_label(raw: str | None) -> str:
         return "This Weekend"
     if raw == "restofday":
         return "Rest of Today"
-    return f"Next {raw}"
+    # N days: "7days" → "Next 7 Days"
+    days_match = re.fullmatch(r"(\d+)\s*days?", raw)
+    if days_match:
+        n = int(days_match.group(1))
+        return f"Next {n} Day{'s' if n != 1 else ''}"
+    # Specific date: try to parse and format nicely ("May 10" → "Saturday May 10")
+    try:
+        tz  = pytz.timezone(TIMEZONE)
+        now = datetime.datetime.now(tz)
+        dt  = _try_parse_specific_date(raw, now, tz)
+        if dt:
+            return dt.strftime("%A, %B %-d")
+    except Exception:
+        pass
+    return raw.title()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -193,7 +258,8 @@ async def handle_calendar_intent(
 
     # ── CAL_VIEW ──────────────────────────────────────────────────────────────
     if intent == CAL_VIEW:
-        raw_range = entities.get("range", "today")
+        # Accept both "range" (new) and legacy "period" key from GPT/keyword paths
+        raw_range = entities.get("range") or entities.get("period", "today")
         await _send_calendar_view(ctx.reply, svc, raw_range)
         return
 

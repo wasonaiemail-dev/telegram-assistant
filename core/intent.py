@@ -589,18 +589,30 @@ def _build_keyword_rules() -> list:
            r"|(?:show|check)\s+(?:my\s+)?(?:calendar|schedule)")
 
     def _cal_view(m, t):
+        import re as _re
         tl = t.lower()
         if "week" in tl:
-            period = "week"
+            range_val = "week"
         elif "tomorrow" in tl:
-            period = "tomorrow"
+            range_val = "tomorrow"
         elif "today" in tl or "today's" in tl:
-            period = "today"
+            range_val = "today"
         else:
-            period = "today"
+            # Try to extract a specific date mention: "May 10", "May 10th", "Jan 3rd"
+            _date_re = _re.compile(
+                r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+                r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+                r"\s+(\d{1,2})(?:st|nd|rd|th)?\b",
+                _re.IGNORECASE,
+            )
+            date_match = _date_re.search(tl)
+            if date_match:
+                range_val = date_match.group(0).strip()  # e.g. "may 10"
+            else:
+                range_val = "today"
         return IntentResult(
             intent=CAL_VIEW,
-            entities={"period": period},
+            entities={"range": range_val},
             confidence="keyword",
             raw=t,
         )
@@ -1210,7 +1222,9 @@ DISAMBIGUATION:
 - "brain dump:" or "dump this:" followed by text → braindump. "/braindump" alone → braindump with empty text.
 
 EXAMPLES:
-{{"user": "what's on my calendar today", "response": {{"intent": "cal_view", "entities": {{"period": "today"}}}}}}
+{{"user": "what's on my calendar today", "response": {{"intent": "cal_view", "entities": {{"range": "today"}}}}}}
+{{"user": "show me my calendar for May 10", "response": {{"intent": "cal_view", "entities": {{"range": "May 10"}}}}}}
+{{"user": "what's on my schedule this week", "response": {{"intent": "cal_view", "entities": {{"range": "week"}}}}}}
 {{"user": "add almond milk to the grocery list", "response": {{"intent": "shop_add", "entities": {{"item": "almond milk", "list_key": "grocery"}}}}}}
 {{"user": "schedule dentist next Tuesday at 2pm", "response": {{"intent": "cal_add", "entities": {{"title": "Dentist", "date": "next Tuesday", "time": "2:00 PM"}}}}}}
 {{"user": "I worked out this morning", "response": {{"intent": "habit_log", "entities": {{"habit_id": "workout"}}}}}}

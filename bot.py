@@ -1348,10 +1348,17 @@ def _schedule_jobs(job_queue: JobQueue) -> None:
 
     # ── Proactive intelligence layer ─────────────────────────────────────────
     try:
-        from core.data import load_data, get_proactive_settings
-        _ps = get_proactive_settings(load_data())
-        _proactive_h = 8
-        _proactive_m = 30
+        from core.data import load_data, get_proactive_settings, get_sleep_schedule_settings
+        _data = load_data()
+        _ps   = get_proactive_settings(_data)
+        # Chronotype-aware daily check time
+        _chronotype = get_sleep_schedule_settings(_data).get("chronotype", "normal")
+        if _chronotype == "early":
+            _proactive_h, _proactive_m = 7, 0    # early birds get 7am
+        elif _chronotype == "night_owl":
+            _proactive_h, _proactive_m = 9, 30   # night owls get 9:30am
+        else:
+            _proactive_h, _proactive_m = 8, 30   # normal default
     except Exception:
         _ps = {}
         _proactive_h, _proactive_m = 8, 30
@@ -1521,6 +1528,7 @@ def main() -> None:
     app.add_handler(CommandHandler("reminders",  cmd_reminders))
     app.add_handler(CommandHandler("habits",     cmd_habits))
     app.add_handler(CommandHandler("calendar",   cmd_calendar))
+    app.add_handler(CommandHandler("cal",        cmd_calendar))
     app.add_handler(CommandHandler("gifts",      cmd_gifts))
     app.add_handler(CommandHandler("meals",      cmd_meals))
     app.add_handler(CommandHandler("workout",    cmd_workout))
