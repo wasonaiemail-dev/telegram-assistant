@@ -90,7 +90,7 @@ async def alfred_dispatch(
         TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
         SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
         NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND,
-        CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
+        CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE, CAL_EMOJI_SET,
         HABIT_LOG, HABIT_VIEW,
         REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
         GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE,
@@ -153,7 +153,7 @@ async def alfred_dispatch(
             await handle_shopping_intent(intent, ents, ctx)
 
         # -- CALENDAR ---------------------------------------------------------
-        elif intent in (CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE):
+        elif intent in (CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE, CAL_EMOJI_SET):
             from features.calendar import handle_calendar_intent
             await handle_calendar_intent(intent, ents, ctx)
 
@@ -386,7 +386,7 @@ def _build_core_intents():
             TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
             SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
             NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND,
-            CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
+            CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE, CAL_EMOJI_SET,
             HABIT_LOG, HABIT_VIEW,
             REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
             GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE,
@@ -412,7 +412,7 @@ def _build_core_intents():
             TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
             SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
             NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND,
-            CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
+            CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE, CAL_EMOJI_SET,
             HABIT_LOG, HABIT_VIEW,
             REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
             GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE,

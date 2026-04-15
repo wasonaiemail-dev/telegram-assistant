@@ -93,6 +93,7 @@ CAL_VIEW        = "cal_view"
 CAL_ADD         = "cal_add"
 CAL_DELETE      = "cal_delete"
 CAL_UPDATE      = "cal_update"
+CAL_EMOJI_SET   = "cal_emoji_set"
 
 # Habits
 HABIT_LOG       = "habit_log"
@@ -206,7 +207,7 @@ _ALL_INTENTS = {
     TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
     SHOP_ADD, SHOP_LIST, SHOP_COMPLETE, SHOP_DELETE, SHOP_CLEAR,
     NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND,
-    CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE,
+    CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE, CAL_EMOJI_SET,
     HABIT_LOG, HABIT_VIEW,
     REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
     GIFT_ADD, GIFT_LIST, GIFT_DONE, GIFT_DELETE,
@@ -619,6 +620,38 @@ def _build_keyword_rules() -> list:
         )
 
     rules.append((p, _cal_view))
+
+    # ── CALENDAR EMOJI SET ────────────────────────────────────────────────────
+    # "use 💪 for workout" / "set trading emoji to 📊" / "show calendar emojis" / "reset calendar emojis"
+    p = _r(
+        r"^(?:use|set|change|make)\s+(.+?)\s+(?:emoji|icon|symbol)\s+(?:to|as)\s+(\S+)$"
+        r"|^(?:use|set)\s+(\S+)\s+(?:for|on)\s+(.+?)(?:\s+events?)?$"
+        r"|^(?:show|list|view)\s+(?:my\s+)?(?:calendar\s+)?(?:custom\s+)?emojis?$"
+        r"|^reset\s+(?:calendar\s+)?emojis?$"
+    )
+
+    def _cal_emoji_set(m, t):
+        tl = t.lower().strip()
+        # show / reset commands
+        if tl.startswith(("show", "list", "view")):
+            return IntentResult(intent=CAL_EMOJI_SET, entities={"keyword": "show", "emoji": ""}, confidence="keyword", raw=t)
+        if tl.startswith("reset"):
+            return IntentResult(intent=CAL_EMOJI_SET, entities={"keyword": "reset", "emoji": ""}, confidence="keyword", raw=t)
+        groups = m.groups()
+        # Pattern 1: "use X emoji to 💪"  → groups (X, 💪, None, None)
+        # Pattern 2: "use 💪 for workout" → groups (None, None, 💪, workout)
+        if groups[0] and groups[1]:
+            return IntentResult(intent=CAL_EMOJI_SET, entities={"keyword": groups[0].strip().lower(), "emoji": groups[1].strip()}, confidence="keyword", raw=t)
+        if groups[2] and groups[3]:
+            # Detect which is emoji and which is keyword (emoji is a single char or short string)
+            a, b = groups[2].strip(), groups[3].strip().lower()
+            if len(a) <= 4:   # likely the emoji
+                return IntentResult(intent=CAL_EMOJI_SET, entities={"keyword": b, "emoji": a}, confidence="keyword", raw=t)
+            else:
+                return IntentResult(intent=CAL_EMOJI_SET, entities={"keyword": a.lower(), "emoji": b}, confidence="keyword", raw=t)
+        return IntentResult(intent=CAL_EMOJI_SET, entities={}, confidence="keyword", raw=t)
+
+    rules.append((p, _cal_emoji_set))
 
     # ── HABIT VIEW ────────────────────────────────────────────────────────────
     p = _r(r"(?:show|check|how(?:'s| are)?)\s+(?:my\s+)?habits?"
@@ -1088,6 +1121,11 @@ contact_add     Add a new contact.
 contact_update  Update notes for an existing contact.
                 Entities: name (required), updates (str)
 
+cal_emoji_set   Customize which emoji Alfred uses for a calendar event keyword.
+                Entities: keyword (str — the word to match in event titles, e.g. "workout"),
+                          emoji (str — the emoji to use, e.g. "💪").
+                Special keywords: "show"/"list" → display overrides. "reset"/"clear" → restore defaults.
+
 note_edit       Replace the content of an existing note.
                 Entities: ref (int or keyword str), new_text (str)
 
@@ -1276,6 +1314,10 @@ EXAMPLES:
 {{"user": "forget that I hate cilantro", "response": {{"intent": "memory_remove", "entities": {{"fact": "I hate cilantro"}}}}}}
 {{"user": "find notes about dentist", "response": {{"intent": "note_search", "entities": {{"query": "dentist"}}}}}}
 {{"user": "search my notes for budget", "response": {{"intent": "note_search", "entities": {{"query": "budget"}}}}}}
+{{"user": "use 💪 for workout events", "response": {{"intent": "cal_emoji_set", "entities": {{"keyword": "workout", "emoji": "💪"}}}}}}
+{{"user": "set the trading emoji to 📊", "response": {{"intent": "cal_emoji_set", "entities": {{"keyword": "trading", "emoji": "📊"}}}}}}
+{{"user": "show my calendar emojis", "response": {{"intent": "cal_emoji_set", "entities": {{"keyword": "show", "emoji": ""}}}}}}
+{{"user": "reset calendar emojis", "response": {{"intent": "cal_emoji_set", "entities": {{"keyword": "reset", "emoji": ""}}}}}}
 {{"user": "move my dentist appointment to 4pm tomorrow", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_start": "{_today_str}T16:00"}}}}}}
 {{"user": "rename my 3pm meeting to Project Kickoff", "response": {{"intent": "cal_update", "entities": {{"title": "3pm meeting", "new_title": "Project Kickoff"}}}}}}
 {{"user": "change the location of my dentist appointment to 123 Main St", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_location": "123 Main St"}}}}}}

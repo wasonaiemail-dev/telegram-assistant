@@ -42,7 +42,7 @@ from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME, TIMEZONE, CALENDAR_NAMES
-from core.intent import CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE
+from core.intent import CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE, CAL_EMOJI_SET
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,199 @@ def _resolve_write_calendar(calendar_hint: str) -> str:
             return cal_id
     # Check CALENDAR_IDS by position ("second calendar", "calendar 2", etc.)
     return "primary"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EMOJI TAGGING + TIME-BLOCK FORMATTER
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Default keyword → emoji map. Checked in order — first match wins.
+# Buyer can override any keyword via NL: "use 💪 for workout events"
+_DEFAULT_EMOJIS: list[tuple[str, str]] = [
+    ("luna",        "🌙"),
+    ("baby",        "🌙"),
+    ("bottles",     "🍼"),
+    ("workout",     "🏋️"),
+    ("gym",         "🏋️"),
+    ("exercise",    "🏋️"),
+    ("run",         "🏃"),
+    ("swim",        "🏊"),
+    ("yoga",        "🧘"),
+    ("breakfast",   "🥐"),
+    ("lunch",       "🍽️"),
+    ("dinner",      "🍽️"),
+    ("brunch",      "🍳"),
+    ("coffee",      "☕"),
+    ("trading",     "📈"),
+    ("market",      "📈"),
+    ("invest",      "📈"),
+    ("zoom",        "📞"),
+    ("call",        "📞"),
+    ("standup",     "💼"),
+    ("meeting",     "💼"),
+    ("interview",   "🤝"),
+    ("client",      "🤝"),
+    ("business",    "💼"),
+    ("doctor",      "💊"),
+    ("dentist",     "🦷"),
+    ("therapy",     "🧠"),
+    ("medical",     "💊"),
+    ("flight",      "✈️"),
+    ("travel",      "✈️"),
+    ("airport",     "✈️"),
+    ("trip",        "✈️"),
+    ("drive",       "🚗"),
+    ("pickup",      "🚗"),
+    ("commute",     "🚗"),
+    ("birthday",    "🎂"),
+    ("anniversary", "🥂"),
+    ("party",       "🎉"),
+    ("todo",        "✅"),
+    ("task",        "✅"),
+    ("focus",       "🎯"),
+    ("study",       "📚"),
+    ("class",       "📚"),
+    ("school",      "📚"),
+    ("haircut",     "💇"),
+    ("date",        "💕"),
+    ("church",      "⛪"),
+]
+_DEFAULT_EMOJI = "📅"   # fallback when nothing matches
+
+
+def _get_emoji_overrides() -> dict:
+    """Load buyer's custom keyword→emoji overrides from userdata."""
+    try:
+        from core.data import load_data
+        data = load_data()
+        return data.get("settings", {}).get("calendar_emoji_overrides", {})
+    except Exception:
+        return {}
+
+
+def _emoji_for_event(title: str, overrides: dict | None = None) -> str:
+    """Return the best emoji for an event title. Buyer overrides take priority."""
+    if overrides is None:
+        overrides = _get_emoji_overrides()
+    tl = title.lower()
+    # Buyer overrides first
+    for kw, emoji in overrides.items():
+        if kw.lower() in tl:
+            return emoji
+    # Built-in defaults
+    for kw, emoji in _DEFAULT_EMOJIS:
+        if kw in tl:
+            return emoji
+    return _DEFAULT_EMOJI
+
+
+def _time_block_label(hour: int) -> str:
+    if 5 <= hour < 12:
+        return "🌅 Morning"
+    elif 12 <= hour < 17:
+        return "☀️ Afternoon"
+    elif 17 <= hour < 21:
+        return "🌙 Evening"
+    else:
+        return "🌃 Night"
+
+
+def _format_event_line(ev: dict, overrides: dict) -> str:
+    """Single event line: emoji  7:00 AM  — Title (1h 30m)"""
+    from adapters.google_calendar import get_event_start_dt, get_event_duration_minutes
+    import pytz
+    tz = pytz.timezone(TIMEZONE)
+    title    = ev.get("summary", "Untitled")
+    emoji    = _emoji_for_event(title, overrides)
+    start_dt = get_event_start_dt(ev, tz)
+    time_str = start_dt.strftime("%-I:%M %p") if start_dt else "?"
+    mins     = get_event_duration_minutes(ev)
+    if mins and mins >= 60:
+        dur = f"{mins // 60}h{f' {mins % 60}m' if mins % 60 else ''}"
+    elif mins:
+        dur = f"{mins} min"
+    else:
+        dur = ""
+    dur_str = f" _({dur})_" if dur else ""
+    return f"{emoji}  *{time_str}*  {title}{dur_str}"
+
+
+def _format_blocks_today(events: list, label: str) -> str:
+    """
+    Format a single-day event list into time blocks (Morning / Afternoon / Evening).
+    Returns Markdown-formatted string.
+    """
+    import pytz
+    tz        = pytz.timezone(TIMEZONE)
+    overrides = _get_emoji_overrides()
+
+    if not events:
+        return f"📅 *{label}*\n  No events."
+
+    # Group events into time blocks
+    blocks: dict[str, list] = {}
+    for ev in events:
+        from adapters.google_calendar import get_event_start_dt
+        start_dt = get_event_start_dt(ev, tz)
+        block    = _time_block_label(start_dt.hour) if start_dt else "🌃 Night"
+        blocks.setdefault(block, []).append(ev)
+
+    # Fixed order
+    block_order = ["🌅 Morning", "☀️ Afternoon", "🌙 Evening", "🌃 Night"]
+
+    lines = [f"📅 *{label}* — {len(events)} event{'s' if len(events) != 1 else ''}"]
+    for block_name in block_order:
+        if block_name not in blocks:
+            continue
+        lines.append(f"\n_{block_name}_")
+        for ev in blocks[block_name]:
+            lines.append("  " + _format_event_line(ev, overrides))
+
+    return "\n".join(lines)
+
+
+def _format_blocks_multiday(events: list, label: str) -> str:
+    """
+    Format a multi-day event list grouped by date (day separator headers).
+    Returns Markdown-formatted string.
+    """
+    import pytz
+    tz        = pytz.timezone(TIMEZONE)
+    overrides = _get_emoji_overrides()
+
+    if not events:
+        return f"📅 *{label}*\n  No events."
+
+    # Group by date
+    days: dict[str, list] = {}
+    for ev in events:
+        from adapters.google_calendar import get_event_start_dt
+        start_dt = get_event_start_dt(ev, tz)
+        day_key  = start_dt.strftime("%Y-%m-%d") if start_dt else "unknown"
+        days.setdefault(day_key, []).append(ev)
+
+    lines = [f"📅 *{label}* — {len(events)} event{'s' if len(events) != 1 else ''}"]
+    for day_key in sorted(days.keys()):
+        day_events = days[day_key]
+        # Day header
+        try:
+            day_dt = datetime.datetime.strptime(day_key, "%Y-%m-%d")
+            day_label = day_dt.strftime("%A, %b %-d")
+        except Exception:
+            day_label = day_key
+        lines.append(f"\n*{day_label}*")
+        for ev in day_events:
+            lines.append("  " + _format_event_line(ev, overrides))
+
+    return "\n".join(lines)
+
+
+def _is_multiday_range(raw_range: str) -> bool:
+    """Return True if the range covers more than one day."""
+    r = (raw_range or "today").lower().strip()
+    if r in ("today", "tomorrow", "restofday"):
+        return False
+    return True   # week, weekend, Ndays, specific date ranges all multi-day
 
 
 def _try_parse_specific_date(
@@ -267,7 +460,7 @@ async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def _send_calendar_view(reply_fn, svc, raw_range: str) -> None:
     """Fetch and format events for a given range string."""
-    from adapters.google_calendar import get_events_range, format_event_brief
+    from adapters.google_calendar import get_events_range
 
     try:
         start, end = _parse_range(raw_range)
@@ -279,18 +472,21 @@ async def _send_calendar_view(reply_fn, svc, raw_range: str) -> None:
 
     label = _format_range_label(raw_range)
 
-    if not events:
-        await reply_fn(
-            f"📅 *{label}*\n  No events.",
-            parse_mode="Markdown",
-        )
-        return
+    try:
+        if _is_multiday_range(raw_range):
+            text = _format_blocks_multiday(events, label)
+        else:
+            text = _format_blocks_today(events, label)
+    except Exception as e:
+        logger.error(f"_send_calendar_view: formatter error: {e}", exc_info=True)
+        # Graceful fallback to plain list
+        from adapters.google_calendar import format_event_brief
+        lines = [f"📅 *{label}* ({len(events)} event(s))"]
+        for ev in events:
+            lines.append(f"  • {format_event_brief(ev)}")
+        text = "\n".join(lines)
 
-    lines = [f"📅 *{label}* ({len(events)} event(s))"]
-    for ev in events:
-        lines.append(f"  • {format_event_brief(ev)}")
-
-    await reply_fn("\n".join(lines), parse_mode="Markdown")
+    await reply_fn(text, parse_mode="Markdown")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -528,3 +724,53 @@ async def handle_calendar_intent(
         else:
             await ctx.reply("Couldn't update that event. Try again.")
         return
+
+    # ── CAL_EMOJI_SET ─────────────────────────────────────────────────────────
+    if intent == CAL_EMOJI_SET:
+        keyword = entities.get("keyword", "").strip().lower()
+        emoji   = entities.get("emoji", "").strip()
+
+        if not keyword or not emoji:
+            await ctx.reply(
+                "Tell me a keyword and an emoji.\n"
+                "Example: \"use 💪 for workout events\""
+            )
+            return
+
+        # Special commands: show overrides or reset
+        if keyword in ("show", "list", "all"):
+            overrides = _get_emoji_overrides()
+            if not overrides:
+                await ctx.reply(
+                    "📅 No custom calendar emojis set.\n"
+                    "All events use the default emoji rules.\n"
+                    "Example: \"use 💪 for workout events\""
+                )
+            else:
+                lines = ["📅 *Your custom calendar emojis:*\n"]
+                for kw, em in overrides.items():
+                    lines.append(f"  {em}  {kw}")
+                lines.append("\n_Say \"reset calendar emojis\" to clear all._")
+                await ctx.reply_markdown("\n".join(lines))
+            return
+
+        if keyword in ("reset", "clear", "default"):
+            from core.data import load_data, save_data
+            data = load_data()
+            data.setdefault("settings", {}).pop("calendar_emoji_overrides", None)
+            save_data(data)
+            await ctx.reply("✅ Calendar emojis reset to defaults.")
+            return
+
+        # Save the override
+        from core.data import load_data, save_data
+        data = load_data()
+        overrides = data.setdefault("settings", {}).setdefault("calendar_emoji_overrides", {})
+        overrides[keyword] = emoji
+        save_data(data)
+        await ctx.reply_markdown(
+            f"✅ Got it — I'll use {emoji} for events containing *\"{keyword}\"*.\n"
+            f"_Say \"show calendar emojis\" to see all your custom rules._"
+        )
+        return
+
