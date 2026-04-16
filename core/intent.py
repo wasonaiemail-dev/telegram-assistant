@@ -662,31 +662,32 @@ def _build_keyword_rules() -> list:
         r"|show\s+(?:all|every)\s+(?:week\s+)?events?"
         r"|show\s+repeating\s+events?"
         r"|disable\s+(?:event\s+)?(?:repeat\s+)?filter"
-        r"|always\s+show\s+(.+)"
-        r"|never\s+hide\s+(.+)"
-        r"|whitelist\s+(.+)"
-        r"|remove\s+(.+?)\s+from\s+(?:the\s+)?whitelist"
-        r"|stop\s+always\s+showing\s+(.+)"
+        r"|always\s+show\s+.+"
+        r"|never\s+hide\s+.+"
+        r"|(?:whitelist|exempt)\s+.+"
+        r"|remove\s+.+?\s+from\s+(?:the\s+)?whitelist"
+        r"|stop\s+always\s+showing\s+.+"
         r"|show\s+(?:calendar\s+)?(?:event\s+)?(?:filter|whitelist)"
         r"|calendar\s+filter\s+settings?"
     )
-    def _cal_repeat_filter(m, t, tl):
-        # Determine action from which part of the pattern matched
-        if re.search(r"hide\s+(?:repeating|daily|recurring)\s+events?|filter\s+(?:out\s+)?(?:repeating|daily|recurring)\s+events?", tl):
-            return IntentResult(intent=CAL_REPEAT_FILTER, entities={"action": "hide"}, confidence="keyword", raw=t)
-        if re.search(r"show\s+(?:all|every)\s+(?:week\s+)?events?|show\s+repeating\s+events?|disable\s+(?:event\s+)?(?:repeat\s+)?filter", tl):
-            return IntentResult(intent=CAL_REPEAT_FILTER, entities={"action": "show"}, confidence="keyword", raw=t)
-        if re.search(r"show\s+(?:calendar\s+)?(?:event\s+)?(?:filter|whitelist)|calendar\s+filter\s+settings?", tl):
-            return IntentResult(intent=CAL_REPEAT_FILTER, entities={"action": "list"}, confidence="keyword", raw=t)
-        # Whitelist add: "always show X" / "never hide X" / "whitelist X"
-        add_m = re.search(r"(?:always\s+show|never\s+hide|whitelist)\s+(.+)", tl)
+    def _cal_repeat_filter(m, t):
+        tl = t.lower().strip()
+        # Whitelist add: "always show X" / "never hide X" — check BEFORE show/hide
+        add_m = re.search(r"(?:always\s+show|never\s+hide|(?:whitelist|exempt))\s+(.+)", tl)
         if add_m:
             return IntentResult(intent=CAL_REPEAT_FILTER, entities={"action": "whitelist_add", "title": add_m.group(1).strip()}, confidence="keyword", raw=t)
-        # Whitelist remove: "remove X from whitelist" / "stop always showing X"
+        # Whitelist remove
         rem_m = re.search(r"remove\s+(.+?)\s+from\s+(?:the\s+)?whitelist|stop\s+always\s+showing\s+(.+)", tl)
         if rem_m:
             title = (rem_m.group(1) or rem_m.group(2) or "").strip()
             return IntentResult(intent=CAL_REPEAT_FILTER, entities={"action": "whitelist_remove", "title": title}, confidence="keyword", raw=t)
+        # List filter settings
+        if re.search(r"show\s+(?:calendar\s+)?(?:event\s+)?(?:filter|whitelist)|calendar\s+filter\s+settings?", tl):
+            return IntentResult(intent=CAL_REPEAT_FILTER, entities={"action": "list"}, confidence="keyword", raw=t)
+        # Show all
+        if re.search(r"show\s+(?:all|every)\s+(?:week\s+)?events?|show\s+repeating\s+events?|disable\s+(?:event\s+)?(?:repeat\s+)?filter", tl):
+            return IntentResult(intent=CAL_REPEAT_FILTER, entities={"action": "show"}, confidence="keyword", raw=t)
+        # Default: hide
         return IntentResult(intent=CAL_REPEAT_FILTER, entities={"action": "hide"}, confidence="keyword", raw=t)
     rules.append((p, _cal_repeat_filter))
 

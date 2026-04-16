@@ -154,17 +154,23 @@ def find_event_by_title(
     service,
     title:       str,
     days_ahead:  int = 30,
+    start:       datetime.datetime = None,
+    end:         datetime.datetime = None,
 ) -> dict | None:
     """
     Find the next upcoming event whose summary contains `title` (case-insensitive).
     Searches within the next `days_ahead` days across all CALENDAR_IDS.
+    Optionally accepts explicit `start` and `end` datetime bounds.
     Returns the first match (earliest start), or None if not found.
     """
     import pytz
-    tz    = pytz.timezone(TIMEZONE)
-    now   = datetime.datetime.now(tz)
-    end   = now + datetime.timedelta(days=days_ahead)
-    events = get_events_range(service, now, end, max_results=100)
+    tz  = pytz.timezone(TIMEZONE)
+    now = datetime.datetime.now(tz)
+    if start is None:
+        start = now
+    if end is None:
+        end = now + datetime.timedelta(days=days_ahead)
+    events = get_events_range(service, start, end, max_results=100)
     title_lower = title.lower()
     for e in events:
         if title_lower in e.get("summary", "").lower():
