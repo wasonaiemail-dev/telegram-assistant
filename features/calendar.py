@@ -832,7 +832,7 @@ async def handle_calendar_intent(
             await ctx.reply_markdown(
                 "✅ *Repeating events hidden from multi-day views.*\n"
                 "Events appearing 3+ days in a view are now filtered out.\n"
-                "_Say \"show all events\" to turn this off, or \"always show [title]\" to exempt a specific event._"
+                "_Say \"show all events\" to turn this off, or \"always show EVENT NAME\" to exempt a specific event._"
             )
             return
 
@@ -852,14 +852,14 @@ async def handle_calendar_intent(
                     lines.append(f"  • {title}")
             else:
                 lines.append("_No whitelist entries — all repeating events are hidden._")
-            lines.append("\n_Commands: \"hide repeating events\" · \"show all events\" · \"always show [title]\" · \"remove [title] from whitelist\"_")
+            lines.append("\n_Commands: \"hide repeating events\" · \"show all events\" · \"always show EVENT NAME\" · \"remove EVENT NAME from whitelist\"_")
             await ctx.reply_markdown("\n".join(lines))
             return
 
         if action == "whitelist_add":
             title = entities.get("title", "").strip()
             if not title:
-                await ctx.reply("Which event should I always show? Say \"always show [event title]\".")
+                await ctx.reply("Which event should I always show? Say \"always show EVENT NAME\".")
                 return
             wl = cfg.setdefault("whitelist", [])
             if title.lower() not in [w.lower() for w in wl]:
@@ -874,7 +874,7 @@ async def handle_calendar_intent(
         if action == "whitelist_remove":
             title = entities.get("title", "").strip()
             if not title:
-                await ctx.reply("Which event should I remove from the whitelist? Say \"remove [event title] from whitelist\".")
+                await ctx.reply("Which event should I remove from the whitelist? Say \"remove EVENT NAME from whitelist\".")
                 return
             wl = cfg.get("whitelist", [])
             new_wl = [w for w in wl if w.lower() != title.lower()]
