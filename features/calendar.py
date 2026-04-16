@@ -265,14 +265,28 @@ def _format_blocks_today(events: list, label: str) -> str:
     return "\n".join(lines)
 
 
+def _get_calendar_filter_settings() -> dict:
+    """Load the repeat-filter settings from userdata.json."""
+    from core.data import load_data
+    data = load_data()
+    s = data.get("settings", {})
+    return s.get("calendar_filter", {"hide_repeating": True, "whitelist": []})
+
+
 def _format_blocks_multiday(events: list, label: str) -> str:
     """
     Format a multi-day event list grouped by date (day separator headers).
+    If hide_repeating is on, events appearing 3+ times in the view are
+    hidden entirely (buyer's whitelist exempts specific titles).
     Returns Markdown-formatted string.
     """
     import pytz
+    from collections import defaultdict
     tz        = pytz.timezone(TIMEZONE)
     overrides = _get_emoji_overrides()
+    flt       = _get_calendar_filter_settings()
+    hide_on   = flt.get("hide_repeating", True)
+    whitelist = {w.lower().strip() for w in flt.get("whitelist", [])}
 
     if not events:
         return f"📅 *{label}*\n  No events."
@@ -285,18 +299,47 @@ def _format_blocks_multiday(events: list, label: str) -> str:
         day_key  = start_dt.strftime("%Y-%m-%d") if start_dt else "unknown"
         days.setdefault(day_key, []).append(ev)
 
-    lines = [f"📅 *{label}* — {len(events)} event{'s' if len(events) != 1 else ''}"]
+    # Identify titles that appear 3+ days and are not whitelisted
+    hidden_titles: set[str] = set()
+    if hide_on:
+        title_day_count: dict[str, set] = defaultdict(set)
+        for day_key, day_evs in days.items():
+            for ev in day_evs:
+                t = (ev.get("summary") or "Untitled").strip().lower()
+                title_day_count[t].add(day_key)
+        hidden_titles = {
+            t for t, dk in title_day_count.items()
+            if len(dk) >= 3 and t not in whitelist
+        }
+
+    # Count visible events for the header
+    visible_events = [
+        ev for ev in events
+        if (ev.get("summary") or "Untitled").strip().lower() not in hidden_titles
+    ]
+    hidden_count = len(events) - len(visible_events)
+    ev_word = f"{len(visible_events)} event{'s' if len(visible_events) != 1 else ''}"
+    lines = [f"📅 *{label}* — {ev_word}"]
+
+    # Per-day sections
     for day_key in sorted(days.keys()):
-        day_events = days[day_key]
-        # Day header
+        day_events = [
+            ev for ev in days[day_key]
+            if (ev.get("summary") or "Untitled").strip().lower() not in hidden_titles
+        ]
+        if not day_events:
+            continue
         try:
-            day_dt = datetime.datetime.strptime(day_key, "%Y-%m-%d")
+            day_dt    = datetime.datetime.strptime(day_key, "%Y-%m-%d")
             day_label = day_dt.strftime("%A, %b %-d")
         except Exception:
             day_label = day_key
         lines.append(f"\n*{day_label}*")
         for ev in day_events:
             lines.append("  " + _format_event_line(ev, overrides))
+
+    if hidden_count:
+        lines.append(f'\n_({hidden_count} daily repeating event{"s" if hidden_count != 1 else ""} hidden — say "show all events" to see them)_')
 
     return "\n".join(lines)
 
@@ -772,5 +815,76 @@ async def handle_calendar_intent(
             f"✅ Got it — I'll use {emoji} for events containing *\"{keyword}\"*.\n"
             f"_Say \"show calendar emojis\" to see all your custom rules._"
         )
+        return
+
+    # ── CAL_REPEAT_FILTER ─────────────────────────────────────────────────────
+    if intent == CAL_REPEAT_FILTER:
+        from core.data import load_data, save_data
+        data     = load_data()
+        cfg      = data.setdefault("settings", {}).setdefault("calendar_filter", {})
+        cfg.setdefault("hide_repeating", True)
+        cfg.setdefault("whitelist", [])
+        action   = entities.get("action", "hide")
+
+        if action == "hide":
+            cfg["hide_repeating"] = True
+            save_data(data)
+            await ctx.reply_markdown(
+                "✅ *Repeating events hidden from multi-day views.*\n"
+                "Events appearing 3+ days in a view are now filtered out.\n"
+                "_Say \"show all events\" to turn this off, or \"always show [title]\" to exempt a specific event._"
+            )
+            return
+
+        if action == "show":
+            cfg["hide_repeating"] = False
+            save_data(data)
+            await ctx.reply("✅ All events will now show in multi-day views, including daily repeating ones.")
+            return
+
+        if action == "list":
+            status    = "on ✅" if cfg.get("hide_repeating", True) else "off ⚫"
+            whitelist = cfg.get("whitelist", [])
+            lines     = [f"📅 *Calendar repeat filter — {status}*\n"]
+            if whitelist:
+                lines.append("*Always shown even if repeating:*")
+                for title in whitelist:
+                    lines.append(f"  • {title}")
+            else:
+                lines.append("_No whitelist entries — all repeating events are hidden._")
+            lines.append("\n_Commands: \"hide repeating events\" · \"show all events\" · \"always show [title]\" · \"remove [title] from whitelist\"_")
+            await ctx.reply_markdown("\n".join(lines))
+            return
+
+        if action == "whitelist_add":
+            title = entities.get("title", "").strip()
+            if not title:
+                await ctx.reply("Which event should I always show? Say \"always show [event title]\".")
+                return
+            wl = cfg.setdefault("whitelist", [])
+            if title.lower() not in [w.lower() for w in wl]:
+                wl.append(title)
+                save_data(data)
+            await ctx.reply_markdown(
+                f"✅ *\"{title}\"* will always appear in your calendar views, even if it repeats.\n"
+                f"_Say \"show calendar filter\" to see all your whitelist entries._"
+            )
+            return
+
+        if action == "whitelist_remove":
+            title = entities.get("title", "").strip()
+            if not title:
+                await ctx.reply("Which event should I remove from the whitelist? Say \"remove [event title] from whitelist\".")
+                return
+            wl = cfg.get("whitelist", [])
+            new_wl = [w for w in wl if w.lower() != title.lower()]
+            if len(new_wl) == len(wl):
+                await ctx.reply(f"I didn't find \"{title}\" in your whitelist. Say \"show calendar filter\" to see what's there.")
+                return
+            cfg["whitelist"] = new_wl
+            save_data(data)
+            await ctx.reply_markdown(f"✅ *\"{title}\"* removed from whitelist. It'll now be filtered if it repeats 3+ days.")
+            return
+
         return
 

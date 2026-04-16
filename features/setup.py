@@ -677,6 +677,7 @@ _PREFS_STEPS = [
     "quiet_hours",              # DND window + chronotype
     "smart_suggestions",
     "weekly_summary_sections",  # HP3: weekly summary section toggles
+    "calendar_filter",          # hide daily repeating events in multi-day views
 ]
 
 _PREFS_TITLES = {
@@ -702,6 +703,7 @@ _PREFS_TITLES = {
     "quiet_hours":            "🔕 Quiet Hours",
     "smart_suggestions":          "💡 Smart Pattern Suggestions",
     "weekly_summary_sections":    "📊 Weekly Summary Sections",
+    "calendar_filter":            "📅 Calendar — Repeating Events",
 }
 
 _PREFS_PROMPTS = {
@@ -783,6 +785,15 @@ _PREFS_PROMPTS = {
         "Available: *habits*, *calendar*, *todos*\n\n"
         "Type as comma-separated list — e.g. *habits, calendar*\n"
         "Type *all* to include everything, or *skip* to keep defaults (all three)."
+    ),
+    "calendar_filter": (
+        "Should I hide events that repeat daily from your week and multi-day calendar views?\n\n"
+        "Events showing up 3 or more times in a view (like a daily standup or morning alarm) "
+        "are filtered out, keeping your view clean. Once-per-week events always stay visible.\n\n"
+        "• *on* — hide daily repeating events (recommended)\n"
+        "• *off* — show all events\n\n"
+        "You can also say *\"always show [event name]\"* later to exempt specific events.\n"
+        "Type *skip* to keep the current setting (on)."
     ),
     "weekly_summary": (
         "When should I deliver your weekly AI summary?\n\n"
@@ -1600,6 +1611,27 @@ async def _save_prefs_answer(
                 feedback = f"✓ Weekly summary sections: {', '.join(sections)}."
             else:
                 feedback = "✓ Weekly summary will show a brief overview only (all sections disabled)."
+
+    # ── calendar_filter ───────────────────────────────────────────────────────
+    elif key == "calendar_filter":
+        if not skip:
+            raw = answer.strip().lower()
+            if raw in {"on", "yes", "y", "enable", "hide"}:
+                from core.data import get_calendar_filter_settings
+                get_calendar_filter_settings(data)["hide_repeating"] = True
+                save_data(data)
+                feedback = "✓ Daily repeating events will be hidden from multi-day views."
+            elif raw in {"off", "no", "n", "disable", "show"}:
+                from core.data import get_calendar_filter_settings
+                get_calendar_filter_settings(data)["hide_repeating"] = False
+                save_data(data)
+                feedback = "✓ All events will show in multi-day views."
+            else:
+                await msg.reply_text(
+                    "Please type *on* or *off*, or *skip* to keep the current setting.",
+                    parse_mode="Markdown",
+                )
+                return
 
     # ── Advance state ─────────────────────────────────────────────────────────
     if skip:

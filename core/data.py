@@ -1264,6 +1264,20 @@ def get_sleep_schedule_settings(data: dict) -> dict:
     return ss
 
 
+def get_calendar_filter_settings(data: dict) -> dict:
+    """
+    Return the calendar repeat-filter settings.
+    hide_repeating: bool — when True, events appearing 3+ days in a multi-day
+                    view are hidden (default True).
+    whitelist: list[str] — event titles exempt from filtering even if they repeat.
+    """
+    s   = data.setdefault("settings", {})
+    cfg = s.setdefault("calendar_filter", {})
+    cfg.setdefault("hide_repeating", True)
+    cfg.setdefault("whitelist", [])
+    return cfg
+
+
 def get_schedule_settings(data: dict) -> dict:
     """
     Return schedule/timing settings for all auto-fired jobs.
