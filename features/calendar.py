@@ -773,14 +773,7 @@ async def handle_calendar_intent(
         keyword = entities.get("keyword", "").strip().lower()
         emoji   = entities.get("emoji", "").strip()
 
-        if not keyword or not emoji:
-            await ctx.reply(
-                "Tell me a keyword and an emoji.\n"
-                "Example: \"use 💪 for workout events\""
-            )
-            return
-
-        # Special commands: show overrides or reset
+        # Special commands first — they don't need an emoji
         if keyword in ("show", "list", "all"):
             overrides = _get_emoji_overrides()
             if not overrides:
@@ -803,6 +796,14 @@ async def handle_calendar_intent(
             data.setdefault("settings", {}).pop("calendar_emoji_overrides", None)
             save_data(data)
             await ctx.reply("✅ Calendar emojis reset to defaults.")
+            return
+
+        # Need both keyword and emoji to save an override
+        if not keyword or not emoji:
+            await ctx.reply(
+                "Tell me a keyword and an emoji.\n"
+                "Example: \"use 💪 for workout events\""
+            )
             return
 
         # Save the override

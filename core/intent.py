@@ -589,7 +589,7 @@ def _build_keyword_rules() -> list:
     # ── CALENDAR — VIEW ───────────────────────────────────────────────────────
     # "what's on my calendar today/this week/tomorrow"
     p = _r(r"what(?:'s| is)?\s+on\s+(?:my\s+)?(?:calendar|schedule)"
-           r"|(?:show|check)\s+(?:my\s+)?(?:calendar|schedule)")
+           r"|(?:show|check)\s+(?:my\s+)?(?:calendar|schedule)(?!\s+emojis?)(?!\s+(?:event\s+)?(?:filter|whitelist|repeat))")
 
     def _cal_view(m, t):
         import re as _re
