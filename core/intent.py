@@ -1337,8 +1337,8 @@ EXAMPLES:
 {{"user": "add almond milk to the grocery list", "response": {{"intent": "shop_add", "entities": {{"item": "almond milk", "list_key": "grocery"}}}}}}
 {{"user": "schedule dentist next Tuesday at 2pm", "response": {{"intent": "cal_add", "entities": {{"title": "Dentist", "start": "2026-04-21T14:00"}}}}}}
 {{"user": "add lunch with Sarah next Monday at noon", "response": {{"intent": "cal_add", "entities": {{"title": "Lunch with Sarah", "start": "2026-04-20T12:00"}}}}}}
-{{"user": "add daily workout at 7am", "response": {{"intent": "cal_add", "entities": {{"title": "Workout", "start": "2026-04-14T07:00", "recur": "daily"}}}}}}
-{{"user": "add team standup every weekday at 9am", "response": {{"intent": "cal_add", "entities": {{"title": "Team Standup", "start": "2026-04-14T09:00", "recur": "weekdays"}}}}}}
+{{"user": "add daily workout at 7am", "response": {{"intent": "cal_add", "entities": {{"title": "Workout", "start": "{_today_str}T07:00", "recur": "daily"}}}}}}
+{{"user": "add team standup every weekday at 9am", "response": {{"intent": "cal_add", "entities": {{"title": "Team Standup", "start": "{_today_str}T09:00", "recur": "weekdays"}}}}}}
 {{"user": "I worked out this morning", "response": {{"intent": "habit_log", "entities": {{"habit_id": "workout"}}}}}}
 {{"user": "remember that I'm lactose intolerant", "response": {{"intent": "memory_add", "entities": {{"category": "Me", "fact": "I am lactose intolerant"}}}}}}
 {{"user": "what have I done this week", "response": {{"intent": "weekly_summary", "entities": {{}}}}}}

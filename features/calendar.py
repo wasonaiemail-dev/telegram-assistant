@@ -603,6 +603,20 @@ async def handle_calendar_intent(
         # We have a start time string — use flexible parser (handles ISO + NL like "4pm")
         now = _now_local()
         start_dt = _parse_datetime_flexible(start_str, reference=now)
+
+        # Bump-forward: if parsed time is in the past AND no explicit date was given
+        # (bare time like "7am" with no day anchor), push forward to tomorrow.
+        # This prevents GPT returning a stale example date from landing in the past.
+        _has_date_anchor = any(
+            kw in start_str.lower()
+            for kw in ("today", "tomorrow", "monday", "tuesday", "wednesday",
+                       "thursday", "friday", "saturday", "sunday", "jan", "feb",
+                       "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
+                       "nov", "dec", "-", "/")
+        )
+        if start_dt and start_dt < now and not _has_date_anchor:
+            start_dt = start_dt + datetime.timedelta(days=1)
+
         if not start_dt:
             # dateutil couldn't parse it — pass full phrase to Google quick_add as last resort
             from adapters.google_calendar import quick_add_event, format_event_brief
