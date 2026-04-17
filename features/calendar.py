@@ -42,7 +42,7 @@ from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME, TIMEZONE, CALENDAR_NAMES
-from core.intent import CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE, CAL_EMOJI_SET
+from core.intent import CAL_VIEW, CAL_ADD, CAL_DELETE, CAL_UPDATE, CAL_EMOJI_SET, CAL_REPEAT_FILTER
 
 logger = logging.getLogger(__name__)
 
@@ -819,93 +819,75 @@ async def handle_calendar_intent(
 
     # ── CAL_REPEAT_FILTER ─────────────────────────────────────────────────────
     if intent == CAL_REPEAT_FILTER:
-        # Sanity ping — confirms handler was entered
-        await ctx.reply("[RF-ENTRY]")
-        try:
-            from core.data import load_data, save_data
-            data = load_data()
-            await ctx.reply("[RF-LOADED]")
-            # Defensive: ensure "settings" and "calendar_filter" are dicts
-            if not isinstance(data.get("settings"), dict):
-                data["settings"] = {}
-            if not isinstance(data["settings"].get("calendar_filter"), dict):
-                data["settings"]["calendar_filter"] = {}
-            cfg = data["settings"]["calendar_filter"]
-            cfg.setdefault("hide_repeating", True)
-            cfg.setdefault("whitelist", [])
-            await ctx.reply("[RF-CFG-OK]")
-        except Exception as _e:
-            try:
-                await ctx.reply("[RF-INIT-FAIL]")
-            except Exception:
-                pass
+        from core.data import load_data, save_data
+        data = load_data()
+        if not isinstance(data.get("settings"), dict):
+            data["settings"] = {}
+        if not isinstance(data["settings"].get("calendar_filter"), dict):
+            data["settings"]["calendar_filter"] = {}
+        cfg = data["settings"]["calendar_filter"]
+        cfg.setdefault("hide_repeating", True)
+        cfg.setdefault("whitelist", [])
+        action = entities.get("action", "hide")
+
+        if action == "hide":
+            cfg["hide_repeating"] = True
+            save_data(data)
+            await ctx.reply_markdown(
+                "✅ *Repeating events hidden from multi-day views.*\n"
+                "Events appearing 3+ days in a view are now filtered out.\n"
+                "_Say \"show all events\" to turn this off, or \"always show EVENT NAME\" to exempt a specific event._"
+            )
             return
-        action   = entities.get("action", "hide")
-        await ctx.reply(f"[RF-ACTION:{action}]")
 
-        try:
-            if action == "hide":
-                cfg["hide_repeating"] = True
+        if action == "show":
+            cfg["hide_repeating"] = False
+            save_data(data)
+            await ctx.reply("✅ All events will now show in multi-day views, including daily repeating ones.")
+            return
+
+        if action == "list":
+            status    = "on ✅" if cfg.get("hide_repeating", True) else "off ⚫"
+            whitelist = cfg.get("whitelist", [])
+            lines     = [f"📅 *Calendar repeat filter — {status}*\n"]
+            if whitelist:
+                lines.append("*Always shown even if repeating:*")
+                for t in whitelist:
+                    lines.append(f"  • {t}")
+            else:
+                lines.append("_No whitelist entries — all repeating events are hidden._")
+            lines.append("\n_Commands: \"hide repeating events\" · \"show all events\" · \"always show EVENT NAME\" · \"remove EVENT NAME from whitelist\"_")
+            await ctx.reply_markdown("\n".join(lines))
+            return
+
+        if action == "whitelist_add":
+            event_title = entities.get("title", "").strip()
+            if not event_title:
+                await ctx.reply("Which event should I always show? Say \"always show EVENT NAME\".")
+                return
+            wl = cfg.setdefault("whitelist", [])
+            if event_title.lower() not in [w.lower() for w in wl]:
+                wl.append(event_title)
                 save_data(data)
-                await ctx.reply_markdown(
-                    "✅ *Repeating events hidden from multi-day views.*\n"
-                    "Events appearing 3+ days in a view are now filtered out.\n"
-                    "_Say \"show all events\" to turn this off, or \"always show EVENT NAME\" to exempt a specific event._"
-                )
-                return
+            await ctx.reply_markdown(
+                f"✅ *\"{event_title}\"* will always appear in your calendar views, even if it repeats.\n"
+                f"_Say \"show calendar filter\" to see all your whitelist entries._"
+            )
+            return
 
-            if action == "show":
-                cfg["hide_repeating"] = False
-                save_data(data)
-                await ctx.reply("✅ All events will now show in multi-day views, including daily repeating ones.")
+        if action == "whitelist_remove":
+            event_title = entities.get("title", "").strip()
+            if not event_title:
+                await ctx.reply("Which event should I remove from the whitelist? Say \"remove EVENT NAME from whitelist\".")
                 return
-
-            if action == "list":
-                status    = "on ✅" if cfg.get("hide_repeating", True) else "off ⚫"
-                whitelist = cfg.get("whitelist", [])
-                lines     = [f"📅 *Calendar repeat filter — {status}*\n"]
-                if whitelist:
-                    lines.append("*Always shown even if repeating:*")
-                    for t in whitelist:
-                        lines.append(f"  • {t}")
-                else:
-                    lines.append("_No whitelist entries — all repeating events are hidden._")
-                lines.append("\n_Commands: \"hide repeating events\" · \"show all events\" · \"always show EVENT NAME\" · \"remove EVENT NAME from whitelist\"_")
-                await ctx.reply_markdown("\n".join(lines))
+            wl = cfg.get("whitelist", [])
+            new_wl = [w for w in wl if w.lower() != event_title.lower()]
+            if len(new_wl) == len(wl):
+                await ctx.reply(f"I didn't find \"{event_title}\" in your whitelist. Say \"show calendar filter\" to see what's there.")
                 return
-
-            if action == "whitelist_add":
-                event_title = entities.get("title", "").strip()
-                if not event_title:
-                    await ctx.reply("Which event should I always show? Say \"always show EVENT NAME\".")
-                    return
-                wl = cfg.setdefault("whitelist", [])
-                if event_title.lower() not in [w.lower() for w in wl]:
-                    wl.append(event_title)
-                    save_data(data)
-                await ctx.reply_markdown(
-                    f"✅ *\"{event_title}\"* will always appear in your calendar views, even if it repeats.\n"
-                    f"_Say \"show calendar filter\" to see all your whitelist entries._"
-                )
-                return
-
-            if action == "whitelist_remove":
-                event_title = entities.get("title", "").strip()
-                if not event_title:
-                    await ctx.reply("Which event should I remove from the whitelist? Say \"remove EVENT NAME from whitelist\".")
-                    return
-                wl = cfg.get("whitelist", [])
-                new_wl = [w for w in wl if w.lower() != event_title.lower()]
-                if len(new_wl) == len(wl):
-                    await ctx.reply(f"I didn't find \"{event_title}\" in your whitelist. Say \"show calendar filter\" to see what's there.")
-                    return
-                cfg["whitelist"] = new_wl
-                save_data(data)
-                await ctx.reply_markdown(f"✅ *\"{event_title}\"* removed from whitelist. It'll now be filtered if it repeats 3+ days.")
-                return
-
-        except Exception as _e:
-            await ctx.reply(f"[DEBUG-ACTION:{action}] {type(_e).__name__}: {_e}")
+            cfg["whitelist"] = new_wl
+            save_data(data)
+            await ctx.reply_markdown(f"✅ *\"{event_title}\"* removed from whitelist. It'll now be filtered if it repeats 3+ days.")
             return
 
         return
