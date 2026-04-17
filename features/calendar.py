@@ -732,7 +732,7 @@ async def handle_calendar_intent(
                     "Try a format like \"4pm tomorrow\" or \"April 20 at 2pm\"."
                 )
                 return
-            update_fields["start"] = ns
+            update_fields["start"] = {"dateTime": ns.isoformat(), "timeZone": TIMEZONE}
             # If a new end isn't specified, shift end by the same delta as start
             if not new_end:
                 from adapters.google_calendar import get_event_start_dt, get_event_end_dt
@@ -742,7 +742,7 @@ async def handle_calendar_intent(
                 old_end   = get_event_end_dt(match, tz)
                 if old_start and old_end:
                     delta = old_end - old_start
-                    update_fields["end"] = ns + delta
+                    update_fields["end"] = {"dateTime": (ns + delta).isoformat(), "timeZone": TIMEZONE}
 
         if new_end:
             ne = _parse_datetime_flexible(new_end, reference=now)
@@ -752,7 +752,7 @@ async def handle_calendar_intent(
                     "Try a format like \"5pm tomorrow\"."
                 )
                 return
-            update_fields["end"] = ne
+            update_fields["end"] = {"dateTime": ne.isoformat(), "timeZone": TIMEZONE}
 
         # ── Field changes: title, location, description
         if new_title:

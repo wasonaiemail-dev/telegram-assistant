@@ -197,12 +197,12 @@ async def handle_gift_intent(
         recipient = (entities.get("recipient") or "").strip()
         from adapters.google_tasks import list_gifts
 
-        if recipient:
+        if recipient and recipient.lower() not in ("all", "everyone", "everybody"):
             gifts = list_gifts(svc, person=recipient)
             title = f"🎁 *Gift Ideas for {recipient.title()}*"
         else:
             gifts = list_gifts(svc)
-            title = "🎁 *Gift Ideas*"
+            title = "🎁 *Gift Ideas for All*" if recipient else "🎁 *Gift Ideas*"
 
         await ctx.reply(_format_gifts_list(gifts, title=title),
             parse_mode="Markdown",

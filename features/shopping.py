@@ -268,15 +268,33 @@ async def handle_shopping_intent(
             await ctx.reply("What should I add? Try: \"add milk to the grocery list\"")
             return
 
-        list_key = _normalize_list_key(entities.get("list", "")) or _auto_route_list(item_text)
+        list_key = _normalize_list_key(entities.get("list_key", "") or entities.get("list", "")) or _auto_route_list(item_text)
         label    = _get_lists().get(list_key, list_key.title())
 
         from adapters.google_tasks import add_shopping_item
-        result = add_shopping_item(svc, list_key, item_text)
-        if result:
-            await ctx.reply_markdown(f"✓ Added *{item_text}* to *{label}*.")
+        import re as _re
+
+        # Multi-item support: "almond milk, eggs, coffee" → add each separately
+        items_to_add = [i.strip() for i in _re.split(r",\s*|\s+and\s+", item_text) if i.strip()]
+
+        if len(items_to_add) > 1:
+            added, failed = [], []
+            for single_item in items_to_add:
+                if add_shopping_item(svc, list_key, single_item):
+                    added.append(single_item)
+                else:
+                    failed.append(single_item)
+            if added:
+                items_str = ", ".join(f"*{a}*" for a in added)
+                await ctx.reply_markdown(f"✓ Added {len(added)} items to *{label}*: {items_str}")
+            if failed:
+                await ctx.reply(f"Couldn't add: {', '.join(failed)}")
         else:
-            await ctx.reply(f"Couldn't add that to {label}. Try again.")
+            result = add_shopping_item(svc, list_key, item_text)
+            if result:
+                await ctx.reply_markdown(f"✓ Added *{item_text}* to *{label}*.")
+            else:
+                await ctx.reply(f"Couldn't add that to {label}. Try again.")
         return
 
     # ── SHOP_LIST ─────────────────────────────────────────────────────────────
