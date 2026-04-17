@@ -819,9 +819,12 @@ async def handle_calendar_intent(
 
     # ── CAL_REPEAT_FILTER ─────────────────────────────────────────────────────
     if intent == CAL_REPEAT_FILTER:
+        # Sanity ping — confirms handler was entered
+        await ctx.reply("[RF-ENTRY]")
         try:
             from core.data import load_data, save_data
             data = load_data()
+            await ctx.reply("[RF-LOADED]")
             # Defensive: ensure "settings" and "calendar_filter" are dicts
             if not isinstance(data.get("settings"), dict):
                 data["settings"] = {}
@@ -830,10 +833,15 @@ async def handle_calendar_intent(
             cfg = data["settings"]["calendar_filter"]
             cfg.setdefault("hide_repeating", True)
             cfg.setdefault("whitelist", [])
+            await ctx.reply("[RF-CFG-OK]")
         except Exception as _e:
-            await ctx.reply(f"[DEBUG-INIT] {type(_e).__name__}: {_e}")
+            try:
+                await ctx.reply("[RF-INIT-FAIL]")
+            except Exception:
+                pass
             return
         action   = entities.get("action", "hide")
+        await ctx.reply(f"[RF-ACTION:{action}]")
 
         try:
             if action == "hide":
