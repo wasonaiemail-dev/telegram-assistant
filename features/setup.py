@@ -678,6 +678,8 @@ _PREFS_STEPS = [
     "smart_suggestions",
     "weekly_summary_sections",  # HP3: weekly summary section toggles
     "calendar_filter",          # hide daily repeating events in multi-day views
+    "cal_repeat_filter",        # whitelist: recurring events that always show
+    "cal_emoji_overrides",      # custom emoji tags per keyword (e.g. 💊 for "doctor")
 ]
 
 _PREFS_TITLES = {
@@ -704,6 +706,8 @@ _PREFS_TITLES = {
     "smart_suggestions":          "💡 Smart Pattern Suggestions",
     "weekly_summary_sections":    "📊 Weekly Summary Sections",
     "calendar_filter":            "📅 Calendar — Repeating Events",
+    "cal_repeat_filter":          "📅 Calendar — Always-Show Events",
+    "cal_emoji_overrides":        "📅 Calendar — Emoji Tags",
 }
 
 _PREFS_PROMPTS = {
@@ -861,6 +865,25 @@ _PREFS_PROMPTS = {
         "• *night_owl* — up after 9am\n\n"
         "You can combine both: *10pm – 7am, night_owl*\n"
         "Or type *off* to disable quiet hours, or *skip* for defaults."
+    ),
+    "cal_repeat_filter": (
+        "Are there any recurring events that should *always* appear in your calendar, "
+        "even when the daily repeat filter is on?\n\n"
+        "For example, if you have a daily standup or a morning alarm that you want "
+        "to keep visible, add those event names here.\n\n"
+        "Type event names separated by commas — e.g. *Standup, Morning Alarm, Lunch*\n"
+        "Type *none* if you don't need any exceptions, or *skip* to keep current settings.\n\n"
+        "You can also manage this anytime by saying \"always show [event name]\" or "
+        "\"show calendar filter settings\"."
+    ),
+    "cal_emoji_overrides": (
+        "I can tag calendar events with custom emojis based on keywords in the event title. "
+        "For example, events containing \"doctor\" get 💊, \"gym\" gets 💪.\n\n"
+        "Set up your overrides now by typing *keyword: emoji* pairs, one per line or comma-separated.\n\n"
+        "Example:\n"
+        "*doctor: 💊, gym: 💪, trading: 📊, lunch: 🍽️*\n\n"
+        "Type *skip* if you'd rather set these up later by saying "
+        "\"use 💊 for doctor events\"."
     ),
     "smart_suggestions": (
         "Alfred can proactively spot patterns and nudge you. Which areas?\n\n"
@@ -1632,6 +1655,67 @@ async def _save_prefs_answer(
                     parse_mode="Markdown",
                 )
                 return
+
+    # ── cal_repeat_filter ─────────────────────────────────────────────────────
+    elif key == "cal_repeat_filter":
+        if not skip:
+            raw = answer.strip()
+            if raw.lower() in {"none", "no", "off", "clear"}:
+                from core.data import get_calendar_filter_settings
+                get_calendar_filter_settings(data)["whitelist"] = []
+                save_data(data)
+                feedback = "✓ No always-show exceptions set — filter applies to all repeating events."
+            else:
+                # Parse comma-separated event names
+                names = [n.strip() for n in raw.split(",") if n.strip()]
+                if names:
+                    from core.data import get_calendar_filter_settings
+                    get_calendar_filter_settings(data)["whitelist"] = names
+                    save_data(data)
+                    listed   = ", ".join(f"*{n}*" for n in names)
+                    feedback = f"✓ These events will always show even when the filter is on: {listed}."
+                else:
+                    await msg.reply_text(
+                        "Couldn't parse any event names. Type them separated by commas, "
+                        "or type *none* if you don't need exceptions.",
+                        parse_mode="Markdown",
+                    )
+                    return
+
+    # ── cal_emoji_overrides ───────────────────────────────────────────────────
+    elif key == "cal_emoji_overrides":
+        if not skip:
+            raw = answer.strip()
+            # Parse "keyword: emoji" pairs — comma-separated or newline-separated
+            pairs_raw = [p.strip() for p in _re.split(r"[,\n]", raw) if p.strip()]
+            overrides = {}
+            bad = []
+            for pair in pairs_raw:
+                if ":" in pair:
+                    kw, _, em = pair.partition(":")
+                    kw = kw.strip().lower()
+                    em = em.strip()
+                    if kw and em:
+                        overrides[kw] = em
+                    else:
+                        bad.append(pair)
+                else:
+                    bad.append(pair)
+
+            if not overrides:
+                await msg.reply_text(
+                    "Couldn't parse any pairs. Use format: *doctor: 💊, gym: 💪*\n"
+                    "Or type *skip* to set these up later.",
+                    parse_mode="Markdown",
+                )
+                return
+
+            data.setdefault("settings", {})["calendar_emoji_overrides"] = overrides
+            save_data(data)
+            lines    = "\n".join(f"  {kw} → {em}" for kw, em in overrides.items())
+            feedback = f"✓ Calendar emoji tags saved:\n{lines}"
+            if bad:
+                feedback += f"\n_(Skipped unparseable: {', '.join(bad)})_"
 
     # ── Advance state ─────────────────────────────────────────────────────────
     if skip:
