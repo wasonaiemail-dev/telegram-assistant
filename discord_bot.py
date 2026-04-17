@@ -513,6 +513,17 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
             await ctx.reply("❌ Could not load task summary right now.")
         return True
 
+    if cmd == "clear":
+        try:
+            from core.data import clear_ask_history, load_conversation, save_conversation
+            clear_ask_history()
+            save_conversation({})
+            await ctx.reply("✓ Conversation history cleared.")
+        except Exception as e:
+            logger.error(f"Discord !clear error: {e}")
+            await ctx.reply("❌ Could not clear history.")
+        return True
+
     if cmd == "braindump":
         try:
             from features.braindump import cmd_braindump

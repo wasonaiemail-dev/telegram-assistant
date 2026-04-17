@@ -870,6 +870,16 @@ async def cmd_braindump(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _f(ctx, args=args)
 
 
+async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Clear conversation history and ask thread."""
+    if not _is_allowed(update):
+        return
+    from core.data import clear_ask_history, load_conversation, save_conversation
+    clear_ask_history()
+    save_conversation({})
+    await update.message.reply_text("✓ Conversation history cleared.")
+
+
 async def cmd_proactive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show proactive layer toggle settings."""
     if not _is_allowed(update):
@@ -1577,6 +1587,7 @@ def main() -> None:
     app.add_handler(CommandHandler("travel",       cmd_travel))
     app.add_handler(CommandHandler("vacation",     cmd_vacation))
     app.add_handler(CommandHandler("tomorrowprep", cmd_tomorrow_prep))
+    app.add_handler(CommandHandler("clear",        cmd_clear))
 
     # ── Plugin auto-discovery ────────────────────────────────────────────
     global _loaded_plugins

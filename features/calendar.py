@@ -123,9 +123,6 @@ def _resolve_write_calendar(calendar_hint: str) -> str:
 # Default keyword → emoji map. Checked in order — first match wins.
 # Buyer can override any keyword via NL: "use 💪 for workout events"
 _DEFAULT_EMOJIS: list[tuple[str, str]] = [
-    ("luna",        "🌙"),
-    ("baby",        "🌙"),
-    ("bottles",     "🍼"),
     ("workout",     "🏋️"),
     ("gym",         "🏋️"),
     ("exercise",    "🏋️"),

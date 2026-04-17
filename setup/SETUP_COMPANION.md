@@ -1,4 +1,3 @@
-
 # Alfred Setup Wizard
 ### Paste this entire document into Claude or ChatGPT to begin
 
@@ -111,142 +110,9 @@
 3. Fill in **App name** (e.g. `Alfred`) and your email for both support and developer contact
 4. Click **Save and Continue** through the remaining screens without changing anything
 5. On the **Test users** screen, click **Add users** → type in your Google email → click **Save**
+6. Click **Back to Dashboard** → click **Publish App** → confirm when prompted
 
-**Step 4D — Create credentials:**
-1. In the left sidebar, click **APIs & Services** → **Credentials**
-2. Click **+ Create Credentials** at the top → choose **OAuth client ID**
-3. Application type: **Desktop app** → Name: anything (e.g. `Alfred`) → click **Create**
-4. A popup appears — click **Download JSON** (the download button)
-
-**Step 4E — Copy the file contents:**
-1. Find the downloaded file (usually in Downloads, named something like `client_secret_xxx.json`)
-2. Open it with any text editor (TextEdit on Mac, Notepad on Windows)
-3. Select all the text and copy it — it should start with `{"installed":{` and be one long line or a few lines
-
-**Collect:** Ask them to paste the entire contents of the JSON file. Tell them it's okay if it looks messy — you'll handle it. When they paste it, confirm you received it and move on (you'll put it on a single line in the final output).
-
----
-
-**EXPRESS MODE — Step 4 is where Express Mode saves the most time. Do all of the following in Chrome:**
-
-> Tell the buyer: "I'm going to handle the Google Cloud setup for you. Sign into console.cloud.google.com with the Google account you want Alfred to use for Calendar, then let me know when you're in."
-
-Once they confirm they're logged in:
-
-1. **Create project:** Click the project dropdown (top of page) → New Project → type `Alfred Bot` → click Create. Wait for creation notification, then click "Select Project."
-2. **Enable Calendar API:** Navigate to APIs & Services → Library → search "Google Calendar API" → click it → click Enable.
-3. **Enable Tasks API:** Navigate back to Library → search "Tasks API" → click it → click Enable.
-### Paste this entire document into Claude or ChatGPT to begin
-
----
-
-> **FOR THE AI RUNNING THIS WIZARD — READ THIS FIRST:**
->
-> You are a friendly setup assistant helping someone deploy Alfred, a personal AI assistant Telegram bot hosted on Railway.app. Your job is to walk the buyer through collecting every required piece of information, then at the very end output a **single, complete KEY=VALUE block** with all their real values filled in — ready to paste directly into Railway's Raw Editor in one shot.
->
-> **Two modes are available. The first thing you do is ask which one to use:**
->
-> - **Standard Mode** — works with Claude or ChatGPT. You give step-by-step text instructions and the buyer follows them manually. Takes ~45 minutes.
-> - **Express Mode** — Claude desktop only, with Chrome control enabled. You control the buyer's browser to handle all navigation and clicking. The buyer only touches credential fields (tokens, API keys). Takes ~20 minutes.
->
-> **How to run this:**
-> - Ask the mode question first (see opening message below). Then follow the matching instructions for each step.
-> - Go through steps **one at a time**. Ask one question, wait for the answer, then move to the next.
-> - Keep a running record of every value collected — you'll need them all for the final output block.
-> - Do NOT output the final block until every step is complete.
-> - When all steps are done, output the block under the heading **"✅ Your Railway Variables — Copy This Entire Block"** in a single code block, with every value filled in.
-> - After the block, walk them through the deployment steps.
->
-> **If the buyer chooses Express Mode and you are not Claude with Chrome control enabled:** Let them know Express Mode requires Claude's desktop app with computer use turned on (Settings → Desktop app → Computer use). Offer to continue in Standard Mode instead.
->
-> **Start the conversation with this exact message:**
->
-> "Hi! I'm going to walk you through setting up Alfred. Before we start — are you using **Claude's desktop app** with computer use enabled?
->
-> If yes, I can run **Express Mode**: I'll control your browser and handle all the navigation and clicking automatically. You only touch the fields where you paste your actual keys and tokens. Setup takes about 20 minutes.
->
-> If no (or you're using ChatGPT), I'll run **Standard Mode**: I'll give you step-by-step instructions and you follow along. Takes about 45 minutes.
->
-> Which would you like?"
-
----
-
-## STEP 1 — Telegram Bot Token + Username
-
-**Variables collected:** `TELEGRAM_TOKEN`, `BOT_USERNAME`
-
-**STANDARD MODE — If they haven't created a bot yet, give these exact instructions:**
-
-1. Open Telegram and search for **@BotFather**
-2. Start a chat with BotFather and send the message `/newbot`
-3. It will ask for a name — this is the display name (e.g. "My Alfred"). Type anything you like.
-4. It will then ask for a username — this must end in `bot` (e.g. `myalfred_bot`). Choose one.
-5. BotFather will reply with a message containing your **bot token** — it looks like `7123456789:AAFxxx_yyy`. Copy that token.
-
-**EXPRESS MODE:** BotFather requires interaction inside the Telegram app itself, which cannot be automated. Ask the buyer to complete Step 1 manually using the Standard instructions above, then paste the token back into the chat when done. This is the only step Express Mode cannot handle.
-
-**Collect:** Ask them to paste their bot token and confirm their bot's username (the @username without the @).
-
----
-
-## STEP 2 — Telegram User ID
-
-**Variable collected:** `ALLOWED_USER_ID`
-
-**STANDARD MODE — Instructions to give:**
-
-1. Open Telegram and search for **@userinfobot**
-2. Start a chat and send any message (e.g. "hi")
-3. It will instantly reply with your numeric user ID — a number like `123456789`
-
-**EXPRESS MODE:** Open `web.telegram.org` in Chrome. Once the buyer logs in, navigate to the @userinfobot conversation. Ask the buyer to send "hi" to the bot, then read the numeric User ID that appears in the reply and record it. Confirm to the buyer: "Got your User ID — you don't need to copy anything."
-
-**Collect:** The numeric user ID (sourced from screen in Express Mode, pasted by buyer in Standard Mode).
-
----
-
-## STEP 3 — OpenAI API Key
-
-**Variable collected:** `OPENAI_API_KEY`
-
-**STANDARD MODE — Instructions to give:**
-
-1. Go to **platform.openai.com** → sign in
-2. Click your profile icon (top right) → **API keys**
-3. Click **Create new secret key** → give it any name → click Create
-4. Copy the key immediately — it starts with `sk-proj-` and you can only see it once
-
-**EXPRESS MODE:** Navigate to `platform.openai.com`. Once the buyer is logged in, click through to the API keys page and click "Create new secret key." When the key appears, it will be masked — stop and say: "Your new key is on screen. Copy it now — this is the only time it's visible." Wait for them to confirm they've copied it, then ask them to paste it into the chat.
-
-**Collect:** Ask them to paste their OpenAI API key.
-
----
-
-## STEP 4 — Google Credentials
-
-**Variable collected:** `GOOGLE_CREDENTIALS`
-
-**STANDARD MODE — Instructions to give — walk through this exactly:**
-
-> "Now we need to connect Alfred to your Google Calendar and Tasks. This takes about 5 minutes. Follow these steps exactly:"
-
-**Step 4A — Create a Google Cloud project:**
-1. Go to **console.cloud.google.com** and sign in with the Google account whose Calendar Alfred will use
-2. Click the project dropdown at the very top of the page → click **New Project**
-3. Give it any name (e.g. `Alfred Bot`) → click **Create**
-4. Make sure your new project is selected in the dropdown before continuing
-
-**Step 4B — Enable the two APIs:**
-1. In the left sidebar, click **APIs & Services** → **Library**
-2. Search `Google Calendar API` → click it → click **Enable**
-3. Click the back arrow, then search `Tasks API` → click it → click **Enable**
-
-**Step 4C — Set up the consent screen:**
-1. In the left sidebar, click **APIs & Services** → **OAuth consent screen**
-2. Choose **External** → click **Create**
-3. Fill in **App name** (e.g. `Alfred`) and your email for both support and developer contact
-4. Click **Save and Continue** through the remaining screens without changing anything
-5. On the **Test users** screen, click **Add users** → type in your Google email → click **Save**
+> ⚠️ **Why step 6 matters:** Apps left in Testing mode have refresh tokens that expire after 7 days, forcing you to run `/auth` every week. Publishing the app makes your refresh token last indefinitely (until you revoke it). For a personal bot with Calendar + Tasks scopes, Google does not require a review — it will show a one-time "unverified app" warning when you first connect, which is safe to click through.
 
 **Step 4D — Create credentials:**
 1. In the left sidebar, click **APIs & Services** → **Credentials**
@@ -405,9 +271,41 @@ Options:
 
 ---
 
+## STEP 14 — Discord (Optional)
+
+**Variables collected:** `DISCORD_TOKEN`, `DISCORD_ALLOWED_USER_ID`
+
+**Ask:** "Alfred also works on Discord — you can control it from any Discord server or DM. Do you want to set up Discord access now, or skip it?"
+
+**If they say skip:** Leave both variables blank in the final output block. Discord simply won't start.
+
+**STANDARD MODE — If yes:**
+
+1. Go to **discord.com/developers/applications** and sign in
+2. Click **New Application** → give it any name (e.g. `Alfred`) → click **Create**
+3. In the left sidebar, click **Bot**
+4. Click **Reset Token** → confirm → copy the token that appears
+5. Scroll down to **Privileged Gateway Intents** → enable **Message Content Intent** → click **Save Changes**
+6. In the left sidebar, click **OAuth2 → URL Generator**
+7. Under Scopes, check `bot`. Under Bot Permissions, check `Send Messages`, `Read Message History`, `Read Messages/View Channels`
+8. Copy the generated URL at the bottom and open it in a browser → choose the server to add Alfred to → click **Authorize**
+9. To get your Discord user ID: in Discord, go to Settings → Advanced → turn on Developer Mode → right-click your name anywhere → **Copy User ID**
+
+**EXPRESS MODE:** Navigate to `discord.com/developers/applications`. Once the buyer is in:
+1. Click New Application, name it Alfred, click Create.
+2. Click Bot in the sidebar → click Reset Token → confirm → read and record the token.
+3. Enable Message Content Intent → Save Changes.
+4. Click OAuth2 → URL Generator → check `bot` scope → check Send Messages, Read Message History, Read Messages/View Channels → copy the invite URL.
+5. Open the invite URL in a new tab → ask the buyer to select their server and click Authorize.
+6. Ask the buyer to right-click their username in Discord and choose Copy User ID (requires Developer Mode in Discord Settings → Advanced). Record it.
+
+**Collect:** Their Discord bot token and their Discord user ID.
+
+---
+
 ## FINAL OUTPUT
 
-When all 13 steps are complete, output this **exactly**, with every placeholder replaced with their real values:
+When all steps are complete, output this **exactly**, with every placeholder replaced with their real values. Leave the Discord variables blank if the buyer skipped Step 14.
 
 ```
 TELEGRAM_TOKEN=[their token]
@@ -431,6 +329,8 @@ WEEKLY_SUMMARY_MINUTE=[minute as integer]
 WEEKLY_SUMMARY_WEEKDAY=[0-6]
 TRAVEL_WEATHER_HOUR=[hour as integer]
 TRAVEL_WEATHER_MINUTE=[minute as integer]
+DISCORD_TOKEN=[their Discord bot token, or leave blank]
+DISCORD_ALLOWED_USER_ID=[their Discord user ID, or leave blank]
 ```
 
 **Important — Google Credentials formatting:**
@@ -545,7 +445,7 @@ Once the Deployments tab shows **"Deployment successful"**:
 2. Send `/start` — Alfred should greet you
 3. Then run these in order:
 ```
-/setup      → tap "Configure preferences" to personalize Alfred
+/setup      → walk through 25 preference steps to personalize Alfred
 /checkauth  → connect your Google Calendar and Tasks
 /briefing   → test your first morning briefing
 /mood       → log your first mood rating
@@ -553,6 +453,10 @@ Once the Deployments tab shows **"Deployment successful"**:
 /meals      → set up your first meal plan
 /journal    → start your first journal entry
 ```
+
+If you set up Discord in Step 14, open your Discord server and send `!help` — Alfred should respond with the same command list.
+
+> **Sports Pack buyers:** After deploying, add `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` to your Railway variables. See the Sports Pack README for setup instructions.
 
 If Alfred doesn't respond to `/start`, go back to Railway → Deployments and check the build log for errors.
 
@@ -564,11 +468,12 @@ If Alfred doesn't respond to `/start`, go back to Railway → Deployments and ch
 ```
 /start              — introduction and command list
 /help               — all available commands
-/setup              — preferences + memory wizard
+/setup              — preferences + memory wizard (25 settings)
 /checkauth          — verify Google connection
 /auth               — (re)connect Google account
 /briefing           — trigger morning briefing on demand
 /export             — download all your data as Excel
+/clear              — wipe conversation and ask thread history
 ```
 
 ### Memory
@@ -597,6 +502,10 @@ remind me to [x] on [date/time] — set a reminder
 ### Calendar
 ```
 /calendar                        — view upcoming events
+/today                           — today's events only
+/week                            — this week's events
+/weekend                         — weekend events
+/restofday                       — rest of today's schedule
 add [event] on [date]            — create an event
 what's on my calendar this week  — natural language query
 ```
@@ -650,6 +559,36 @@ mood [number]                    — natural language log
 show my mood this week           — recent trend
 ```
 
+### Sleep
+```
+/sleep                           — view 7-day sleep history
+/sleep [hours]                   — log hours slept (e.g. /sleep 7.5)
+/sleep [hours] [quality 1-5]     — log hours + quality rating
+slept 7 hours                    — natural language log
+```
+
+### Expenses
+```
+/expenses                        — view this month's spending by category
+/expenses today                  — today's spending
+/expenses week                   — this week's spending
+$45 groceries                    — natural language add (dollar sign triggers it)
+spent $12 on coffee              — alternate natural language form
+delete expense [category]        — remove most recent expense in a category
+```
+
+### Brain Dump
+```
+/braindump [text]                — dump anything — Alfred sorts it into todos, reminders, notes, shopping
+brain dump: [text]               — alternate trigger phrase
+```
+
+### Undo
+```
+undo                             — restore the last thing you deleted (todos, notes, shopping, expenses)
+undo that                        — same as above
+```
+
 ### Links
 ```
 /readlater                       — view unread saves
@@ -684,8 +623,72 @@ add gift for [name]: [idea]
 **Smart suggestions:** Alfred analyzes patterns in your habits, workouts, meals, mood, and shopping over time and surfaces observations in your weekly summary. Configure which areas in `/setup` → Configure preferences.
 
 **Morning briefing sections** (toggle any on/off in `/setup`):
-`weather` `calendar` `todos` `habits` `quote` `word_of_day` `meals` `journal_highlight` `workout_stats`
+`weather` `calendar` `todos` `habits` `quote` `word_of_day` `meals` `journal_highlight` `workout_stats` `expenses`
 
 ---
 
-*Alfred Setup Companion v3.1 — Express Mode added*
+### Proactive Alerts
+
+Alfred proactively notices things without being asked — 25 different checks across four categories.
+
+**Commands:**
+```
+/proactive                        — view all toggle settings
+/travel                           — show upcoming detected trips
+/vacation                         — show vacation mode status
+/vacation on until [date]         — activate vacation mode
+/vacation off                     — deactivate (or say "I'm back")
+/tomorrowprep                     — manually trigger night-before briefing
+```
+
+**Natural language:**
+```
+"turn off habit streak alerts"         — disable a specific check
+"enable expense spike alerts"          — re-enable
+"vacation on until June 20"            — activate vacation mode
+"I'm back"                             — deactivate vacation mode
+"pause running on vacation"            — snooze a habit during vacation
+"keep tracking water on vacation"      — keep a habit active during vacation
+"add sunscreen to beach packing list"  — customize trip packing lists
+```
+
+**Night-before briefing** fires automatically at 9pm (configurable) on nights before busy days (≥3 events or a priority to-do due). Blends: tomorrow's schedule, priority tasks, weather, bedtime suggestion, meeting-prep notes, travel alerts.
+
+**Smart travel system** detects upcoming trips in your calendar and fires packing reminders at 7, 3, 2, and 1 day(s) out. Trip types detected: business, beach, ski, camping, international, weekend. Destination weather included.
+
+**Vacation mode** pauses most proactive alerts. Habits can be individually kept or paused. Auto-resume on a set return date with a welcome-back recovery nudge.
+
+All 25 checks can be toggled individually — say `"turn off [check name]"` or use `/proactive`.
+
+---
+
+### Sleep & Schedule
+
+Configure your personal sleep preferences during `/setup` → Sleep & Schedule.
+
+**What Alfred stores:**
+- Weekday bed time / wake time (default: 11pm / 7am)
+- Weekend bed time / wake time (default: midnight / 9am)
+- Sleep goal in hours (default: 7.5)
+- Chronotype: `early` (up before 6am) | `normal` (7am) | `night_owl` (9am+)
+- Quiet hours: no proactive nudges during this window (default: 10pm – 7am)
+
+**What these settings control:**
+- Night-before briefing bedtime suggestion — uses your actual sleep goal and target wake time, not a generic calculation. Only fires if going to bed later than your target is meaningful.
+- Proactive job DND gate — all 25 checks + tomorrow prep are silenced during quiet hours
+- Chronotype-aware job scheduling — night owls get proactive checks at 9:30am, early birds at 7am, normal at 8:30am
+
+**Setup format:**
+```
+Step: Sleep & Schedule
+→ 11pm, 7am, midnight, 9am, 7.5
+  (weekday bed, weekday wake, weekend bed, weekend wake, sleep goal)
+
+Step: Quiet Hours
+→ 10pm – 7am, night_owl
+  (DND window, optional chronotype)
+```
+
+---
+
+*Alfred Setup Companion v3.4 — Discord step added (Step 14), DISCORD_TOKEN + DISCORD_ALLOWED_USER_ID in env block, /clear command added, chronotype-aware scheduling marked live, /setup updated to 25 steps*
