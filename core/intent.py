@@ -776,7 +776,7 @@ def _build_keyword_rules() -> list:
     # ── TODO — COMPLETE (mark done) ───────────────────────────────────────
     # "mark buy groceries done" / "check off buy groceries" / "done with laundry"
     # "complete my todo about dentist" / "finished the report"
-    p = _r(r"^(?:mark|check)\s+(?:off\s+)?(.+?)\s+(?:done|complete|off|finished)$"
+    p = _r(r"^(?:mark|check)\s+(?:off\s+)?(.+?)\s+(?:as\s+)?(?:done|complete|off|finished)$"
            r"|^(?:done|finished)\s+(?:with\s+)?(.+)$"
            r"|^(?:complete|finish)\s+(?:my\s+)?(?:todo|task)?\s*(?:about\s+|for\s+)?(.+)$")
 

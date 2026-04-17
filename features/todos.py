@@ -244,7 +244,8 @@ async def handle_todo_intent(
 
     # ── TODO_COMPLETE ─────────────────────────────────────────────────────────
     if intent == TODO_COMPLETE:
-        query = entities.get("task", "").strip()
+        # "task" is used by some paths, "query" by Layer 1 keyword regex and GPT — accept both
+        query = (entities.get("task") or entities.get("query") or "").strip()
         from adapters.google_tasks import list_todos, complete_todo
         todos = list_todos(svc, include_done=False)
 
