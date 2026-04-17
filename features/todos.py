@@ -253,14 +253,28 @@ async def handle_todo_intent(
                 await ctx.reply("Your todo list is empty.")
                 return
             lines = ["Which todo did you complete? Reply with the number:\n"]
+            options = []
             for i, t in enumerate(todos, 1):
-                lines.append(f"  {i}. {t.get('title','(untitled)')}")
+                lines.append(f"  {i}. {t.get('title', '(untitled)')}")
+                options.append({"id": t["id"], "title": t.get("title", "")})
+            from core.data import load_data, save_data, set_pending
+            _d = load_data(); set_pending(_d, "complete_todo", options); save_data(_d)
             await ctx.reply("\n".join(lines))
             return
 
         match = _find_best_match(todos, query)
         if not match:
-            await ctx.reply(f'I couldn\'t find a todo matching "{query}". Run /todos to see your list.')
+            if not todos:
+                await ctx.reply(f'I couldn\'t find a todo matching "{query}". Your list is empty.')
+                return
+            lines = [f'No exact match for "{query}". Which did you mean? Reply with the number:\n']
+            options = []
+            for i, t in enumerate(todos, 1):
+                lines.append(f"  {i}. {t.get('title', '(untitled)')}")
+                options.append({"id": t["id"], "title": t.get("title", "")})
+            from core.data import load_data, save_data, set_pending
+            _d = load_data(); set_pending(_d, "complete_todo", options); save_data(_d)
+            await ctx.reply("\n".join(lines))
             return
 
         if complete_todo(svc, match["id"]):
@@ -316,3 +330,21 @@ async def handle_todo_intent(
         else:
             await ctx.reply("Couldn't update that. Try again.")
         return
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PENDING DISAMBIGUATION RESOLVER
+# Called by bot.py when the user replies with a number after a disambiguation prompt.
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _resolve_pending_complete(chosen: dict, ctx: AlfredContext) -> None:
+    """Complete the todo that was selected via a numbered reply."""
+    svc = _get_service()
+    if not svc:
+        await ctx.reply(_auth_error_msg())
+        return
+    from adapters.google_tasks import complete_todo
+    if complete_todo(svc, chosen["id"]):
+        await ctx.reply_markdown(f"✓ Marked complete: *{chosen['title']}*")
+    else:
+        await ctx.reply("Couldn't mark that as done. Try again.")

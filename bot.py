@@ -489,6 +489,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await handle_refinement(text, ctx)
             return
 
+        # Pending disambiguation intercept — catches numbered replies like "1", "2"
+        # after the bot has asked "which one did you mean?"
+        if text.strip().isdigit():
+            from core.data import load_data, save_data, get_pending, clear_pending
+            _pdata = load_data()
+            _pending = get_pending(_pdata)
+            if _pending:
+                idx = int(text.strip()) - 1
+                options = _pending.get("options", [])
+                clear_pending(_pdata)
+                save_data(_pdata)
+                if 0 <= idx < len(options):
+                    action = _pending.get("action")
+                    chosen = options[idx]
+                    if action == "complete_todo":
+                        from features.todos import _resolve_pending_complete
+                        await _resolve_pending_complete(chosen, ctx)
+                else:
+                    await ctx.reply(f"That number isn't on the list. Say what you want to do again.")
+                return
+
     intent_result = await classify(text)
     await alfred_dispatch(intent_result, ctx, _loaded_plugins)
 

@@ -1296,3 +1296,46 @@ def get_schedule_settings(data: dict) -> dict:
     sc.setdefault("travel_weather_hour",   int(_os.getenv("TRAVEL_WEATHER_HOUR",  "19")))
     sc.setdefault("travel_weather_minute", int(_os.getenv("TRAVEL_WEATHER_MINUTE","0")))
     return sc
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PENDING DISAMBIGUATION STATE
+# Stores the context for a "which one did you mean?" prompt so the next
+# numeric reply can be resolved without hitting GPT.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def set_pending(data: dict, action: str, options: list, timeout_seconds: int = 300) -> None:
+    """
+    Save a pending disambiguation action to userdata.
+
+    Args:
+        action:  string key for the action type, e.g. "complete_todo"
+        options: list of dicts describing each choice (must include "id" and "title")
+        timeout_seconds: how long (in seconds) before the pending state expires (default 5 min)
+    """
+    import time
+    data["_pending"] = {
+        "action":  action,
+        "options": options,
+        "expires": time.time() + timeout_seconds,
+    }
+
+
+def get_pending(data: dict) -> dict | None:
+    """
+    Return the pending action dict if it exists and hasn't expired.
+    Returns None and clears stale state if expired.
+    """
+    import time
+    p = data.get("_pending")
+    if not p:
+        return None
+    if p.get("expires", 0) < time.time():
+        data.pop("_pending", None)
+        return None
+    return p
+
+
+def clear_pending(data: dict) -> None:
+    """Remove any pending disambiguation state."""
+    data.pop("_pending", None)
