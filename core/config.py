@@ -72,13 +72,24 @@ EXPORT_DIR        = "/tmp"
 
 # ---------------------------------------------------------------------------
 # GOOGLE API SCOPES
-# Calendar + Tasks. Do not change unless you are adding a new Google service.
+# Calendar + Tasks + Sheets.
+# Adding a scope here requires the user to re-run /auth to re-consent.
 # ---------------------------------------------------------------------------
 
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/spreadsheets",
 ]
+
+# ---------------------------------------------------------------------------
+# GOOGLE SHEETS — EXPENSE LEDGER                             # <-- CUSTOMIZE
+# Create a Google Sheet and paste its ID here (from the URL:
+#   https://docs.google.com/spreadsheets/d/SHEET_ID/edit)
+# Leave blank to disable Sheets sync (expenses still log to userdata.json).
+# ---------------------------------------------------------------------------
+
+SHEETS_EXPENSE_ID = os.environ.get("GOOGLE_SHEETS_EXPENSE_ID", "")
 
 
 # ---------------------------------------------------------------------------

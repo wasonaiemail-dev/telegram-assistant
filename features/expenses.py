@@ -44,7 +44,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 from core.alfred_context import AlfredContext
-from core.config import TIMEZONE
+from core.config import TIMEZONE, SHEETS_EXPENSE_ID
 from core.data import load_data, save_data
 
 logger = logging.getLogger(__name__)
@@ -103,6 +103,70 @@ def _parse_category(raw: str) -> str:
 
 def _label(cat: str) -> str:
     return _CAT_LABELS.get(cat, f"📌 {cat.title()}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# GOOGLE SHEETS SYNC
+# Appends a row to the configured expense ledger Sheet.
+# Silently skips if GOOGLE_SHEETS_EXPENSE_ID is not set or auth is missing.
+# NEVER raises — sheet sync failure must never crash the main expense flow.
+# ════════════════════════════════════════════════════════════════════════════
+
+_SHEET_HEADERS = ["Date", "Amount", "Category", "Note", "ID"]
+_SHEET_RANGE   = "Sheet1!A:E"
+
+
+def _sync_expense_to_sheet(expense: dict) -> None:
+    """
+    Append one expense row to the Google Sheet ledger.
+    Called after every successful expense log.
+    """
+    if not SHEETS_EXPENSE_ID:
+        return  # Sheets sync not configured — skip silently
+
+    try:
+        from core.google_auth import get_sheets_service
+        svc = get_sheets_service()
+        if not svc:
+            logger.warning("Sheets sync skipped: Google not authorized (run /auth).")
+            return
+
+        sheet = svc.spreadsheets()
+
+        # On very first use, check if A1 has a header and add one if not.
+        result = sheet.values().get(
+            spreadsheetId=SHEETS_EXPENSE_ID,
+            range="Sheet1!A1",
+        ).execute()
+        existing = result.get("values", [])
+        if not existing or existing[0][0] != "Date":
+            sheet.values().update(
+                spreadsheetId=SHEETS_EXPENSE_ID,
+                range="Sheet1!A1",
+                valueInputOption="USER_ENTERED",
+                body={"values": [_SHEET_HEADERS]},
+            ).execute()
+
+        # Append the expense row
+        row = [
+            expense.get("date", ""),
+            expense.get("amount", 0),
+            expense.get("category", "other"),
+            expense.get("note", ""),
+            expense.get("id", ""),
+        ]
+        sheet.values().append(
+            spreadsheetId=SHEETS_EXPENSE_ID,
+            range=_SHEET_RANGE,
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [row]},
+        ).execute()
+
+        logger.info(f"Expense #{expense.get('id')} synced to Sheets.")
+
+    except Exception as e:
+        logger.error(f"Sheets sync failed (expense not affected): {e}")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -165,6 +229,7 @@ async def _add_expense(ctx: AlfredContext, data: dict, ents: dict) -> None:
     }
     data["expenses"].append(expense)
     save_data(data)
+    _sync_expense_to_sheet(expense)   # fire-and-forget — never blocks or crashes
 
     note_part = f" — {note}" if note else ""
     await ctx.reply_markdown(
