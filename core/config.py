@@ -80,6 +80,7 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.file",
 ]
 
 # ---------------------------------------------------------------------------
@@ -90,6 +91,17 @@ GOOGLE_SCOPES = [
 # ---------------------------------------------------------------------------
 
 SHEETS_EXPENSE_ID = os.environ.get("GOOGLE_SHEETS_EXPENSE_ID", "")
+
+# ---------------------------------------------------------------------------
+# GOOGLE DRIVE — NOTES
+# Alfred stores notes as .txt files in a Drive folder called "Alfred Notes".
+# The folder is auto-created on first use. Its ID is cached on disk.
+# The mapping of Tasks note IDs → Drive file IDs is also cached on disk.
+# No env var needed — zero-config for buyers.
+# ---------------------------------------------------------------------------
+
+DRIVE_NOTES_FOLDER_FILE = os.path.join(PERSIST_DIR, "drive_notes_folder_id.txt")
+DRIVE_NOTES_MAP_FILE    = os.path.join(PERSIST_DIR, "drive_notes_map.json")
 
 
 # ---------------------------------------------------------------------------

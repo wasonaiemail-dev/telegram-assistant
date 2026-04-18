@@ -198,6 +198,12 @@ async def handle_note_intent(
         if result:
             preview = text[:80] + ("…" if len(text) > 80 else "")
             await ctx.reply_markdown(f"📝 Saved: _{preview}_")
+            # Mirror to Drive (fire-and-forget — never blocks or crashes)
+            try:
+                from adapters.google_drive import sync_note_add
+                sync_note_add(result["id"], text)
+            except Exception:
+                pass
         else:
             await ctx.reply("Couldn't save that note. Try again.")
         return
@@ -246,6 +252,11 @@ async def handle_note_intent(
             from features.undo import record_deletion
             _ud = load_data(); record_deletion(_ud, "note", title=note.get("title", "")); save_data(_ud)
             await ctx.reply_markdown(f"✓ Deleted: _{preview}_  _(say \"undo\" to restore)_")
+            try:
+                from adapters.google_drive import sync_note_delete
+                sync_note_delete(note["id"])
+            except Exception:
+                pass
         else:
             await ctx.reply("Couldn't delete that. Try again.")
         return
@@ -298,6 +309,11 @@ async def handle_note_intent(
             return
         if update_note(svc, note["id"], new_text):
             await ctx.reply_markdown(f"✓ Note updated: _{new_text[:80]}_")
+            try:
+                from adapters.google_drive import sync_note_update
+                sync_note_update(note["id"], new_text)
+            except Exception:
+                pass
         else:
             await ctx.reply("Couldn't update that note. Try again.")
         return
@@ -321,6 +337,11 @@ async def handle_note_intent(
         combined = note.get("title", "").rstrip(". ") + ". " + append_text
         if update_note(svc, note["id"], combined):
             await ctx.reply_markdown(f"✓ Note updated: _{combined[:80]}_")
+            try:
+                from adapters.google_drive import sync_note_update
+                sync_note_update(note["id"], combined)
+            except Exception:
+                pass
         else:
             await ctx.reply("Couldn't update that note. Try again.")
         return

@@ -194,6 +194,26 @@ def get_tasks_service():
         return None
 
 
+def get_drive_service():
+    """
+    Return an authorized Google Drive API service object.
+    Uses the drive.file scope — only accesses files Alfred created.
+
+    Returns:
+        googleapiclient.discovery.Resource — ready to use
+        None — not authorized or an error occurred
+    """
+    creds = get_creds()
+    if not creds:
+        return None
+    try:
+        from googleapiclient.discovery import build
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        logger.error(f"get_drive_service: {e}")
+        return None
+
+
 def get_sheets_service():
     """
     Return an authorized Google Sheets API service object.
@@ -251,7 +271,7 @@ async def cmd_auth(update, context):
             f"<b>Connect {BOT_NAME} to Google</b>\n\n"
             "1️⃣ Open this link and sign in with your Google account:\n\n"
             f"<code>{auth_url}</code>\n\n"
-            "2️⃣ Approve the Calendar, Tasks, and Sheets permissions.\n\n"
+            "2️⃣ Approve the Calendar, Tasks, Sheets, and Drive permissions.\n\n"
             "3️⃣ Your browser will redirect to a page that shows an error — "
             "<b>that is completely normal.</b>\n\n"
             "4️⃣ Look at the address bar. Copy everything after <code>code=</code> "
@@ -344,7 +364,7 @@ async def cmd_code(update, context):
         audit_log("AUTH_SUCCESS")
         await update.message.reply_text(
             f"✅ <b>Google connected successfully!</b>\n\n"
-            f"{BOT_NAME} now has access to your Google Calendar, Tasks, and Sheets.\n\n"
+            f"{BOT_NAME} now has access to your Google Calendar, Tasks, Sheets, and Drive.\n\n"
             "Try <code>/briefing</code> to run your morning briefing, or "
             "<code>/checkauth</code> to confirm the connection any time.",
             parse_mode="HTML",
@@ -403,15 +423,23 @@ async def cmd_checkauth(update, context):
     try:
         svc = get_sheets_service()
         if svc:
-            # Lightweight check: list spreadsheets (just confirms the scope works)
-            from googleapiclient.discovery import build as _build
-            drive_svc = _build("drive", "v3", credentials=get_creds(), cache_discovery=False)
-            drive_svc.files().list(
-                q="mimeType='application/vnd.google-apps.spreadsheet'",
-                pageSize=1,
-                fields="files(id)",
-            ).execute()
-            sheets_ok = True
+            drive_svc = get_drive_service()
+            if drive_svc:
+                drive_svc.files().list(
+                    q="mimeType='application/vnd.google-apps.spreadsheet'",
+                    pageSize=1,
+                    fields="files(id)",
+                ).execute()
+                sheets_ok = True
+    except Exception:
+        pass
+
+    drive_ok = False
+    try:
+        svc = get_drive_service()
+        if svc:
+            svc.files().list(pageSize=1, fields="files(id)").execute()
+            drive_ok = True
     except Exception:
         pass
 
@@ -420,8 +448,6 @@ async def cmd_checkauth(update, context):
         if hours_left < 0:
             expiry_line = "⚠️ Token appears expired (auto-refresh may be needed)"
         else:
-            # Google access tokens expire every ~1 hour — this is normal.
-            # The refresh token handles renewal automatically.
             mins_left = int(hours_left * 60)
             expiry_line = f"✅ Access token valid ({mins_left} min remaining, auto-refreshes)"
     else:
@@ -430,13 +456,15 @@ async def cmd_checkauth(update, context):
     cal_icon    = "✅" if calendar_ok else "❌"
     tasks_icon  = "✅" if tasks_ok    else "❌"
     sheets_icon = "✅" if sheets_ok   else "❌"
+    drive_icon  = "✅" if drive_ok    else "❌"
 
-    all_ok = calendar_ok and tasks_ok and sheets_ok
+    all_ok = calendar_ok and tasks_ok and sheets_ok and drive_ok
     await update.message.reply_text(
         f"<b>Google Auth Status</b>\n\n"
         f"{cal_icon} Calendar API\n"
         f"{tasks_icon} Tasks API\n"
         f"{sheets_icon} Sheets API\n"
+        f"{drive_icon} Drive API\n"
         f"🕐 {expiry_line}\n\n"
         + ("Everything looks good." if all_ok
            else "One or more services failed. Run /auth to reconnect."),
