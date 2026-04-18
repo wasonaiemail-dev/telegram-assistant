@@ -109,6 +109,7 @@ async def alfred_dispatch(
         SLEEP_LOG, SLEEP_VIEW,
         BRAINDUMP, UNDO,
         PROACTIVE_TOGGLE, VACATION_MODE, PACKING_OVERRIDE,
+        GMAIL_SEND, GMAIL_DRAFT, GMAIL_UNREAD,
         BRIEFING, WEATHER, WEEKLY_SUMMARY,
         ASK, UNKNOWN,
     )
@@ -306,6 +307,11 @@ async def alfred_dispatch(
             from features.vacation import handle_vacation_intent
             await handle_vacation_intent(intent, ents, ctx)
 
+        # ── GMAIL ─────────────────────────────────────────────────────────────
+        elif intent in (GMAIL_SEND, GMAIL_DRAFT, GMAIL_UNREAD):
+            from features.gmail import handle_gmail_intent
+            await handle_gmail_intent(intent, ents, ctx)
+
         # ── PLUGIN INTENTS (fallback) ─────────────────────────────────────────
         else:
             update  = ctx._update
@@ -405,6 +411,7 @@ def _build_core_intents():
             SLEEP_LOG, SLEEP_VIEW,
             BRAINDUMP, UNDO,
             PROACTIVE_TOGGLE, VACATION_MODE, PACKING_OVERRIDE,
+            GMAIL_SEND, GMAIL_DRAFT, GMAIL_UNREAD,
             BRIEFING, WEATHER, WEEKLY_SUMMARY,
             ASK, UNKNOWN,
         )
@@ -431,6 +438,7 @@ def _build_core_intents():
             SLEEP_LOG, SLEEP_VIEW,
             BRAINDUMP, UNDO,
             PROACTIVE_TOGGLE, VACATION_MODE, PACKING_OVERRIDE,
+            GMAIL_SEND, GMAIL_DRAFT, GMAIL_UNREAD,
             BRIEFING, WEATHER, WEEKLY_SUMMARY,
             ASK, UNKNOWN,
         }

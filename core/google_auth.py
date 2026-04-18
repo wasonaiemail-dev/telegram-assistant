@@ -214,6 +214,26 @@ def get_drive_service():
         return None
 
 
+def get_gmail_service():
+    """
+    Return an authorized Gmail API service object.
+    Uses gmail.send + gmail.readonly scopes.
+
+    Returns:
+        googleapiclient.discovery.Resource — ready to use
+        None — not authorized or an error occurred
+    """
+    creds = get_creds()
+    if not creds:
+        return None
+    try:
+        from googleapiclient.discovery import build
+        return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        logger.error(f"get_gmail_service: {e}")
+        return None
+
+
 def get_sheets_service():
     """
     Return an authorized Google Sheets API service object.
@@ -271,7 +291,7 @@ async def cmd_auth(update, context):
             f"<b>Connect {BOT_NAME} to Google</b>\n\n"
             "1️⃣ Open this link and sign in with your Google account:\n\n"
             f"<code>{auth_url}</code>\n\n"
-            "2️⃣ Approve the Calendar, Tasks, Sheets, and Drive permissions.\n\n"
+            "2️⃣ Approve the Calendar, Tasks, Sheets, Drive, and Gmail permissions.\n\n"
             "3️⃣ Your browser will redirect to a page that shows an error — "
             "<b>that is completely normal.</b>\n\n"
             "4️⃣ Look at the address bar. Copy everything after <code>code=</code> "
@@ -364,7 +384,7 @@ async def cmd_code(update, context):
         audit_log("AUTH_SUCCESS")
         await update.message.reply_text(
             f"✅ <b>Google connected successfully!</b>\n\n"
-            f"{BOT_NAME} now has access to your Google Calendar, Tasks, Sheets, and Drive.\n\n"
+            f"{BOT_NAME} now has access to your Google Calendar, Tasks, Sheets, Drive, and Gmail.\n\n"
             "Try <code>/briefing</code> to run your morning briefing, or "
             "<code>/checkauth</code> to confirm the connection any time.",
             parse_mode="HTML",
@@ -443,6 +463,15 @@ async def cmd_checkauth(update, context):
     except Exception:
         pass
 
+    gmail_ok = False
+    try:
+        svc = get_gmail_service()
+        if svc:
+            svc.users().getProfile(userId="me").execute()
+            gmail_ok = True
+    except Exception:
+        pass
+
     hours_left = token_expires_in_hours()
     if hours_left is not None:
         if hours_left < 0:
@@ -457,14 +486,16 @@ async def cmd_checkauth(update, context):
     tasks_icon  = "✅" if tasks_ok    else "❌"
     sheets_icon = "✅" if sheets_ok   else "❌"
     drive_icon  = "✅" if drive_ok    else "❌"
+    gmail_icon  = "✅" if gmail_ok    else "❌"
 
-    all_ok = calendar_ok and tasks_ok and sheets_ok and drive_ok
+    all_ok = calendar_ok and tasks_ok and sheets_ok and drive_ok and gmail_ok
     await update.message.reply_text(
         f"<b>Google Auth Status</b>\n\n"
         f"{cal_icon} Calendar API\n"
         f"{tasks_icon} Tasks API\n"
         f"{sheets_icon} Sheets API\n"
         f"{drive_icon} Drive API\n"
+        f"{gmail_icon} Gmail API\n"
         f"🕐 {expiry_line}\n\n"
         + ("Everything looks good." if all_ok
            else "One or more services failed. Run /auth to reconnect."),

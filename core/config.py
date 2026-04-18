@@ -81,6 +81,8 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 
 # ---------------------------------------------------------------------------
@@ -91,6 +93,25 @@ GOOGLE_SCOPES = [
 # ---------------------------------------------------------------------------
 
 SHEETS_EXPENSE_ID = os.environ.get("GOOGLE_SHEETS_EXPENSE_ID", "")
+
+# ---------------------------------------------------------------------------
+# GMAIL INTEGRATION                                          # <-- CUSTOMIZE
+# Alfred can send emails, save drafts, and surface unread counts in the
+# morning briefing. No extra setup beyond running /auth — scopes are included.
+#
+# GMAIL_VIP_SENDERS: comma-separated email addresses whose unread messages
+# are highlighted in the morning briefing. Leave blank to skip VIP section.
+# Example: "boss@work.com,mom@gmail.com,partner@gmail.com"
+#
+# GMAIL_DEFAULT_SIGNATURE: optional text appended to every sent email.
+# Leave blank for no signature.
+# ---------------------------------------------------------------------------
+
+GMAIL_VIP_SENDERS = [
+    s.strip() for s in os.environ.get("GMAIL_VIP_SENDERS", "").split(",")
+    if s.strip()
+]
+GMAIL_DEFAULT_SIGNATURE = os.environ.get("GMAIL_DEFAULT_SIGNATURE", "")
 
 # ---------------------------------------------------------------------------
 # GOOGLE DRIVE — NOTES

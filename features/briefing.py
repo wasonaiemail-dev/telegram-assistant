@@ -635,12 +635,21 @@ async def _section_sports(_now, platform: str = "telegram"):
         return ""
 
 
+async def _section_gmail(_now):
+    try:
+        from features.gmail import get_gmail_briefing_section
+        return await get_gmail_briefing_section()
+    except Exception:
+        return ""
+
+
 _SECTION_BUILDERS = {
     "weather":           _section_weather,
     "calendar":          _section_calendar,
     "todos":             _section_tasks,
     "habits":            _section_habits,
     "reminders":         _section_reminders,
+    "gmail":             _section_gmail,
     "meals":             _section_meals_today,
     "journal_highlight": _section_journal_highlight,
     "workout_stats":     _section_workout_stats,

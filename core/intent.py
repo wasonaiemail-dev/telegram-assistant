@@ -199,6 +199,11 @@ PROACTIVE_TOGGLE    = "proactive_toggle"       # "turn off habit streak risk"
 VACATION_MODE       = "vacation_mode"          # "vacation on until June 20"
 PACKING_OVERRIDE    = "packing_override"       # "add sunscreen to beach packing list"
 
+# Gmail
+GMAIL_SEND      = "gmail_send"     # "email John that I'll be late"
+GMAIL_DRAFT     = "gmail_draft"    # "draft an email to my landlord about..."
+GMAIL_UNREAD    = "gmail_unread"   # "how many unread emails do I have?"
+
 # Catch-all
 ASK             = "ask"
 UNKNOWN         = "unknown"
@@ -227,6 +232,7 @@ _ALL_INTENTS = {
     SLEEP_LOG, SLEEP_VIEW,
     BRAINDUMP, UNDO,
     PROACTIVE_TOGGLE, VACATION_MODE, PACKING_OVERRIDE,
+    GMAIL_SEND, GMAIL_DRAFT, GMAIL_UNREAD,
     BRIEFING, WEATHER, WEEKLY_SUMMARY,
     ASK, UNKNOWN,
 }

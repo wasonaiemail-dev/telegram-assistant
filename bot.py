@@ -166,6 +166,7 @@ async def _dispatch(intent_result, update: Update, context: ContextTypes.DEFAULT
         MOOD_LOG, MOOD_VIEW,
         LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
         EXPORT_DATA,
+        GMAIL_SEND, GMAIL_DRAFT, GMAIL_UNREAD,
         BRIEFING, WEATHER, WEEKLY_SUMMARY,
         ASK, UNKNOWN,
     )
@@ -309,6 +310,12 @@ async def _dispatch(intent_result, update: Update, context: ContextTypes.DEFAULT
         # -- LINKS (READ-LATER) ---------------------------------------------------
         elif intent in (LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE):
             await handle_link_intent(intent, ents, update, context)
+
+        # -- GMAIL ----------------------------------------------------------------
+        elif intent in (GMAIL_SEND, GMAIL_DRAFT, GMAIL_UNREAD):
+            from features.gmail import handle_gmail_intent
+            from adapters.telegram_adapter import make_context as _mk
+            await handle_gmail_intent(intent, ents, _mk(update, context))
 
         # -- EXPORT ---------------------------------------------------------------
         elif intent == EXPORT_DATA:
@@ -509,6 +516,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 else:
                     await ctx.reply(f"That number isn't on the list. Say what you want to do again.")
                 return
+
+    # Gmail send-confirmation intercept — "yes/no" after email preview
+    from features.gmail import is_gmail_confirmation, handle_gmail_confirmation
+    if is_gmail_confirmation(text):
+        handled = await handle_gmail_confirmation(text, ctx)
+        if handled:
+            return
 
     intent_result = await classify(text)
     await alfred_dispatch(intent_result, ctx, _loaded_plugins)
