@@ -993,6 +993,37 @@ def _build_keyword_rules() -> list:
 
     rules.append((p, _sleep_view))
 
+    # ── GMAIL — UNREAD ────────────────────────────────────────────────────
+    # "how many unread emails" / "check my inbox" / "any emails"
+    p = _r(r"(?:how\s+many\s+(?:unread\s+)?emails?|check\s+(?:my\s+)?(?:email|inbox|gmail)|"
+           r"any\s+(?:new\s+|unread\s+)?emails?|what(?:'s|\s+is)\s+in\s+my\s+(?:inbox|email))")
+
+    def _gmail_unread(m, t):
+        return IntentResult(intent=GMAIL_UNREAD, entities={}, confidence="keyword", raw=t)
+
+    rules.append((p, _gmail_unread))
+
+    # ── GMAIL — DRAFT ─────────────────────────────────────────────────────
+    # "draft an email to..." / "compose an email to..." / "write an email to..."
+    p = _r(r"^(?:draft|compose|write)\s+(?:an?\s+)?email\s+to\s+")
+
+    def _gmail_draft(m, t):
+        return IntentResult(intent=GMAIL_DRAFT, entities={"to": "", "subject": "", "body": t}, confidence="keyword", raw=t)
+
+    rules.append((p, _gmail_draft))
+
+    # ── GMAIL — SEND ──────────────────────────────────────────────────────
+    # "email john@example.com that..." / "email John that..." / "send an email to..."
+    # Must fire BEFORE email_assist grabs it. email_assist = drafting a REPLY
+    # to an email you received. gmail_send = composing a NEW email.
+    p = _r(r"^(?:send\s+(?:an?\s+)?email\s+to\s+|email\s+\S+@\S+|"
+           r"email\s+\w+\s+(?:that|about|saying|to\s+say|to\s+tell|letting))")
+
+    def _gmail_send(m, t):
+        return IntentResult(intent=GMAIL_SEND, entities={"to": "", "subject": "", "body": t}, confidence="keyword", raw=t)
+
+    rules.append((p, _gmail_send))
+
     return rules
 
 
@@ -1245,11 +1276,27 @@ journal_month   Get a GPT summary of the current month's journal entries.
 journal_wins    Show positive highlights extracted from journal entries.
                 Entities: days (int, default 30)
 
+gmail_send      Send a new email from the user's Gmail account.
+                Entities: to (str, required — recipient name or email address),
+                          subject (str — infer from context if not stated),
+                          body (str — the full message instruction or text)
+                Use this when the user says "email [name/address] that..." or "send an email to...".
+                Do NOT use for replying to received emails — that is email_assist.
+
+gmail_draft     Save an email to Gmail Drafts without sending.
+                Entities: to (str, required), subject (str), body (str)
+                Use this when the user says "draft/compose/write an email to...".
+
+gmail_unread    Check unread email count and VIP inbox highlights.
+                Entities: {{}}
+                Use for "how many unread emails", "check my inbox", "any new emails".
+
 reply_assist    Draft reply suggestions for a text message screenshot or description.
                 Entities: context (str, optional description the user typed before sending photo)
 
-email_assist    Draft a reply to an email (screenshot or pasted text).
+email_assist    Draft a reply to an email the user RECEIVED (screenshot or pasted text).
                 Entities: email_text (str, optional), context (str, optional)
+                Do NOT use when the user wants to SEND or COMPOSE a new email — use gmail_send or gmail_draft.
 
 reply_style_add Save a writing style example to the reply style library.
                 Entities: example (str)
@@ -1335,6 +1382,9 @@ DISAMBIGUATION:
 - "slept 7 hours" / "got 6 hours of sleep" → sleep_log. "show my sleep" / "sleep history" → sleep_view.
 - "undo" / "undo that" / "take it back" → undo.
 - "brain dump:" or "dump this:" followed by text → braindump. "/braindump" alone → braindump with empty text.
+- "email [person/address] that/about/saying [content]" / "send an email to [person]" → gmail_send (composing a new outbound email). Use email_assist ONLY when the user pastes or describes an email they RECEIVED and wants a reply drafted.
+- "draft/compose/write an email to [person] about [topic]" → gmail_draft.
+- "how many unread emails" / "check my inbox" → gmail_unread.
 
 EXAMPLES:
 {{"user": "what's on my calendar today", "response": {{"intent": "cal_view", "entities": {{"range": "today"}}}}}}
@@ -1365,6 +1415,12 @@ EXAMPLES:
 {{"user": "move my dentist appointment to 4pm tomorrow", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_start": "{_today_str}T16:00"}}}}}}
 {{"user": "rename my 3pm meeting to Project Kickoff", "response": {{"intent": "cal_update", "entities": {{"title": "3pm meeting", "new_title": "Project Kickoff"}}}}}}
 {{"user": "change the location of my dentist appointment to 123 Main St", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_location": "123 Main St"}}}}}}
+{{"user": "email tylerwason@gmail.com that this is a test from Alfred", "response": {{"intent": "gmail_send", "entities": {{"to": "tylerwason@gmail.com", "subject": "Test from Alfred", "body": "this is a test from Alfred"}}}}}}
+{{"user": "email John that I'll be 10 minutes late", "response": {{"intent": "gmail_send", "entities": {{"to": "John", "subject": "Running Late", "body": "I'll be 10 minutes late"}}}}}}
+{{"user": "send an email to boss@work.com saying I'm out sick today", "response": {{"intent": "gmail_send", "entities": {{"to": "boss@work.com", "subject": "Out Sick Today", "body": "I'm out sick today"}}}}}}
+{{"user": "draft an email to my landlord about the broken heater", "response": {{"intent": "gmail_draft", "entities": {{"to": "landlord", "subject": "Broken Heater", "body": "broken heater needs fixing"}}}}}}
+{{"user": "how many unread emails do I have", "response": {{"intent": "gmail_unread", "entities": {{}}}}}}
+{{"user": "check my inbox", "response": {{"intent": "gmail_unread", "entities": {{}}}}}}
 
 Return only the JSON for the user's message — no wrapper keys like "response"."""
 

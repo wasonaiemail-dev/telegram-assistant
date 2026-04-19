@@ -90,6 +90,33 @@ def _resolve_recipient(raw_to: str) -> str:
     return raw_to  # Return unchanged — user may need to clarify
 
 
+async def _gpt_extract_email_fields(raw_text: str) -> dict:
+    """
+    Use GPT to extract to/subject/body from a raw send-email instruction.
+    Returns dict with keys: to, subject, body.
+    """
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+        prompt = (
+            'Extract the email fields from this instruction. Return JSON only.\n\n'
+            f'Instruction: "{raw_text}"\n\n'
+            'Return: {"to": "recipient name or email", "subject": "inferred subject", "body": "message content or instruction"}\n'
+            'If a field cannot be determined, use an empty string. Subject should be inferred from context.'
+        )
+        resp = await client.chat.completions.create(
+            model=GPT_CHAT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+        )
+        import json as _json
+        return _json.loads(resp.choices[0].message.content.strip())
+    except Exception as e:
+        logger.error(f"_gpt_extract_email_fields: {e}")
+        return {"to": "", "subject": "", "body": raw_text}
+
+
 async def _gpt_draft_email(to: str, subject: str, user_instruction: str) -> str:
     """
     Use GPT to write a complete email body from the user's instruction.
@@ -184,6 +211,13 @@ async def handle_gmail_intent(
         body    = entities.get("body", "").strip()
         original_instruction = ctx.text if hasattr(ctx, "text") else body
 
+        # Keyword route sends empty entities — extract with GPT
+        if not raw_to:
+            extracted = await _gpt_extract_email_fields(ctx.text or body)
+            raw_to  = extracted.get("to", "").strip()
+            subject = extracted.get("subject", "").strip()
+            body    = extracted.get("body", "").strip()
+
         if not raw_to:
             await ctx.reply('Who should I email? Try: "email john@example.com that I\'ll be late"')
             return
@@ -232,6 +266,13 @@ async def handle_gmail_intent(
         subject = entities.get("subject", "").strip()
         body    = entities.get("body", "").strip()
         original_instruction = ctx.text if hasattr(ctx, "text") else body
+
+        # Keyword route sends empty entities — extract with GPT
+        if not raw_to:
+            extracted = await _gpt_extract_email_fields(ctx.text or body)
+            raw_to  = extracted.get("to", "").strip()
+            subject = extracted.get("subject", "").strip()
+            body    = extracted.get("body", "").strip()
 
         if not raw_to:
             await ctx.reply('Who\'s the draft for? Try: "draft an email to my landlord about..."')
