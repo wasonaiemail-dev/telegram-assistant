@@ -361,6 +361,16 @@ def main() -> None:
         except Exception as _setup_err:
             logger.warning(f"Discord: setup intercept error: {_setup_err}")
 
+        # Gmail confirmation intercept (yes/no for pending email send)
+        try:
+            from features.gmail import is_gmail_confirmation, handle_gmail_confirmation
+            if is_gmail_confirmation(text):
+                handled = await handle_gmail_confirmation(text, ctx)
+                if handled:
+                    return
+        except Exception as _gmail_err:
+            logger.warning(f"Discord: gmail confirmation intercept error: {_gmail_err}")
+
         # Natural language — classify and dispatch
         try:
             await ctx.send_typing()
