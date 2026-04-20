@@ -54,6 +54,11 @@ from core.intent import GMAIL_SEND, GMAIL_DRAFT, GMAIL_UNREAD
 
 logger = logging.getLogger(__name__)
 
+# In-memory store for pending email confirmations, keyed by user_id string.
+# Avoids file I/O race conditions when multiple async saves happen between
+# the preview message and the user's "yes/no" reply.
+_pending_emails: dict = {}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
@@ -256,19 +261,15 @@ async def handle_gmail_intent(
             "_Reply *yes* to send, or *no* to cancel._"
         )
 
-        # Save the pending email in data so the confirmation handler can find it
-        try:
-            from core.data import load_data, save_data
-            data = load_data()
-            data["pending_gmail"] = {
-                "action":  "send",
-                "to":      to,
-                "subject": subject,
-                "body":    _add_signature(body),
-            }
-            save_data(data)
-        except Exception as e:
-            logger.error(f"GMAIL_SEND: could not save pending: {e}")
+        # Store pending email in-memory (keyed by user_id) — avoids file I/O
+        # race conditions between the preview message and the "yes/no" reply.
+        uid = str(getattr(ctx, "user_id", None) or getattr(ctx, "chat_id", "default"))
+        _pending_emails[uid] = {
+            "action":  "send",
+            "to":      to,
+            "subject": subject,
+            "body":    _add_signature(body),
+        }
         return
 
     # ── GMAIL_DRAFT ───────────────────────────────────────────────────────────
@@ -349,34 +350,29 @@ async def handle_gmail_confirmation(text: str, ctx: AlfredContext) -> bool:
 
     Returns True if a pending email was found and handled, False otherwise.
     """
-    try:
-        from core.data import load_data, save_data
-        data = load_data()
-        pending = data.get("pending_gmail")
-        if not pending or pending.get("action") != "send":
-            return False
+    uid = str(getattr(ctx, "user_id", None) or getattr(ctx, "chat_id", "default"))
+    pending = _pending_emails.get(uid)
+    if not pending or pending.get("action") != "send":
+        return False
 
-        tl = text.lower().strip().rstrip(".")
+    tl = text.lower().strip().rstrip(".")
 
-        if tl in _CANCEL_WORDS:
-            data.pop("pending_gmail", None)
-            save_data(data)
-            await ctx.reply("Cancelled. Email not sent.")
-            return True
+    if tl in _CANCEL_WORDS:
+        _pending_emails.pop(uid, None)
+        await ctx.reply("Cancelled. Email not sent.")
+        return True
 
-        if tl in _CONFIRM_WORDS:
+    if tl in _CONFIRM_WORDS:
+        try:
             svc = _get_service()
             if not svc:
-                data.pop("pending_gmail", None)
-                save_data(data)
+                _pending_emails.pop(uid, None)
                 await ctx.reply(_auth_error())
                 return True
 
             from adapters.gmail import send_email
             ok = send_email(svc, pending["to"], pending["subject"], pending["body"])
-
-            data.pop("pending_gmail", None)
-            save_data(data)
+            _pending_emails.pop(uid, None)
 
             if ok:
                 to_display = pending["to"]
@@ -386,10 +382,11 @@ async def handle_gmail_confirmation(text: str, ctx: AlfredContext) -> bool:
                 )
             else:
                 await ctx.reply("Couldn't send the email. Check your Gmail connection with /checkauth.")
-            return True
-
-    except Exception as e:
-        logger.error(f"handle_gmail_confirmation: {e}")
+        except Exception as e:
+            logger.error(f"handle_gmail_confirmation send: {e}")
+            _pending_emails.pop(uid, None)
+            await ctx.reply("Something went wrong sending the email. Try again.")
+        return True
 
     return False
 
