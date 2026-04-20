@@ -1,6 +1,6 @@
 # Alfred — Project Handoff (Session Log)
 *Quick-read status doc. Updated every session. For full vision and roadmap, see Alfred_Master_Plan.md.*
-*Last updated: April 12, 2026*
+*Last updated: April 20, 2026*
 
 ---
 
@@ -15,30 +15,20 @@
 
 ## What's Next (Priority Order)
 
-### 🏗️ Active Track — Quick Wins (Customizability, in progress)
-*Low-lift buyer-facing improvements. Knocking these out before returning to core build priorities.*
+### 🔴 Immediate Blockers
+- **Tyler must run `/auth` in Telegram** — grants gmail.send + gmail.readonly + Sheets + Drive scopes. Gmail, expense sheet sync, and Drive notes mirror all depend on this.
+- **Reddit OAuth setup** — Top Plays returns empty because Railway's IP is hard-blocked. Tyler needs to create a Reddit app at `reddit.com/prefs/apps` (type: script), add `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` to Railway. No code needed. Run `!topplaysdebug` to confirm.
 
-- ✅ **CW1 — Scheduled times in setup wizard** — done, live
-- ✅ **CW2 — Briefing on/off toggle** — done, live
-- ✅ **CW3 — Journal toggle + prompt customization in setup wizard** — done, live
-- ✅ **CW4 — Sports recap: favorite teams setup step + on/off toggle** — done, live
-- ✅ **CW6 — Reply Assist signature** — done, live
-- ✅ **CW7 — Shopping: default list + 50 pre-populated common items** — done, live
-- ✅ **CW8 — Todo: list naming + due-date display preference** — done, live
-- ✅ **HP1 — Recurring Reminders** — done, live ("remind me every Monday at 9am")
-- ✅ **HP2 — Snooze Duration Setting** — done, live (configurable in setup)
-- ✅ **HP3 — Weekly Summary Section Toggles** — done, live
-- ✅ **CW5 — Event Prep toggle** — done, push pending via GitHub Desktop
+### 🔴 Next Priorities
+1. **Sports plugin season fix** — `CURRENT_YEAR` hardcoded to 2024 in `plugins/sports/config.py`. Broken for 2026. Fix: auto-detect from `datetime.date.today().year`.
+2. **Product packaging** — ZIP structure, Gumroad vs Lemon Squeezy decision (ask Tyler). SETUP_COMPANION.md is now v3.5 and ready.
+3. **Enable Gmail API** — Tyler needs to enable Gmail API in Google Cloud Console (same project as Calendar/Tasks).
 
-### 🔴 Immediate Blocker
-- **Reddit OAuth setup** — Top Plays code is deployed but returns empty because Railway's IP is hard-blocked (HTTP 403). Need Tyler to: create Reddit app at `reddit.com/prefs/apps` (type: script), then add `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` to Railway. No code changes needed — already built. Run `!topplaysdebug` after deploy to confirm.
-
-### 🔴 Core Build Priorities (after quick wins)
-1. ✅ **Google Tasks Two-Way Sync** — done April 12. `/synctasks` command + `auto_sync_tasks` job at 7:05am. Inherently two-way since Alfred writes directly to Google Tasks.
-2. **Reddit OAuth Setup** — see Immediate Blocker above. One-time config, no code needed.
-3. ✅ **Discord Phase 4C** — done April 12. Discord now at full feature parity.
-4. ✅ **Expense Tracking** — done April 12. `features/expenses.py`. NL bypass, `/expenses`, briefing section (yesterday's spending), weekly summary integration.
-5. ✅ **Sleep Tracking** — done April 12. `features/sleep.py`. NL bypass, `/sleep [hrs]`, weekly summary integration.
+### ✅ All Quick Wins + Core Builds Complete
+- CW1–CW8, HP1–HP3, CW5 — all done and live
+- Google Tasks Sync, Discord Phase 4C, Expense Tracking, Sleep Tracking, Brain Dump, Undo, Note Aging, Photo Pipeline — all done and live
+- Google Sheets expense sync, Drive notes mirror, Gmail integration — done April 18–20 2026
+- SETUP_COMPANION.md — v3.5, fully current through Session 23
 
 ---
 
@@ -167,6 +157,71 @@
 - **`core/data.py`** updated — `"expenses": []` added to `load_data()` migration defaults and `_empty_data()`
 - **Discord `!help`** updated — expenses and sleep listed under Health & Fitness
 
+### Sessions 15–16 (April 14–15, 2026) — Proactive Layer + Photo Pipeline
+
+- **Session 15:** Built full proactive layer — `features/proactive.py` (25 notification types), `features/tomorrow_prep.py` (night-before briefing), `features/travel.py` (smart travel system with 7/3/2/1d checkpoints), `features/vacation.py` (vacation mode with auto-detect + habit snooze). DND quiet hours gating. All 25 checks individually toggleable via `/proactive`. Sleep & Schedule setup wizard steps.
+- **Session 16:** Photo pipeline — `features/photo_handlers.py`. 6 photo types: receipt→shopping removal, photo→calendar event, whiteboard→note, food/menu→meal log, screenshot→NL, message screenshot→reply. Both Telegram and Discord. Shared helpers: `_vision_query()`, `_current_meal_slot()`.
+
+### Session 17 (April 15, 2026) — Calendar Overhaul
+
+- Note Search: `NOTE_SEARCH` intent — fuzzy keyword search across all Google Tasks notes
+- Multi-Calendar Write: `create_event` gains `calendar_id` param. `_resolve_write_calendar()` maps names via `CALENDAR_NAMES` config dict
+- CAL_ADD entity bug fixed: GPT returns `start` as ISO; fallback merge for `date`+`time` keys
+- CAL_UPDATE overhaul: `_parse_datetime_flexible()` via python-dateutil, `new_title`/`new_location`/`new_description` support, auto-shift end time
+- `python-dateutil>=2.9.0` added to requirements.txt
+- Discord `/restofday` and `/cal` fixed (were falling through to GPT)
+- Calendar time-block view: events grouped Morning/Afternoon/Evening/Night
+- Emoji tagging: 35+ keyword→emoji pairs, buyer overrides in settings
+- `CAL_EMOJI_SET` intent: set/show/reset calendar emojis
+- `CAL_REPEAT_FILTER` intent: hide/show repeating events, per-event whitelist
+
+### Sessions 18–21 (April 16–17, 2026) — Bug Fixes + Setup Wizard
+
+- `_cal_repeat_filter` handler signature fixed
+- `find_event_by_title` accepts optional start/end kwargs
+- Fixed Telegram MarkdownV1 parse errors in CAL_REPEAT_FILTER replies
+- Added `CAL_REPEAT_FILTER` to calendar.py module-level imports (was root cause of all crashes)
+- CAL_VIEW negative lookahead fixed ("show calendar emojis" no longer routes to CAL_VIEW)
+- CAL_EMOJI_SET restructured: special commands checked before empty guard
+- GPT prompt stale date fix in recurring CAL_ADD
+- Bump-forward guard in CAL_ADD: past start_dt pushed forward one day
+- SHOP_ADD: comma/and-separated multi-item add
+- CAL_UPDATE: `update_fields["start/end"]` now use `{"dateTime": iso, "timeZone": TIMEZONE}` dict format
+- GIFT_LIST: `recipient == "all"` treated as show-all
+- `set_pending`/`get_pending`/`clear_pending` helpers in `core/data.py`
+- TODO_COMPLETE: entity key + regex fixes; disambiguation pending state
+- `bot.py`: pending intercept block for numbered disambiguation replies
+- Setup wizard: `cal_repeat_filter` + `cal_emoji_overrides` as steps 24–25 (wizard now 25 steps)
+- `bot.py`: `/clear` command (clears ask history + conversation memory)
+- `discord_bot.py`: `!clear` for Discord parity
+- Removed Luna Baby-specific emoji entries from `_DEFAULT_EMOJIS`
+- `SETUP_COMPANION.md` updated to v3.4
+
+**All 9 test blocks passing as of April 17 2:47pm.**
+
+### Session 22 (April 18, 2026) — Google Sheets + Drive Sync
+
+- `core/config.py`: added `spreadsheets` + `drive.file` OAuth scopes, `SHEETS_EXPENSE_ID`, `DRIVE_NOTES_FOLDER_FILE`, `DRIVE_NOTES_MAP_FILE`
+- `core/google_auth.py`: added `get_drive_service()`, `/checkauth` now shows 4 lines
+- `adapters/google_drive.py` NEW: `sync_note_add`, `sync_note_update`, `sync_note_delete` — mirrors notes to "Alfred Notes" Drive folder as .txt files
+- `features/expenses.py`: `_sync_expense_to_sheet()` appends each expense to Alfred Expenses Google Sheet
+- `features/notes.py`: Drive sync calls added to add/edit/append/delete (all fire-and-forget)
+- Alfred Expenses Sheet ID: `1fJIP5VdX9PNHYBpnlDuBn7-nVrA9HfRHpmsReAIgB3k` (env var: `GOOGLE_SHEETS_EXPENSE_ID`)
+
+### Session 23 (April 20, 2026) — Gmail Integration
+
+- `core/config.py`: `gmail.send` + `gmail.readonly` scopes added, `GMAIL_VIP_SENDERS` + `GMAIL_DEFAULT_SIGNATURE` env vars
+- `core/google_auth.py`: `get_gmail_service()` added; `/checkauth` now shows 5 lines
+- `adapters/gmail.py` NEW: `get_unread_count`, `get_vip_emails`, `send_email`, `create_draft`, `search_emails`
+- `features/gmail.py` NEW: GMAIL_SEND/DRAFT/UNREAD handlers, GPT email drafting, regex+GPT entity extraction, in-memory confirmation state (`_pending_emails` dict), `get_gmail_briefing_section`
+- `features/briefing.py`: `_section_gmail()` wired into `_SECTION_BUILDERS`
+- `core/intent.py`: GMAIL_SEND/DRAFT/UNREAD constants, Layer 1 bypass rules, GPT examples, disambiguation vs EMAIL_ASSIST
+- `core/alfred_dispatch.py`: Gmail intent dispatch
+- `bot.py`: Gmail confirmation intercept (yes/no before intent classification)
+- `discord_bot.py`: Gmail confirmation intercept added
+- **Root cause fix:** `pending_gmail` in `userdata.json` was being wiped by concurrent saves from other features. Replaced with in-memory `_pending_emails: dict` keyed by user_id — confirmed working on both platforms.
+- `SETUP_COMPANION.md` updated to v3.5 (Step 15 Gmail, Gmail commands in appendix)
+
 ### Session 12 (cont.) — Discord Phase 4C Complete
 - **Diagnosed Phase 4C gap:** All feature files (meals, workout, journal, reply_assist, summary) already use `ctx: AlfredContext` pattern with zero Telegram-specific code. NL dispatch in `alfred_dispatch.py` already routed all these intents on Discord. The ONLY missing piece was the `!command` fast-path routing in `discord_bot.py`.
 - **Added to `_handle_discord_command`:** `!meals`, `!workout`, `!journal`, `!reply [message]`, `!weekly` (also `!weeklysummary`, `!summary`), `!synctasks` — all with proper error handling.
@@ -184,7 +239,7 @@
 | `Alfred_Master_Plan.md` | Full vision, architecture, roadmap, product plan, build order |
 | `alfred_feature_backlog.md` | All missing features with full context, recovered from historical docs |
 | `CLAUDE.md` | Claude behavior rules for this project |
-| `setup/SETUP_COMPANION.md` | Buyer installer document (needs update for Sessions 5+) |
+| `setup/SETUP_COMPANION.md` | Buyer installer document — v3.5, fully current through Session 23 |
 
 ---
 

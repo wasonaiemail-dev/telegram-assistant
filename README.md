@@ -34,6 +34,7 @@ Send Alfred a message and it handles the rest. Every feature is available by com
 | 🔗 **Read Later** | Save links with AI summaries and tags, snooze, search, weekly digest |
 | 💬 **Reply Assist** | Paste a message and Alfred drafts your response |
 | 📤 **Data Export** | Export everything (journal, mood, notes, habits, memory, links) to Excel |
+| 📧 **Gmail** | Send emails, save drafts, and check unread count — all by voice or natural language |
 
 ---
 

@@ -303,6 +303,40 @@ Options:
 
 ---
 
+## STEP 15 — Gmail (Optional)
+
+**Variables collected:** `GMAIL_VIP_SENDERS`, `GMAIL_DEFAULT_SIGNATURE`
+
+**Ask:** "Alfred can read, send, and draft emails through Gmail. To enable it, you'll need to re-run `/auth` in Telegram after deployment so Alfred can request Gmail access — it'll be added to the same Google consent screen you already set up. Do you want to configure Gmail options now?"
+
+**If they say skip:** Leave both variables blank in the final output block. Gmail features will still be available once they run `/auth`, just without VIP senders or a signature.
+
+**If yes, ask two sub-questions:**
+
+**15A — VIP Senders (optional):**
+"Do you have any email addresses you consider VIP — like a boss, partner, or important client? If so, list them separated by commas. Alfred will highlight unread emails from these senders in your morning briefing."
+
+Example: `boss@company.com,mom@gmail.com`
+
+Leave blank if they don't want this.
+
+**15B — Email Signature (optional):**
+"Do you want a signature automatically added to every email Alfred sends or drafts? If yes, what should it say?"
+
+Example: `Tyler` or `Best, Tyler Wason`
+
+Leave blank if they don't want one.
+
+**Important note for Standard and Express Mode:**
+
+> ⚠️ After deployment, you must run `/auth` in Telegram to grant Gmail access. Alfred will open a Google consent screen — you'll see Gmail listed alongside Calendar and Tasks. Click through to authorize it. You only need to do this once.
+>
+> Also: in Google Cloud Console (from Step 4), go to **APIs & Services → Library** and enable **Gmail API** if you want Gmail features to work.
+
+**Collect:** Their VIP sender emails (or blank) and their signature (or blank).
+
+---
+
 ## FINAL OUTPUT
 
 When all steps are complete, output this **exactly**, with every placeholder replaced with their real values. Leave the Discord variables blank if the buyer skipped Step 14.
@@ -331,6 +365,8 @@ TRAVEL_WEATHER_HOUR=[hour as integer]
 TRAVEL_WEATHER_MINUTE=[minute as integer]
 DISCORD_TOKEN=[their Discord bot token, or leave blank]
 DISCORD_ALLOWED_USER_ID=[their Discord user ID, or leave blank]
+GMAIL_VIP_SENDERS=[comma-separated VIP emails, or leave blank]
+GMAIL_DEFAULT_SIGNATURE=[email signature text, or leave blank]
 ```
 
 **Important — Google Credentials formatting:**
@@ -446,7 +482,8 @@ Once the Deployments tab shows **"Deployment successful"**:
 3. Then run these in order:
 ```
 /setup      → walk through 25 preference steps to personalize Alfred
-/checkauth  → connect your Google Calendar and Tasks
+/auth       → connect Google (Calendar, Tasks, Sheets, Drive, Gmail)
+/checkauth  → verify all Google connections show green
 /briefing   → test your first morning briefing
 /mood       → log your first mood rating
 /workout    → set up your workout program
@@ -605,6 +642,19 @@ add contact note for [name]: [fact]
 add gift for [name]: [idea]
 ```
 
+### Email (Gmail)
+```
+how many unread emails?                    — inbox count (+ VIP highlights if configured)
+check my inbox                             — same as above
+email [address] that [message]             — send an email with preview + confirmation
+email [name] that [message]                — send to a contact (name resolved from contacts)
+send an email to [x] saying [message]      — alternate send phrasing
+draft an email to [x] about [topic]        — save to Gmail Drafts (no confirmation needed)
+save a draft to [x] about [topic]          — alternate draft phrasing
+```
+
+> **Note:** Gmail requires running `/auth` after deployment to grant Gmail access. Alfred will walk you through it. VIP senders and email signature are set via `GMAIL_VIP_SENDERS` and `GMAIL_DEFAULT_SIGNATURE` environment variables.
+
 ### Ask
 ```
 /ask [question]                  — research with optional web search
@@ -623,7 +673,7 @@ add gift for [name]: [idea]
 **Smart suggestions:** Alfred analyzes patterns in your habits, workouts, meals, mood, and shopping over time and surfaces observations in your weekly summary. Configure which areas in `/setup` → Configure preferences.
 
 **Morning briefing sections** (toggle any on/off in `/setup`):
-`weather` `calendar` `todos` `habits` `quote` `word_of_day` `meals` `journal_highlight` `workout_stats` `expenses`
+`weather` `calendar` `todos` `habits` `quote` `word_of_day` `meals` `journal_highlight` `workout_stats` `expenses` `gmail`
 
 ---
 
@@ -691,4 +741,4 @@ Step: Quiet Hours
 
 ---
 
-*Alfred Setup Companion v3.4 — Discord step added (Step 14), DISCORD_TOKEN + DISCORD_ALLOWED_USER_ID in env block, /clear command added, chronotype-aware scheduling marked live, /setup updated to 25 steps*
+*Alfred Setup Companion v3.5 — Gmail step added (Step 15), GMAIL_VIP_SENDERS + GMAIL_DEFAULT_SIGNATURE in env block, Gmail commands in appendix, gmail added to briefing sections, /auth added to first-run sequence*

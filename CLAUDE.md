@@ -1,6 +1,27 @@
 # Alfred — Claude Reference Rules
 *For Claude to reference when working on the Alfred Telegram bot project.*
-*Last updated: April 2026*
+*Last updated: April 20, 2026*
+
+---
+
+## ⚠️ END OF SESSION CHECKLIST
+
+**Tyler will say this to trigger the update pass:**
+
+> "Do a full end-of-session doc update. Check and update ALL of these: Alfred_Master_Plan.md, Alfred_Project_Handoff.md (add a session log entry), alfred_feature_backlog.md, the auto-memory pickup file, SETUP_COMPANION.md (if buyer-facing changes), and README.md (if new features). Tell me what you updated in each one and what you skipped and why."
+
+**Every session that ships code MUST update all of the following. No exceptions.**
+
+| File | What to update |
+|---|---|
+| `Alfred_Master_Plan.md` | Header date, Section 7 env vars, Section 8 features table, Section 11 pre-launch checklist |
+| `Alfred_Project_Handoff.md` | Header date, "What's Next" section, new Session Log entry, file reference table if versions changed |
+| `alfred_feature_backlog.md` | Mark completed items ✅ Done [date], update packaging/product steps |
+| `auto-memory pickup file` | What shipped, what broke, what was fixed, what's next, Tyler action items, update MEMORY.md index pointer |
+| `SETUP_COMPANION.md` | New setup steps, new env vars in FINAL OUTPUT, new appendix commands, bump version footer |
+| `README.md` | Feature table row for any new features |
+
+**Rule:** If a feature shipped, it appears in all 6. Not 4 of 6. All 6.
 
 ---
 
