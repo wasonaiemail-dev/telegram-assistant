@@ -46,6 +46,7 @@ HOW UNREAD WORKS
 """
 
 import logging
+import re as _re
 
 from core.alfred_context import AlfredContext
 from core.config import BOT_NAME, OPENAI_API_KEY, GPT_CHAT_MODEL, GMAIL_VIP_SENDERS, GMAIL_DEFAULT_SIGNATURE
@@ -211,12 +212,19 @@ async def handle_gmail_intent(
         body    = entities.get("body", "").strip()
         original_instruction = ctx.text if hasattr(ctx, "text") else body
 
-        # Keyword route sends empty entities — extract with GPT
+        # Keyword route sends empty entities — extract to/subject/body
         if not raw_to:
-            extracted = await _gpt_extract_email_fields(ctx.text or body)
-            raw_to  = extracted.get("to", "").strip()
-            subject = extracted.get("subject", "").strip()
-            body    = extracted.get("body", "").strip()
+            raw_text = ctx.text or body
+            # 1) Quick regex: pull email address directly if present (fast, no GPT needed)
+            _email_match = _re.search(r'\b[\w.+\-]+@[\w.\-]+\.[a-zA-Z]{2,}\b', raw_text)
+            if _email_match:
+                raw_to = _email_match.group(0)
+            else:
+                # 2) Fallback: ask GPT to parse name-based recipients ("email John that...")
+                extracted = await _gpt_extract_email_fields(raw_text)
+                raw_to  = extracted.get("to", "").strip()
+                subject = extracted.get("subject", "").strip()
+                body    = extracted.get("body", "").strip()
 
         if not raw_to:
             await ctx.reply('Who should I email? Try: "email john@example.com that I\'ll be late"')
@@ -267,12 +275,17 @@ async def handle_gmail_intent(
         body    = entities.get("body", "").strip()
         original_instruction = ctx.text if hasattr(ctx, "text") else body
 
-        # Keyword route sends empty entities — extract with GPT
+        # Keyword route sends empty entities — extract to/subject/body
         if not raw_to:
-            extracted = await _gpt_extract_email_fields(ctx.text or body)
-            raw_to  = extracted.get("to", "").strip()
-            subject = extracted.get("subject", "").strip()
-            body    = extracted.get("body", "").strip()
+            raw_text = ctx.text or body
+            _email_match = _re.search(r'\b[\w.+\-]+@[\w.\-]+\.[a-zA-Z]{2,}\b', raw_text)
+            if _email_match:
+                raw_to = _email_match.group(0)
+            else:
+                extracted = await _gpt_extract_email_fields(raw_text)
+                raw_to  = extracted.get("to", "").strip()
+                subject = extracted.get("subject", "").strip()
+                body    = extracted.get("body", "").strip()
 
         if not raw_to:
             await ctx.reply('Who\'s the draft for? Try: "draft an email to my landlord about..."')
