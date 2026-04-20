@@ -219,6 +219,14 @@ async def handle_gmail_intent(
             _email_match = _re.search(r'\b[\w.+\-]+@[\w.\-]+\.[a-zA-Z]{2,}\b', raw_text)
             if _email_match:
                 raw_to = _email_match.group(0)
+                # Also extract the body content: everything after "that/saying/about/to say/to tell"
+                # e.g. "email foo@bar.com that I'll be late" → body = "I'll be late"
+                _body_match = _re.search(
+                    r'(?:that|saying|about|to\s+say|to\s+tell|letting\s+\S+\s+know)\s+(.+)',
+                    raw_text, _re.IGNORECASE
+                )
+                if _body_match:
+                    body = _body_match.group(1).strip()
             else:
                 # 2) Fallback: ask GPT to parse name-based recipients ("email John that...")
                 extracted = await _gpt_extract_email_fields(raw_text)
@@ -281,6 +289,12 @@ async def handle_gmail_intent(
             _email_match = _re.search(r'\b[\w.+\-]+@[\w.\-]+\.[a-zA-Z]{2,}\b', raw_text)
             if _email_match:
                 raw_to = _email_match.group(0)
+                _body_match = _re.search(
+                    r'(?:that|saying|about|to\s+say|to\s+tell|letting\s+\S+\s+know)\s+(.+)',
+                    raw_text, _re.IGNORECASE
+                )
+                if _body_match:
+                    body = _body_match.group(1).strip()
             else:
                 extracted = await _gpt_extract_email_fields(raw_text)
                 raw_to  = extracted.get("to", "").strip()
