@@ -1,6 +1,6 @@
 # Alfred — Project Handoff (Session Log)
 *Quick-read status doc. Updated every session. For full vision and roadmap, see Alfred_Master_Plan.md.*
-*Last updated: April 20, 2026*
+*Last updated: April 20, 2026 — Session 25 (Whop listing mockup)*
 
 ---
 
@@ -16,13 +16,13 @@
 ## What's Next (Priority Order)
 
 ### 🔴 Immediate Blockers
-- **Tyler must run `/auth` in Telegram** — grants gmail.send + gmail.readonly + Sheets + Drive scopes. Gmail, expense sheet sync, and Drive notes mirror all depend on this.
 - **Reddit OAuth setup** — Top Plays returns empty because Railway's IP is hard-blocked. Tyler needs to create a Reddit app at `reddit.com/prefs/apps` (type: script), add `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` to Railway. No code needed. Run `!topplaysdebug` to confirm.
 
 ### 🔴 Next Priorities
-1. **Sports plugin season fix** — `CURRENT_YEAR` hardcoded to 2024 in `plugins/sports/config.py`. Broken for 2026. Fix: auto-detect from `datetime.date.today().year`.
-2. **Product packaging** — ZIP structure, Gumroad vs Lemon Squeezy decision (ask Tyler). SETUP_COMPANION.md is now v3.5 and ready.
-3. **Enable Gmail API** — Tyler needs to enable Gmail API in Google Cloud Console (same project as Calendar/Tasks).
+1. **Sports plugin season fix** — `"season": 2024` hardcoded in `plugins/sports/config.py`. Broken for 2026. Fix: `datetime.date.today().year`. Must fix before Sports Pack is listed on Whop.
+2. **Publish Whop listing** — Mockup (`AI/marvin_whop_listing.html`) is complete. Transfer copy and structure to live Whop page. Product name: **Marvin**. Price: $1. Sports Pack as separate $1 add-on listing.
+3. **Product packaging** — ZIP structure: which folders go in buyer download? Needs decision before listing goes live.
+4. **Enable Gmail API** — Tyler needs to enable Gmail API in Google Cloud Console (same project as Calendar/Tasks) if not already done.
 
 ### ✅ All Quick Wins + Core Builds Complete
 - CW1–CW8, HP1–HP3, CW5 — all done and live
@@ -221,6 +221,24 @@
 - `discord_bot.py`: Gmail confirmation intercept added
 - **Root cause fix:** `pending_gmail` in `userdata.json` was being wiped by concurrent saves from other features. Replaced with in-memory `_pending_emails: dict` keyed by user_id — confirmed working on both platforms.
 - `SETUP_COMPANION.md` updated to v3.5 (Step 15 Gmail, Gmail commands in appendix)
+
+### Session 25 (April 20, 2026) — Whop Listing Mockup + Product Naming
+
+**No bot code shipped this session. All work was on product packaging and the Whop listing.**
+
+- **Platform decided: Whop** — chosen over Gumroad and Lemon Squeezy. 3% fee, no monthly cost, built for software/bots, growing social presence. Supports both marketplace and self-driven marketing.
+- **Product name decided: Marvin** — external brand name for the Whop listing. Avoids potential Alfred Mac app trademark conflict. Named after Marvin from Hitchhiker's Guide to the Galaxy.
+- **`AI/marvin_whop_listing.html`** — full dark-themed Whop-style product listing mockup built and iterated across the session. Contains:
+  - Cover banner, seller row, product tagline, rating, tags
+  - "Just talk to it" NL pitch with 11 varied examples across all feature categories
+  - "Marvin doesn't wait" foresight/proactive pitch with 5 examples
+  - 10 phone chat screenshots: full morning briefing (all sections), Whole Foods receipt photo scan, voice→email with transcript, calendar voice add, expense tracking, mood logging, recurring reminder, travel prep, and 2 to-do list management phones
+  - Weekly summary + night-before briefing phone mockups
+  - "Fully Customizable" section with /setup wizard + NL customization phone mockups
+  - Multiple to-do list management section (2 phones: list overview/drill-in, cross-list overdue/snooze)
+  - Feature grid, setup steps, what's included, requirements table, purchase card with Sports Pack add-on
+- **Receipt image** — used a real Whole Foods receipt photo (pbfingers.com source), embedded via JavaScript base64 chunks to bypass data URI rendering restrictions. Items in Marvin's response match the actual receipt (tortillas, eggs, black beans, strawberries, gala apples, $45.44 total).
+- **`AI/whole_foods_receipt.jpg`** — real receipt photo saved to workspace alongside the listing HTML.
 
 ### Session 12 (cont.) — Discord Phase 4C Complete
 - **Diagnosed Phase 4C gap:** All feature files (meals, workout, journal, reply_assist, summary) already use `ctx: AlfredContext` pattern with zero Telegram-specific code. NL dispatch in `alfred_dispatch.py` already routed all these intents on Discord. The ONLY missing piece was the `!command` fast-path routing in `discord_bot.py`.
