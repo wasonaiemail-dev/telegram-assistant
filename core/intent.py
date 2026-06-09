@@ -1490,26 +1490,10 @@ async def _gpt_classify(text: str) -> "IntentResult | None":
 
     raw = ""
     try:
-        # Compute the REAL current date at request time. The static system prompt
-        # bakes in the date from when it was last built (at bot startup), which goes
-        # stale on long-running deploys — making relative dates like "tomorrow"
-        # resolve off the boot date. This per-request override keeps them correct.
-        import datetime as _dt
-        from zoneinfo import ZoneInfo as _ZI
-        from core.config import TIMEZONE as _TZ
-        _today_live = _dt.datetime.now(_ZI(_TZ)).strftime("%Y-%m-%d (%A)")
-
         resp = await client.chat.completions.create(
             model=GPT_CHAT_MODEL,
             messages=[
                 {"role": "system", "content": _gpt_system_prompt},
-                {"role": "system", "content": (
-                    f"CURRENT DATE OVERRIDE: Today is {_today_live}. This is "
-                    f"authoritative and supersedes any date mentioned earlier in "
-                    f"the prompt or its examples. Resolve ALL relative dates and "
-                    f"times (today, tonight, tomorrow, next Monday, in 3 days, etc.) "
-                    f"from this date."
-                )},
                 {"role": "user",   "content": text},
             ],
             temperature=0,
