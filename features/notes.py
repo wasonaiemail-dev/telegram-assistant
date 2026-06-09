@@ -218,12 +218,7 @@ async def handle_note_intent(
     # ── NOTE_DELETE ────────────────────────────────────────────────────────────
     if intent == NOTE_DELETE:
         number = entities.get("number")
-        # "query" is what the classifier emits; "text" used by some paths — accept both.
-        text   = (entities.get("query") or entities.get("text") or "").strip()
-        # A bare number ("delete note 2") arrives as query text — treat as an index.
-        if number is None and text.isdigit():
-            number = text
-            text   = ""
+        text   = entities.get("text", "").strip()
 
         from adapters.google_tasks import list_notes, delete_note
         notes = list_notes(svc)
