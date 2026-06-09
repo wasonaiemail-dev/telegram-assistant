@@ -659,7 +659,8 @@ async def handle_calendar_intent(
 
     # ── CAL_DELETE ────────────────────────────────────────────────────────────
     if intent == CAL_DELETE:
-        title     = entities.get("title", "").strip()
+        # "query" is what the classifier emits; "title" used by some paths — accept both.
+        title     = (entities.get("query") or entities.get("title") or "").strip()
         date_str  = entities.get("date", "")
 
         if not title:

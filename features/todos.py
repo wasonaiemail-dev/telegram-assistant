@@ -286,7 +286,9 @@ async def handle_todo_intent(
 
     # ── TODO_DELETE ────────────────────────────────────────────────────────────
     if intent == TODO_DELETE:
-        query = entities.get("task", "").strip()
+        # "query" is what Layer 1 keyword regex and GPT emit; "task" used by some
+        # paths — accept both (mirrors TODO_COMPLETE).
+        query = (entities.get("query") or entities.get("task") or "").strip()
         from adapters.google_tasks import list_todos, delete_todo
         todos = list_todos(svc, include_done=False)
 
