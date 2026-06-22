@@ -9,6 +9,7 @@ WHAT CAN BE UNDONE
   • Deleted note      → recreated in Google Tasks "Alfred Notes"
   • Deleted shopping  → recreated in the appropriate Google Tasks shopping list
   • Deleted expense   → restored to userdata.json["expenses"]
+  • Deleted mood      → restored to userdata.json["mood_log"]
 
 HOW IT WORKS
 ─────────────
@@ -56,16 +57,18 @@ def record_deletion(
     title:     str = "",
     list_key:  str = "",
     expense:   dict | None = None,
+    mood:      dict | None = None,
 ) -> None:
     """
     Push a deletable snapshot onto _last_deleted before actually deleting.
 
     Args:
         data:       current userdata dict (will be mutated + saved by caller)
-        item_type:  "todo" | "note" | "shopping" | "expense"
+        item_type:  "todo" | "note" | "shopping" | "expense" | "mood"
         title:      item title text (for todo/note/shopping)
         list_key:   shopping list key (only for item_type="shopping")
         expense:    full expense dict (only for item_type="expense")
+        mood:       full mood entry dict (only for item_type="mood")
     """
     entry = {"type": item_type}
     if item_type in ("todo", "note"):
@@ -75,6 +78,8 @@ def record_deletion(
         entry["list_key"] = list_key
     elif item_type == "expense":
         entry["expense"] = expense or {}
+    elif item_type == "mood":
+        entry["mood"] = mood or {}
 
     stack = data.setdefault("_last_deleted", [])
     stack.append(entry)
@@ -165,6 +170,27 @@ async def handle_undo_intent(ctx: AlfredContext) -> None:
         except Exception as e:
             logger.error(f"undo expense: {e}")
             await ctx.reply("Something went wrong restoring that expense.")
+
+    # ── Undo mood ─────────────────────────────────────────────────────────
+    elif item_type == "mood":
+        mood = entry.get("mood", {})
+        if not mood:
+            await ctx.reply("No mood data to restore.")
+            return
+        try:
+            # Reload fresh to avoid overwrite races
+            data2 = load_data()
+            log = data2.setdefault("mood_log", [])
+            # Drop any current entry for that date, then restore the snapshot
+            target_date = mood.get("date")
+            data2["mood_log"] = [e for e in log if e.get("date") != target_date]
+            data2["mood_log"].append(mood)
+            save_data(data2)
+            rating = mood.get("rating", 0)
+            await ctx.reply_markdown(f"↩️ Restored mood entry for *{target_date}*: {rating}/10")
+        except Exception as e:
+            logger.error(f"undo mood: {e}")
+            await ctx.reply("Something went wrong restoring that mood entry.")
 
     else:
         await ctx.reply("I'm not sure what to undo.")

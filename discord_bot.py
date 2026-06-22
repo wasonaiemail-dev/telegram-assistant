@@ -62,7 +62,7 @@ PLATFORM DIFFERENCES
   Full Discord button (discord.ui.View) support is planned for Phase 6.
 - Discord messages have a 2000-character limit (auto-split by adapter).
 - HTML formatting is converted to Discord Markdown automatically.
-- Voice transcription is not yet supported on Discord (Phase 5 roadmap).
+- Voice/audio attachments are transcribed via Whisper (same path as Telegram).
 """
 
 import asyncio
@@ -269,6 +269,67 @@ def main() -> None:
                 pass
 
     # ─────────────────────────────────────────────────────────────────────────
+    # VOICE / AUDIO HANDLER
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _handle_discord_voice(attachment, ctx, message) -> None:
+        """
+        Download a Discord voice/audio attachment and route it through the same
+        transcription pipeline as Telegram:
+          1. Active journal session → handle_voice_journal
+          2. Otherwise → Whisper transcribe → echo → intent classify → dispatch
+        Reuses bot._transcribe_voice_file; no Discord-specific whisper logic.
+        """
+        import tempfile
+        import aiohttp
+        from bot import _transcribe_voice_file
+
+        # Download the attachment to a temp file
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(attachment.url) as resp:
+                    data = await resp.read()
+            suffix = os.path.splitext(attachment.filename.lower())[1] or ".ogg"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
+        except Exception as e:
+            logger.error(f"Discord: failed to download voice attachment: {e}")
+            await ctx.reply("Couldn't download that voice message. Try again.")
+            return
+
+        try:
+            # Journal session takes priority (parity with Telegram)
+            from features.journal import is_journal_session_active, handle_voice_journal
+            if is_journal_session_active():
+                await handle_voice_journal(tmp_path, ctx)
+                return
+
+            # General voice: transcribe, then route the text as a normal message
+            text = await _transcribe_voice_file(tmp_path)
+            if not text:
+                await ctx.reply("Sorry, I couldn't understand that audio.")
+                return
+
+            # Acknowledge what was heard
+            await ctx.reply(f"🎙️ {text}")
+
+            # Treat the transcript as the user's message: classify + dispatch
+            ctx = _rebuild_ctx_with_text(ctx, text)
+            await ctx.send_typing()
+            intent_result = await classify(text)
+            from core.alfred_dispatch import alfred_dispatch
+            await alfred_dispatch(intent_result, ctx, loaded_plugins)
+        except Exception as e:
+            logger.error(f"Discord: voice handling error: {e}", exc_info=True)
+            await ctx.reply("Something went wrong with that voice message. Try typing instead.")
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    # ─────────────────────────────────────────────────────────────────────────
     # EVENT HANDLERS
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -297,6 +358,21 @@ def main() -> None:
         # Ignore empty messages — but check for image attachments first
         text = (message.content or "").strip()
         if not text:
+            # Handle voice/audio attachments first (voice notes have no text)
+            if message.attachments:
+                audio_exts = {".ogg", ".oga", ".mp3", ".m4a", ".wav", ".webm", ".flac", ".aac"}
+                for att in message.attachments:
+                    ext = os.path.splitext(att.filename.lower())[1]
+                    if ext in audio_exts:
+                        if not _check_rate_limit():
+                            await message.channel.send(
+                                "You're sending messages very quickly — slow down a little."
+                            )
+                            return
+                        from adapters.discord_adapter import make_context
+                        ctx = make_context(message)
+                        await _handle_discord_voice(att, ctx, message)
+                        return
             # Handle photo/image attachments (receipt, screenshot, general)
             if message.attachments:
                 image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}

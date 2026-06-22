@@ -166,8 +166,9 @@ EMAIL_ASSIST    = "email_assist"
 REPLY_STYLE_ADD = "reply_style_add"
 
 # Mood tracking
-MOOD_LOG  = "mood_log"
-MOOD_VIEW = "mood_view"
+MOOD_LOG    = "mood_log"
+MOOD_VIEW   = "mood_view"
+MOOD_DELETE = "mood_delete"
 
 # Link / read-later
 LINK_SAVE      = "link_save"
@@ -225,7 +226,7 @@ _ALL_INTENTS = {
     WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY,
     JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH, JOURNAL_MONTH, JOURNAL_WINS,
     REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD,
-    MOOD_LOG, MOOD_VIEW,
+    MOOD_LOG, MOOD_VIEW, MOOD_DELETE,
     LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
     EXPORT_DATA,
     EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
@@ -888,6 +889,21 @@ def _build_keyword_rules() -> list:
 
     rules.append((p, _mood_log))
 
+    # ── MOOD — DELETE ─────────────────────────────────────────────────────
+    # "delete my mood" / "delete today's mood entry" / "remove mood for 2026-06-09"
+    p = _r(r"^(?:delete|remove|clear)\s+(?:my\s+|the\s+)?(?:today'?s\s+)?mood"
+           r"(?:\s+(?:entry|log|rating))?(?:\s+(?:for|on)\s+(.+))?$")
+
+    def _mood_delete(m, t):
+        return IntentResult(
+            intent=MOOD_DELETE,
+            entities={"date": (m.group(1) or "").strip()},
+            confidence="keyword",
+            raw=t,
+        )
+
+    rules.append((p, _mood_delete))
+
     # ── MEMORY — ADD (quick) ──────────────────────────────────────────────
     # "remember that I hate cilantro" / "remember my favorite color is blue"
     p = _r(r"^remember\s+(?:that\s+)?(.+)$")
@@ -1326,6 +1342,9 @@ mood_log        Log the user's current mood/emotional state (1-10 rating).
 mood_view       Show the user's recent mood history or trends.
                 Entities: days (int, default 7)
 
+mood_delete     Delete a logged mood entry (defaults to today's entry).
+                Entities: date (str, optional — ISO date like 2026-06-09; empty means today)
+
 link_save       Save a URL to the read-later list.
                 Entities: url (str), note (str optional)
 
@@ -1347,7 +1366,7 @@ export_data     Export all user data (journal, habits, mood, etc.) to a file.
 braindump       Sort a messy stream-of-consciousness into todos, reminders, notes, and shopping.
                 Entities: text (the raw dump text)
 
-undo            Undo the last deletion (todo, note, shopping item, or expense).
+undo            Undo the last deletion (todo, note, shopping item, expense, or mood).
                 Entities: {{}}
 
 expense_add     Log a new expense.
@@ -1396,7 +1415,7 @@ DISAMBIGUATION:
 - Rule of thumb: short acknowledgments of exercise → habit_log. Detailed workout descriptions → workout_log.
 - "done with X" / "mark X done" / "finished X" → todo_complete (not workout_log unless it explicitly says "workout").
 - "forget X" → memory_remove. "remember X" → memory_add.
-- "mood 7" or "feeling 8" → mood_log. "how's my mood" / "mood history" → mood_view.
+- "mood 7" or "feeling 8" → mood_log. "how's my mood" / "mood history" → mood_view. "delete today's mood" / "remove my mood entry" → mood_delete.
 - "$45 groceries" / "spent $12 on coffee" → expense_add. "show my expenses" / "how much did I spend" → expense_view.
 - "slept 7 hours" / "got 6 hours of sleep" → sleep_log. "show my sleep" / "sleep history" → sleep_view.
 - "undo" / "undo that" / "take it back" → undo.
@@ -1425,6 +1444,8 @@ EXAMPLES:
 {{"user": "got the milk", "response": {{"intent": "shop_complete", "entities": {{"item": "milk", "list_key": "grocery"}}}}}}
 {{"user": "did chest and triceps for 45 min", "response": {{"intent": "workout_log", "entities": {{"description": "chest and triceps", "duration_min": 45}}}}}}
 {{"user": "forget that I hate cilantro", "response": {{"intent": "memory_remove", "entities": {{"fact": "I hate cilantro"}}}}}}
+{{"user": "delete today's mood entry", "response": {{"intent": "mood_delete", "entities": {{"date": ""}}}}}}
+{{"user": "remove my mood log for June 9", "response": {{"intent": "mood_delete", "entities": {{"date": "2026-06-09"}}}}}}
 {{"user": "find notes about dentist", "response": {{"intent": "note_search", "entities": {{"query": "dentist"}}}}}}
 {{"user": "search my notes for budget", "response": {{"intent": "note_search", "entities": {{"query": "budget"}}}}}}
 {{"user": "use 💪 for workout events", "response": {{"intent": "cal_emoji_set", "entities": {{"keyword": "workout", "emoji": "💪"}}}}}}
@@ -1434,7 +1455,7 @@ EXAMPLES:
 {{"user": "move my dentist appointment to 4pm tomorrow", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_start": "{_today_str}T16:00"}}}}}}
 {{"user": "rename my 3pm meeting to Project Kickoff", "response": {{"intent": "cal_update", "entities": {{"title": "3pm meeting", "new_title": "Project Kickoff"}}}}}}
 {{"user": "change the location of my dentist appointment to 123 Main St", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_location": "123 Main St"}}}}}}
-{{"user": "email tylerwason@gmail.com that this is a test from Alfred", "response": {{"intent": "gmail_send", "entities": {{"to": "tylerwason@gmail.com", "subject": "Test from Alfred", "body": "this is a test from Alfred"}}}}}}
+{{"user": "email you@example.com that this is a test from Alfred", "response": {{"intent": "gmail_send", "entities": {{"to": "you@example.com", "subject": "Test from Alfred", "body": "this is a test from Alfred"}}}}}}
 {{"user": "email John that I'll be 10 minutes late", "response": {{"intent": "gmail_send", "entities": {{"to": "John", "subject": "Running Late", "body": "I'll be 10 minutes late"}}}}}}
 {{"user": "send an email to boss@work.com saying I'm out sick today", "response": {{"intent": "gmail_send", "entities": {{"to": "boss@work.com", "subject": "Out Sick Today", "body": "I'm out sick today"}}}}}}
 {{"user": "draft an email to my landlord about the broken heater", "response": {{"intent": "gmail_draft", "entities": {{"to": "landlord", "subject": "Broken Heater", "body": "broken heater needs fixing"}}}}}}

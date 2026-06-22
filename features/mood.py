@@ -32,7 +32,7 @@ from core.alfred_context import AlfredContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME, TIMEZONE
-from core.intent import MOOD_LOG, MOOD_VIEW
+from core.intent import MOOD_LOG, MOOD_VIEW, MOOD_DELETE
 from core.data import load_data, save_data
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,27 @@ def log_mood(rating: int, note: str, data: dict) -> str:
 
     emoji = "😭" if rating <= 3 else "😕" if rating <= 5 else "😐" if rating <= 7 else "😊" if rating <= 9 else "🤩"
     return f"{emoji} Logged mood {rating}/10" + (f" — {note}" if note else "")
+
+
+def delete_mood(date_str: str, data: dict) -> dict | None:
+    """
+    Delete a mood entry by date (defaults to today). Records the deletion for
+    undo before removing. Returns the deleted entry dict, or None if not found.
+    """
+    target = (date_str or "").strip() or _today_str()
+    mood_log = data.get("mood_log", [])
+
+    match = next((e for e in mood_log if e.get("date") == target), None)
+    if not match:
+        return None
+
+    # Record for undo BEFORE deleting
+    from features.undo import record_deletion
+    record_deletion(data, "mood", mood=dict(match))
+
+    data["mood_log"] = [e for e in mood_log if e.get("date") != target]
+    save_data(data)
+    return match
 
 
 def get_mood_trend(days: int, data: dict) -> list:
@@ -299,6 +320,21 @@ async def handle_mood_intent(intent: str, entities: dict, ctx: AlfredContext) ->
 
         msg = log_mood(rating, note, data)
         await ctx.reply(msg)
+
+    elif intent == MOOD_DELETE:
+        date_str = (entities.get("date") or "").strip()
+        deleted = delete_mood(date_str, data)
+        if not deleted:
+            when = date_str or "today"
+            await ctx.reply(f"No mood entry found for {when}.")
+            return
+        rating = deleted.get("rating", 0)
+        emoji = "😭😕😐😊🤩"[min(4, max(0, rating - 1))]
+        note = deleted.get("note", "")
+        note_part = f" — {note}" if note else ""
+        await ctx.reply_markdown(
+            f"✓ Deleted mood entry for *{deleted.get('date')}*: {rating}/10 {emoji}{note_part}  _(\"undo\" to restore)_"
+        )
 
     elif intent == MOOD_VIEW:
         days = entities.get("days", 7)

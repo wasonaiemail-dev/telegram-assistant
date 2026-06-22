@@ -323,7 +323,7 @@ Leave blank if they don't want this.
 **15B — Email Signature (optional):**
 "Do you want a signature automatically added to every email Alfred sends or drafts? If yes, what should it say?"
 
-Example: `Tyler` or `Best, Tyler Wason`
+Example: `Sam` or `Best, Sam Rivera`
 
 Leave blank if they don't want one.
 

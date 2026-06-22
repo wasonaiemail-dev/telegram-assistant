@@ -585,7 +585,7 @@ def get_memory_context(text: str = None, mem: dict = None, categories: list = No
     Returns:
         Formatted string like:
             [Me]
-              - Name is Tyler, lives in Salt Lake City
+              - Name is Alex, lives in Denver
             [Health]
               - Lactose intolerant
         Returns empty string if no relevant facts exist.

@@ -717,7 +717,7 @@ _PREFS_PROMPTS = {
     ),
     "reply_signature": (
         "What name or sign-off should I append to reply drafts?\n\n"
-        "• Type your name or closing — e.g. *Tyler*, *Thanks, Tyler*, *— T*\n"
+        "• Type your name or closing — e.g. *Sam*, *Thanks, Sam*, *— S*\n"
         "• Type *none* to draft replies without a signature\n\n"
         "Type *skip* to keep current setting."
     ),

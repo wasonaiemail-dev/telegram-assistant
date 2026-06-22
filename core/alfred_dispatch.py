@@ -102,7 +102,7 @@ async def alfred_dispatch(
         WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY,
         JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH, JOURNAL_MONTH, JOURNAL_WINS,
         REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD,
-        MOOD_LOG, MOOD_VIEW,
+        MOOD_LOG, MOOD_VIEW, MOOD_DELETE,
         LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
         EXPORT_DATA,
         EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
@@ -174,7 +174,7 @@ async def alfred_dispatch(
             await handle_contact_intent(intent, ents, ctx)
 
         # -- MOOD -------------------------------------------------------------
-        elif intent in (MOOD_LOG, MOOD_VIEW):
+        elif intent in (MOOD_LOG, MOOD_VIEW, MOOD_DELETE):
             from features.mood import handle_mood_intent
             await handle_mood_intent(intent, ents, ctx)
 
@@ -404,7 +404,7 @@ def _build_core_intents():
             WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY,
             JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH, JOURNAL_MONTH, JOURNAL_WINS,
             REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD,
-            MOOD_LOG, MOOD_VIEW,
+            MOOD_LOG, MOOD_VIEW, MOOD_DELETE,
             LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
             EXPORT_DATA,
             EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,
@@ -431,7 +431,7 @@ def _build_core_intents():
             WORKOUT_TEMPLATE, WORKOUT_EXPORT, WORKOUT_BODY,
             JOURNAL_PROMPT, JOURNAL_VIEW, JOURNAL_SEARCH, JOURNAL_MONTH, JOURNAL_WINS,
             REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD,
-            MOOD_LOG, MOOD_VIEW,
+            MOOD_LOG, MOOD_VIEW, MOOD_DELETE,
             LINK_SAVE, LINK_VIEW, LINK_SEARCH, LINK_MARK_READ, LINK_SNOOZE,
             EXPORT_DATA,
             EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE,

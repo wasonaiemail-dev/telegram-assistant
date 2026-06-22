@@ -547,39 +547,6 @@ async def _transcribe_voice_file(file_path: str) -> str | None:
         return None
 
 
-async def _transcribe_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    """
-    Download a voice/audio message and transcribe it with OpenAI Whisper.
-    Returns the transcribed text, or empty string on failure.
-    """
-    import os
-    import tempfile
-    from openai import AsyncOpenAI
-    from core.config import OPENAI_API_KEY, GPT_VOICE_MODEL
-
-    try:
-        file_obj = update.message.voice or update.message.audio
-        tg_file  = await context.bot.get_file(file_obj.file_id)
-
-        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
-            await tg_file.download_to_drive(tmp.name)
-            tmp_path = tmp.name
-
-        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-        with open(tmp_path, "rb") as audio_file:
-            transcript = await client.audio.transcriptions.create(
-                model=GPT_VOICE_MODEL,
-                file=audio_file,
-            )
-
-        os.unlink(tmp_path)
-        return transcript.text.strip()
-
-    except Exception as e:
-        logger.error(f"voice transcription error: {e}")
-        return ""
-
-
 # =============================================================================
 # PHOTO TYPE DETECTION
 # =============================================================================

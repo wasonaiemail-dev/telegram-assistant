@@ -4,18 +4,18 @@ alfred/features/sync_tasks.py
 Google Tasks sync summary — /synctasks command + auto_sync_tasks scheduled job.
 
 Alfred stores all todos, shopping lists, and gifts directly in Google Tasks.
-That means anything Tyler adds on Alfred shows up immediately in the Google Tasks
-phone app, and anything Tyler adds or checks off on his phone is instantly
+That means anything you add on Alfred shows up immediately in the Google Tasks
+phone app, and anything you add or check off on your phone is instantly
 reflected the next time Alfred reads a list. No traditional "sync" is needed.
 
 What this module adds:
   • /synctasks  — On-demand consolidated view of all Alfred Google Tasks lists.
                    Shows todo count + high-priority items, each shopping list with
-                   items, and gift ideas count. Useful after Tyler has been adding
-                   things from his phone and wants to see what Alfred sees.
+                   items, and gift ideas count. Useful after you have been adding
+                   things from your phone and want to see what Alfred sees.
   • auto_sync_tasks  — Scheduled job at 7:05 AM (5 min after briefing). Sends
-                       the same summary automatically each morning so Tyler knows
-                       what's on his lists without having to ask.
+                       the same summary automatically each morning so you know
+                       what's on your lists without having to ask.
 
 COMMAND
 ───────
@@ -208,9 +208,9 @@ async def auto_sync_tasks(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Scheduled job — fires at 7:05 AM (5 minutes after the morning briefing).
 
-    Sends Tyler a consolidated Google Tasks summary so he starts the day with
-    a clear picture of everything on his lists, including anything he added
-    from his phone the night before.
+    Sends the user a consolidated Google Tasks summary so they start the day with
+    a clear picture of everything on their lists, including anything they added
+    from their phone the night before.
     """
     try:
         from core.config import ALLOWED_USER_ID
