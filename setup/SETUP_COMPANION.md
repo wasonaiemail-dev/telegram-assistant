@@ -594,6 +594,7 @@ export my workout log            — download Excel log
 /mood                            — tap a 1–10 rating button
 mood [number]                    — natural language log
 show my mood this week           — recent trend
+delete my mood entry [date]      — remove a logged mood (say "undo" to restore)
 ```
 
 ### Sleep
@@ -664,7 +665,7 @@ save a draft to [x] about [topic]          — alternate draft phrasing
 
 ## APPENDIX — Feature Quick Reference
 
-**Voice:** Every feature works by voice. Send any Telegram voice note and Alfred transcribes it and routes it normally.
+**Voice:** Every feature works by voice. Send any Telegram or Discord voice note (or audio file) and Alfred transcribes it with Whisper and routes it normally.
 
 **Receipt scanning:** Photograph any store receipt and send it — Alfred reads the items and removes them from your shopping lists.
 
