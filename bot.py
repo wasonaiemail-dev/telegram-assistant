@@ -1008,6 +1008,38 @@ async def _job_briefing(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"job_briefing error: {e}")
 
 
+async def _job_briefing_catchup(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Restart-proof catch-up. Scheduled once, a few seconds after startup.
+
+    run_daily fires only at the exact scheduled minute, so if the bot is down
+    or the briefing errored at that moment, the day is silently skipped. This
+    job runs in the normal job context (same as the 7am briefing): if it's
+    already past today's briefing time and today's briefing hasn't been sent,
+    it sends it now and records the date.
+    """
+    try:
+        import datetime as _dt
+        from core.data import load_data, get_schedule_settings, save_data
+        data  = load_data()
+        sched = get_schedule_settings(data)
+        if not sched.get("briefing_enabled", True):
+            return
+        bh = int(sched.get("briefing_hour",   BRIEFING_HOUR))
+        bm = int(sched.get("briefing_minute", BRIEFING_MINUTE))
+        now   = _dt.datetime.now(pytz.timezone(TIMEZONE))
+        due   = now.replace(hour=bh, minute=bm, second=0, microsecond=0)
+        today = now.date().isoformat()
+        if now >= due and sched.get("last_briefing_date") != today:
+            logger.info(f"Briefing catch-up: sending missed briefing for {today}.")
+            from features.briefing import send_briefing
+            await send_briefing(context, ALLOWED_USER_ID)
+            sched["last_briefing_date"] = today
+            save_data(data)
+    except Exception as e:
+        logger.error(f"job_briefing_catchup error: {e}")
+
+
 async def _job_habit_nudge(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         from features.habits import send_habit_nudge
@@ -1279,6 +1311,13 @@ def _schedule_jobs(job_queue: JobQueue) -> None:
             time=dtime(_briefing_h, _briefing_m, tzinfo=tz),
             name="daily_briefing",
         )
+        # Restart-proof catch-up: 25s after startup, send today's briefing if it
+        # was missed (process down/errored at the scheduled minute).
+        job_queue.run_once(
+            _job_briefing_catchup,
+            when=25,
+            name="briefing_catchup",
+        )
     job_queue.run_daily(
         job_google_health_check,
         time=dtime(_briefing_h, max(0, _briefing_m - 10), tzinfo=tz),
@@ -1518,31 +1557,11 @@ async def _on_startup(app: Application) -> None:
     except Exception as e:
         logger.warning(f"Startup: could not set bot commands: {e}")
 
-    # Briefing catch-up — make the morning briefing restart-proof.
-    # run_daily only fires at the exact scheduled minute; if the process is
-    # down across that moment (crash, infra cycle, or deploy), that day's
-    # briefing is silently skipped. Here, on startup, if it's already past the
-    # briefing time today and today's briefing hasn't been sent, send it now.
-    try:
-        import datetime as _dt
-        from types import SimpleNamespace
-        from core.data import load_data, get_schedule_settings, save_data
-        data  = load_data()
-        sched = get_schedule_settings(data)   # live reference into data
-        if sched.get("briefing_enabled", True):
-            _bh = int(sched.get("briefing_hour", BRIEFING_HOUR))
-            _bm = int(sched.get("briefing_minute", BRIEFING_MINUTE))
-            _now = _dt.datetime.now(pytz.timezone(TIMEZONE))
-            _due = _now.replace(hour=_bh, minute=_bm, second=0, microsecond=0)
-            _today = _now.date().isoformat()
-            if _now >= _due and sched.get("last_briefing_date") != _today:
-                logger.info(f"Briefing catch-up: sending missed briefing for {_today}.")
-                from features.briefing import send_briefing
-                await send_briefing(SimpleNamespace(bot=app.bot), ALLOWED_USER_ID)
-                sched["last_briefing_date"] = _today
-                save_data(data)
-    except Exception as e:
-        logger.warning(f"Startup: briefing catch-up failed: {e}")
+    # NOTE: the restart-proof briefing catch-up runs as a one-time scheduled
+    # job (_job_briefing_catchup, registered in _schedule_jobs) a few seconds
+    # after startup — NOT here. Running send_briefing inside post_init (before
+    # the updater is fully started) is a fragile context; the run_once job
+    # fires in the same context as the normal 7am briefing, which is proven.
 
     logger.info(f"{BOT_NAME} is ready.")
 
