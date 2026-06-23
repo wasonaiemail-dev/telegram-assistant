@@ -1,18 +1,18 @@
 """
-alfred/features/sync_tasks.py
+marvin/features/sync_tasks.py
 ==============================
 Google Tasks sync summary — /synctasks command + auto_sync_tasks scheduled job.
 
-Alfred stores all todos, shopping lists, and gifts directly in Google Tasks.
-That means anything you add on Alfred shows up immediately in the Google Tasks
+Marvin stores all todos, shopping lists, and gifts directly in Google Tasks.
+That means anything you add on Marvin shows up immediately in the Google Tasks
 phone app, and anything you add or check off on your phone is instantly
-reflected the next time Alfred reads a list. No traditional "sync" is needed.
+reflected the next time Marvin reads a list. No traditional "sync" is needed.
 
 What this module adds:
-  • /synctasks  — On-demand consolidated view of all Alfred Google Tasks lists.
+  • /synctasks  — On-demand consolidated view of all Marvin Google Tasks lists.
                    Shows todo count + high-priority items, each shopping list with
                    items, and gift ideas count. Useful after you have been adding
-                   things from your phone and want to see what Alfred sees.
+                   things from your phone and want to see what Marvin sees.
   • auto_sync_tasks  — Scheduled job at 7:05 AM (5 min after briefing). Sends
                        the same summary automatically each morning so you know
                        what's on your lists without having to ask.
@@ -79,7 +79,7 @@ def _is_overdue(task: dict) -> bool:
 
 def build_sync_summary() -> str:
     """
-    Read all Alfred Google Tasks lists and return a formatted summary string.
+    Read all Marvin Google Tasks lists and return a formatted summary string.
 
     Returns a human-readable Markdown string covering:
       - Open todos (total, overdue, high-priority)
@@ -176,7 +176,7 @@ def build_sync_summary() -> str:
 
     # ── HEADER + FOOTER ───────────────────────────────────────────────────────
     now = datetime.datetime.now().strftime("%-I:%M %p")
-    header = f"📋 *Alfred Lists — Synced with Google Tasks*\n_Last updated: {now}_\n"
+    header = f"📋 *Marvin Lists — Synced with Google Tasks*\n_Last updated: {now}_\n"
     footer = "\n_All changes made on your phone or here stay in sync automatically._"
 
     return header + "\n\n".join(sections) + footer
@@ -188,11 +188,11 @@ def build_sync_summary() -> str:
 
 async def cmd_synctasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    /synctasks — Show a consolidated view of all Alfred Google Tasks lists.
+    /synctasks — Show a consolidated view of all Marvin Google Tasks lists.
 
     Reads todos, all shopping lists, and gift ideas from Google Tasks and
     returns a formatted summary. Use this after adding items on your phone
-    to confirm Alfred sees them, or anytime you want a full picture of your lists.
+    to confirm Marvin sees them, or anytime you want a full picture of your lists.
     """
     await update.message.reply_text(
         build_sync_summary(),

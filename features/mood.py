@@ -1,5 +1,5 @@
 """
-alfred/features/mood.py
+marvin/features/mood.py
 =======================
 Mood tracking — log emotional state with ratings and view trends.
 
@@ -28,7 +28,7 @@ import re
 from zoneinfo import ZoneInfo
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME, TIMEZONE
@@ -299,7 +299,7 @@ async def handle_mood_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_mood_intent(intent: str, entities: dict, ctx: AlfredContext) -> None:
+async def handle_mood_intent(intent: str, entities: dict, ctx: MarvinContext) -> None:
     """Route MOOD_LOG and MOOD_VIEW intents."""
     data = load_data()
 

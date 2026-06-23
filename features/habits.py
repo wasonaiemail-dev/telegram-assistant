@@ -1,5 +1,5 @@
 """
-alfred/features/habits.py
+marvin/features/habits.py
 ==========================
 Habit tracker — log completions and view progress.
 
@@ -43,7 +43,7 @@ from zoneinfo import ZoneInfo
 
 from telegram import Update
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from telegram.ext import ContextTypes
 
 from core.config import (
@@ -305,7 +305,7 @@ async def cmd_habits(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def handle_habit_intent(
     intent:   str,
     entities: dict,
-    ctx:      AlfredContext,
+    ctx:      MarvinContext,
 ) -> None:
     """Dispatch HABIT_LOG and HABIT_VIEW intents."""
 

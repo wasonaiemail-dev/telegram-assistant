@@ -1,22 +1,22 @@
 """
-alfred/core/alfred_context.py
+marvin/core/marvin_context.py
 ==============================
-Platform-agnostic context object passed to all Alfred command handlers.
+Platform-agnostic context object passed to all Marvin command handlers.
 
 WHY THIS EXISTS
 ---------------
-Alfred originally ran only on Telegram, so every handler took
+Marvin originally ran only on Telegram, so every handler took
 (update: Update, context: ContextTypes.DEFAULT_TYPE) and called
 update.message.reply_text(). Adding Discord (or any other platform)
 would require duplicating all handler logic.
 
-AlfredContext solves this by wrapping the platform-specific send/reply
+MarvinContext solves this by wrapping the platform-specific send/reply
 interface behind a single object. Handlers call ctx.reply_html(text)
 and it works on any platform.
 
 HOW ADAPTERS WORK
 -----------------
-Each platform provides an adapter that builds an AlfredContext from its
+Each platform provides an adapter that builds an MarvinContext from its
 native event object:
 
     # Telegram (adapters/telegram_adapter.py)
@@ -25,7 +25,7 @@ native event object:
     # Discord (adapters/discord_adapter.py)
     ctx = discord_adapter.make_context(message)
 
-Both produce an AlfredContext with the same interface. Handlers never
+Both produce an MarvinContext with the same interface. Handlers never
 import Telegram or Discord code directly.
 
 MIGRATION PATH
@@ -66,11 +66,11 @@ class MenuButton:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ALFRED CONTEXT
+# MARVIN CONTEXT
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @dataclass
-class AlfredContext:
+class MarvinContext:
     """
     Platform-agnostic context object passed to all command handlers.
 
@@ -167,7 +167,7 @@ class AlfredContext:
     def update(self):
         """
         Raw Telegram Update object (None on Discord).
-        Use only for code not yet migrated to AlfredContext.
+        Use only for code not yet migrated to MarvinContext.
         """
         return self._update
 
@@ -175,7 +175,7 @@ class AlfredContext:
     def context(self):
         """
         Raw Telegram context (None on Discord).
-        Use only for code not yet migrated to AlfredContext.
+        Use only for code not yet migrated to MarvinContext.
         """
         return self._context
 

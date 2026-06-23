@@ -1,7 +1,7 @@
 """
-alfred/features/expenses.py
+marvin/features/expenses.py
 ============================
-Expense tracking for Alfred.
+Expense tracking for Marvin.
 
 STORAGE  (userdata.json["expenses"])
 ─────────────────────────────────────
@@ -43,7 +43,7 @@ import datetime
 import logging
 from zoneinfo import ZoneInfo
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import TIMEZONE, SHEETS_EXPENSE_ID
 from core.data import load_data, save_data
 
@@ -173,7 +173,7 @@ def _sync_expense_to_sheet(expense: dict) -> None:
 # COMMAND HANDLER  (slash command entry point for both Telegram + Discord)
 # ════════════════════════════════════════════════════════════════════════════
 
-async def cmd_expenses(ctx: AlfredContext, period: str = "month") -> None:
+async def cmd_expenses(ctx: MarvinContext, period: str = "month") -> None:
     """
     /expenses [today|week|month]
     Shows expense summary for the requested period.
@@ -186,7 +186,7 @@ async def cmd_expenses(ctx: AlfredContext, period: str = "month") -> None:
 # INTENT HANDLER  (NL dispatch entry point)
 # ════════════════════════════════════════════════════════════════════════════
 
-async def handle_expense_intent(intent: str, ents: dict, ctx: AlfredContext) -> None:
+async def handle_expense_intent(intent: str, ents: dict, ctx: MarvinContext) -> None:
     from core.intent import EXPENSE_ADD, EXPENSE_VIEW, EXPENSE_DELETE
 
     data = load_data()
@@ -207,7 +207,7 @@ async def handle_expense_intent(intent: str, ents: dict, ctx: AlfredContext) -> 
 # INTERNAL — ADD
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _add_expense(ctx: AlfredContext, data: dict, ents: dict) -> None:
+async def _add_expense(ctx: MarvinContext, data: dict, ents: dict) -> None:
     amount = ents.get("amount")
     if not amount:
         await ctx.reply(
@@ -241,7 +241,7 @@ async def _add_expense(ctx: AlfredContext, data: dict, ents: dict) -> None:
 # INTERNAL — VIEW / SUMMARY
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _send_expense_summary(ctx: AlfredContext, data: dict, period: str) -> None:
+async def _send_expense_summary(ctx: MarvinContext, data: dict, period: str) -> None:
     tz      = ZoneInfo(TIMEZONE)
     now     = datetime.datetime.now(tz)
     today   = now.date()
@@ -293,7 +293,7 @@ async def _send_expense_summary(ctx: AlfredContext, data: dict, period: str) -> 
 # INTERNAL — DELETE
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _delete_expense(ctx: AlfredContext, data: dict, ents: dict) -> None:
+async def _delete_expense(ctx: MarvinContext, data: dict, ents: dict) -> None:
     """Delete most recent expense, or match by query if provided."""
     expenses = data.get("expenses", [])
     if not expenses:

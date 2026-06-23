@@ -1,5 +1,5 @@
 """
-alfred/features/journal.py
+marvin/features/journal.py
 ===========================
 End-of-day journaling with prompted flow, free-form, and voice support.
 
@@ -162,7 +162,7 @@ async def handle_journal_session_reply(text: str, ctx) -> bool:
     If an active prompted session exists, record the answer and send the
     next question (or finalise the session).
     Returns True if message was consumed, False if no active session.
-    ctx: AlfredContext
+    ctx: MarvinContext
     """
     from core.data import save_data
     data    = load_data()
@@ -214,7 +214,7 @@ async def handle_journal_session_reply(text: str, ctx) -> bool:
 
 
 async def handle_journal_freeform_reply(text: str, ctx) -> bool:
-    """Handle a freeform follow-on after a prompted session. ctx: AlfredContext"""
+    """Handle a freeform follow-on after a prompted session. ctx: MarvinContext"""
     from core.data import save_data
     data = load_data()
     date_iso = data.get("settings", {}).get("journal", {}).get("_awaiting_freeform")
@@ -247,7 +247,7 @@ async def handle_voice_journal(file_path: str, ctx) -> None:
     """
     Transcribe a voice message with Whisper, GPT-clean it, confirm with user.
     Called from bot.py when a voice message is received during an active session.
-    ctx: AlfredContext
+    ctx: MarvinContext
     """
     from openai import AsyncOpenAI
     client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -298,7 +298,7 @@ async def handle_voice_journal(file_path: str, ctx) -> None:
 
 
 async def handle_voice_confirm(text: str, ctx) -> bool:
-    """Confirm or edit a pending voice transcription. ctx: AlfredContext"""
+    """Confirm or edit a pending voice transcription. ctx: MarvinContext"""
     from core.data import save_data
     data    = load_data()
     pending = data.get("settings", {}).get("journal", {}).get("_pending_voice")
@@ -428,7 +428,7 @@ def _collect_entries_text(journal: dict, start_iso: str | None = None,
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def cmd_journal(ctx) -> None:
-    """Start or view journal. /journal → prompt. /journal [date] → view. ctx: AlfredContext"""
+    """Start or view journal. /journal → prompt. /journal [date] → view. ctx: MarvinContext"""
     js = get_journal_settings(load_data())
     if not js.get("enabled", True):
         await ctx.reply(
@@ -457,7 +457,7 @@ async def cmd_journal(ctx) -> None:
 
 
 async def _start_journal_session(ctx) -> None:
-    """ctx: AlfredContext"""
+    """ctx: MarvinContext"""
     from core.data import save_data
     questions = _get_prompts_for_today()
     if not questions:
@@ -486,7 +486,7 @@ async def _start_journal_session(ctx) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_journal_intent(intent: str, entities: dict, ctx) -> None:
-    """ctx: AlfredContext"""
+    """ctx: MarvinContext"""
 
     # ── JOURNAL_PROMPT ────────────────────────────────────────────────────────
     if intent == JOURNAL_PROMPT:
@@ -601,7 +601,7 @@ async def handle_journal_intent(intent: str, entities: dict, ctx) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def send_journal_reminder(ctx, is_followup: bool = False) -> None:
-    """Send the nightly journal reminder. ctx: AlfredContext"""
+    """Send the nightly journal reminder. ctx: MarvinContext"""
     js = get_journal_settings(load_data())
     if not js.get("enabled", True):
         return  # Buyer disabled journal reminders

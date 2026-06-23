@@ -1,16 +1,16 @@
 """
-alfred/discord_bot.py
+marvin/discord_bot.py
 ======================
-Discord entry point for Alfred.
+Discord entry point for Marvin.
 
-Alfred on Discord is a SEPARATE ALTERNATIVE to the Telegram bot — not a
+Marvin on Discord is a SEPARATE ALTERNATIVE to the Telegram bot — not a
 plugin. The buyer chooses one platform (or both). All the same core features
 and plugins are available on both.
 
 HOW IT WORKS
 ------------
 1. A Discord bot token is configured (DISCORD_TOKEN env var).
-2. Alfred listens for messages in any channel/DM it can see.
+2. Marvin listens for messages in any channel/DM it can see.
 3. Messages starting with "!" (or "/" — configurable) are treated as commands.
 4. All other messages go through the same intent classifier as Telegram.
 5. Responses are sent back to the same channel.
@@ -28,11 +28,11 @@ COMMANDS (same as Telegram, use "!" prefix on Discord)
   !reminders  — reminders
   !ask        — AI chat
   !help       — command list
-  (and all other Alfred commands)
+  (and all other Marvin commands)
 
 NATURAL LANGUAGE
 ----------------
-Any message in a channel Alfred monitors (no prefix needed) is classified
+Any message in a channel Marvin monitors (no prefix needed) is classified
 by the intent engine — same as Telegram. "What are the NBA scores?" works.
 
 SETUP FOR BUYERS
@@ -80,9 +80,9 @@ DISCORD_TOKEN       = os.environ.get("DISCORD_TOKEN", "")
 DISCORD_ALLOWED_ID  = int(os.environ.get("DISCORD_ALLOWED_USER_ID", "0"))
 DISCORD_PREFIX      = os.environ.get("DISCORD_COMMAND_PREFIX", "!")
 
-# If True, Alfred only responds in DMs and channels where it is explicitly
+# If True, Marvin only responds in DMs and channels where it is explicitly
 # mentioned or the message uses the command prefix. If False (default),
-# Alfred classifies ALL messages in channels it can see.
+# Marvin classifies ALL messages in channels it can see.
 DISCORD_PREFIX_ONLY = os.environ.get("DISCORD_PREFIX_ONLY", "false").lower() == "true"
 
 
@@ -121,7 +121,7 @@ def _create_discord_client():
 
 
 def main() -> None:
-    """Start the Alfred Discord bot."""
+    """Start the Marvin Discord bot."""
     print("[discord_bot] main() called", flush=True)
     logging.basicConfig(
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -318,8 +318,8 @@ def main() -> None:
             ctx = _rebuild_ctx_with_text(ctx, text)
             await ctx.send_typing()
             intent_result = await classify(text)
-            from core.alfred_dispatch import alfred_dispatch
-            await alfred_dispatch(intent_result, ctx, loaded_plugins)
+            from core.marvin_dispatch import marvin_dispatch
+            await marvin_dispatch(intent_result, ctx, loaded_plugins)
         except Exception as e:
             logger.error(f"Discord: voice handling error: {e}", exc_info=True)
             await ctx.reply("Something went wrong with that voice message. Try typing instead.")
@@ -336,7 +336,7 @@ def main() -> None:
     @client.event
     async def on_ready():
         logger.info(
-            f"Alfred Discord bot ready. "
+            f"Marvin Discord bot ready. "
             f"Logged in as {client.user} (ID: {client.user.id})"
         )
         logger.info(
@@ -451,8 +451,8 @@ def main() -> None:
         try:
             await ctx.send_typing()
             intent_result = await classify(text)
-            from core.alfred_dispatch import alfred_dispatch
-            await alfred_dispatch(intent_result, ctx, loaded_plugins)
+            from core.marvin_dispatch import marvin_dispatch
+            await marvin_dispatch(intent_result, ctx, loaded_plugins)
         except Exception as e:
             logger.error(f"Discord: dispatch error: {e}", exc_info=True)
             await message.channel.send(
@@ -521,9 +521,9 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
         # Pass through to intent classifier for /ask with text
         if args_str:
             from core.intent import classify
-            from core.alfred_dispatch import alfred_dispatch
+            from core.marvin_dispatch import marvin_dispatch
             intent_result = await classify(f"ask {args_str}")
-            await alfred_dispatch(intent_result, ctx, loaded_plugins)
+            await marvin_dispatch(intent_result, ctx, loaded_plugins)
             return True
         else:
             await ctx.reply("What would you like to know? Type your question after `!ask`.")
@@ -567,9 +567,9 @@ async def _handle_discord_command(ctx, message, loaded_plugins) -> bool:
         if args_str:
             try:
                 from core.intent import classify
-                from core.alfred_dispatch import alfred_dispatch
+                from core.marvin_dispatch import marvin_dispatch
                 intent_result = await classify(f"draft a reply to: {args_str}")
-                await alfred_dispatch(intent_result, ctx, loaded_plugins)
+                await marvin_dispatch(intent_result, ctx, loaded_plugins)
             except Exception as e:
                 logger.error(f"Discord !reply error: {e}")
                 await ctx.reply("❌ Could not draft a reply right now.")
@@ -954,10 +954,10 @@ async def _discord_stats(ctx, cmd: str, args_str: str, loaded_plugins) -> None:
         # Route through intent classifier for now
         await ctx.send_typing()
         from core.intent import classify
-        from core.alfred_dispatch import alfred_dispatch
+        from core.marvin_dispatch import marvin_dispatch
         query = f"{cmd} {args_str}"
         intent_result = await classify(query)
-        await alfred_dispatch(intent_result, ctx, loaded_plugins)
+        await marvin_dispatch(intent_result, ctx, loaded_plugins)
 
     except Exception as e:
         logger.error(f"discord !{cmd} error: {e}", exc_info=True)
@@ -965,7 +965,7 @@ async def _discord_stats(ctx, cmd: str, args_str: str, loaded_plugins) -> None:
 
 
 async def _discord_briefing(ctx) -> None:
-    """!briefing — trigger morning briefing via AlfredContext (Discord-aware)."""
+    """!briefing — trigger morning briefing via MarvinContext (Discord-aware)."""
     try:
         from features.briefing import send_briefing_ctx
         await send_briefing_ctx(ctx)
@@ -1161,7 +1161,7 @@ async def _discord_help(ctx, loaded_plugins) -> None:
             plugin_cmds += f"\n**{plugin.name}:** {cmds}"
 
     await ctx.reply_html(
-        "<b>Alfred — Discord Commands</b>\n\n"
+        "<b>Marvin — Discord Commands</b>\n\n"
         "<b>Sports (Sports Pack)</b>\n"
         "  !scores [league]       — yesterday's scores\n"
         "  !standings [league]    — current standings\n"
@@ -1191,7 +1191,7 @@ async def _discord_help(ctx, loaded_plugins) -> None:
         "  !synctasks             — full Google Tasks summary\n\n"
         "<b>Proactive &amp; Travel</b>\n"
         "  !proactive             — view/toggle all proactive alerts\n"
-        "  !travel                — upcoming trips Alfred detected\n"
+        "  !travel                — upcoming trips Marvin detected\n"
         "  !vacation [on|off]     — vacation mode (pauses most alerts)\n"
         "  !tomorrowprep          — tonight's night-before briefing\n\n"
         "<b>Settings</b>\n"

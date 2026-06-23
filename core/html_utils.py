@@ -1,5 +1,5 @@
 """
-alfred/core/html_utils.py
+marvin/core/html_utils.py
 ==========================
 Utilities for converting Telegram HTML formatting to other platform formats.
 
@@ -33,7 +33,7 @@ def html_to_discord(text: str) -> str:
     """
     Convert Telegram HTML tags to Discord Markdown.
 
-    Handles the tags Alfred actually uses. Unknown tags are stripped.
+    Handles the tags Marvin actually uses. Unknown tags are stripped.
 
     Examples:
         "<b>bold</b>"         → "**bold**"

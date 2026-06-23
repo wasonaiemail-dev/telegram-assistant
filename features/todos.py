@@ -1,5 +1,5 @@
 """
-alfred/features/todos.py
+marvin/features/todos.py
 =========================
 Todo list management via Google Tasks.
 
@@ -39,7 +39,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import BOT_NAME, RECUR_LABELS
 from core.intent import (
     TODO_ADD, TODO_LIST, TODO_COMPLETE, TODO_DELETE, TODO_UPDATE,
@@ -192,7 +192,7 @@ async def cmd_todos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def handle_todo_intent(
     intent:   str,
     entities: dict,
-    ctx:      AlfredContext,
+    ctx:      MarvinContext,
 ) -> None:
     """Dispatch all TODO_* intents."""
 
@@ -340,7 +340,7 @@ async def handle_todo_intent(
 # Called by bot.py when the user replies with a number after a disambiguation prompt.
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _resolve_pending_complete(chosen: dict, ctx: AlfredContext) -> None:
+async def _resolve_pending_complete(chosen: dict, ctx: MarvinContext) -> None:
     """Complete the todo that was selected via a numbered reply."""
     svc = _get_service()
     if not svc:

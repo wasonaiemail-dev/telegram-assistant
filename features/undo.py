@@ -1,12 +1,12 @@
 """
-alfred/features/undo.py
+marvin/features/undo.py
 ========================
-Undo last deletion for Alfred.
+Undo last deletion for Marvin.
 
 WHAT CAN BE UNDONE
 ───────────────────
-  • Deleted todo      → recreated in Google Tasks "Alfred Todos"
-  • Deleted note      → recreated in Google Tasks "Alfred Notes"
+  • Deleted todo      → recreated in Google Tasks "Marvin Todos"
+  • Deleted note      → recreated in Google Tasks "Marvin Notes"
   • Deleted shopping  → recreated in the appropriate Google Tasks shopping list
   • Deleted expense   → restored to userdata.json["expenses"]
   • Deleted mood      → restored to userdata.json["mood_log"]
@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import logging
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.data import load_data, save_data
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ def record_deletion(
 # INTENT HANDLER
 # ════════════════════════════════════════════════════════════════════════════
 
-async def handle_undo_intent(ctx: AlfredContext) -> None:
+async def handle_undo_intent(ctx: MarvinContext) -> None:
     """Pop the last deletion and recreate it."""
     data  = load_data()
     stack = data.get("_last_deleted", [])

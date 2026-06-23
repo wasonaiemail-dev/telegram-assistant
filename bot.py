@@ -1,14 +1,14 @@
 """
-alfred/bot.py
+marvin/bot.py
 =============
-Entry point for Alfred. Initialises the Telegram bot, registers all
+Entry point for Marvin. Initialises the Telegram bot, registers all
 command and message handlers, schedules all background jobs, and starts
 the polling loop.
 
 HOW IT WORKS
 ------------
 1. On startup:
-   - Load alfred_memory.json and refresh the intent classifier prompt
+   - Load marvin_memory.json and refresh the intent classifier prompt
    - Ensure all Google Tasks lists exist (todos, notes, shopping, gifts)
    - Start background jobs (briefing, reminders, habits, event prep, etc.)
 
@@ -97,7 +97,7 @@ from core.plugin_loader import (
     list_plugins,
 )
 from adapters.telegram_adapter import make_context as _make_telegram_ctx, make_bg_ctx as _make_bg_ctx
-from core.alfred_dispatch import alfred_dispatch
+from core.marvin_dispatch import marvin_dispatch
 
 logger = logging.getLogger(__name__)
 
@@ -525,7 +525,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
     intent_result = await classify(text)
-    await alfred_dispatch(intent_result, ctx, _loaded_plugins)
+    await marvin_dispatch(intent_result, ctx, _loaded_plugins)
 
 
 # =============================================================================

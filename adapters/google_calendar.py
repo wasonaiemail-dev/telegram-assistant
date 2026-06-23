@@ -1,5 +1,5 @@
 """
-alfred/adapters/google_calendar.py
+marvin/adapters/google_calendar.py
 ====================================
 Google Calendar full CRUD adapter — read, create, update, and delete events.
 
@@ -197,7 +197,7 @@ def create_event(
     Create a new calendar event on the primary calendar.
 
     For all-day events, pass all_day=True and set start/end to midnight on
-    the relevant date(s). Alfred will convert them to the correct date format.
+    the relevant date(s). Marvin will convert them to the correct date format.
 
     Returns the created event dict (contains 'id', 'htmlLink', etc.) or None.
     """

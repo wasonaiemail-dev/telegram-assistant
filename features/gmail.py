@@ -1,7 +1,7 @@
 """
-alfred/features/gmail.py
+marvin/features/gmail.py
 ========================
-Gmail integration for Alfred.
+Gmail integration for Marvin.
 
 COMMANDS
 ────────
@@ -29,15 +29,15 @@ HOW SEND WORKS
 ──────────────
   1. GPT extracts to/subject/body from the user's message
   2. If body is missing or vague, GPT drafts the full email body
-  3. Alfred sends a preview and asks for confirmation
+  3. Marvin sends a preview and asks for confirmation
   4. User confirms by replying "yes", "send it", "do it", etc.
-  5. Alfred sends via Gmail API
+  5. Marvin sends via Gmail API
 
 HOW DRAFT WORKS
 ───────────────
   1. GPT extracts to/subject/body
   2. GPT drafts the email body if body is vague
-  3. Alfred saves to Gmail Drafts and confirms
+  3. Marvin saves to Gmail Drafts and confirms
   4. No confirmation step needed — saving a draft is non-destructive
 
 HOW UNREAD WORKS
@@ -48,7 +48,7 @@ HOW UNREAD WORKS
 import logging
 import re as _re
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import BOT_NAME, OPENAI_API_KEY, GPT_CHAT_MODEL, GMAIL_VIP_SENDERS, GMAIL_DEFAULT_SIGNATURE
 from core.intent import GMAIL_SEND, GMAIL_DRAFT, GMAIL_UNREAD
 
@@ -177,7 +177,7 @@ def _add_signature(body: str) -> str:
 async def handle_gmail_intent(
     intent:   str,
     entities: dict,
-    ctx:      AlfredContext,
+    ctx:      MarvinContext,
 ) -> None:
     """Dispatch all GMAIL_* intents."""
 
@@ -344,7 +344,7 @@ def is_gmail_confirmation(text: str) -> bool:
     return tl in _CONFIRM_WORDS or tl in _CANCEL_WORDS
 
 
-async def handle_gmail_confirmation(text: str, ctx: AlfredContext) -> bool:
+async def handle_gmail_confirmation(text: str, ctx: MarvinContext) -> bool:
     """
     Handle a confirmation or cancellation for a pending email send.
 

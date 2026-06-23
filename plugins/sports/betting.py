@@ -1,5 +1,5 @@
 """
-Sports betting module for Alfred Sports Pack.
+Sports betting module for Marvin Sports Pack.
 
 Handles:
 - Screenshot-based line comparison (sportsbook odds extraction via GPT-4o Vision)

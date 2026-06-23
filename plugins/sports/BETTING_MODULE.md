@@ -2,13 +2,13 @@
 
 ## Overview
 
-The Sports Betting Module extends the Alfred Sports Pack with advanced sports betting tools including:
+The Sports Betting Module extends the Marvin Sports Pack with advanced sports betting tools including:
 
 - **Screenshot-based Line Comparison** — Extract odds from sportsbook screenshots using GPT-4o Vision
 - **Bet Sizing Calculators** — Fixed unit, percentage, and Kelly Criterion sizing
 - **Bet Tracking** — Log, resolve, and track all bets with automatic P&L calculation
 - **Analytics & Charts** — Comprehensive statistics and dark-themed visualization charts
-- **Intent Routing** — Full integration with Alfred's intent system for natural language commands
+- **Intent Routing** — Full integration with Marvin's intent system for natural language commands
 
 ## Quick Start
 
@@ -439,7 +439,7 @@ The bot will:
 
 ## Intent System Integration
 
-The module integrates with Alfred's intent detection system.
+The module integrates with Marvin's intent detection system.
 
 ### Supported Intents
 

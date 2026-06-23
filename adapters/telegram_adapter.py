@@ -1,7 +1,7 @@
 """
-alfred/adapters/telegram_adapter.py
+marvin/adapters/telegram_adapter.py
 =====================================
-Builds an AlfredContext from a Telegram Update + ContextTypes object.
+Builds an MarvinContext from a Telegram Update + ContextTypes object.
 
 Usage in bot.py:
     from adapters.telegram_adapter import make_context
@@ -10,7 +10,7 @@ Usage in bot.py:
         ctx = make_context(update, context)
         await some_handler(intent, ents, ctx)
 
-The resulting AlfredContext wraps all Telegram-specific send calls so that
+The resulting MarvinContext wraps all Telegram-specific send calls so that
 handlers work unchanged when ported to other platforms.
 
 INLINE KEYBOARD MENUS
@@ -29,7 +29,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode, ChatAction
 from telegram.ext import ContextTypes
 
-from core.alfred_context import AlfredContext, MenuButton
+from core.marvin_context import MarvinContext, MenuButton
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,9 @@ logger = logging.getLogger(__name__)
 def make_context(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-) -> AlfredContext:
+) -> MarvinContext:
     """
-    Build an AlfredContext from a Telegram Update.
+    Build an MarvinContext from a Telegram Update.
 
     Works for both command messages (/scores nba) and plain text messages.
     Returns None if the update has no message (e.g. edited messages — callers
@@ -139,9 +139,9 @@ def make_context(
             )
             await msg.reply_text(f"{text_}\n\n{numbered}")
 
-    # ── Build and return AlfredContext ────────────────────────────────────────
+    # ── Build and return MarvinContext ────────────────────────────────────────
 
-    return AlfredContext(
+    return MarvinContext(
         text=text,
         user_id=user_id,
         chat_id=chat_id,
@@ -160,9 +160,9 @@ def make_bg_ctx(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     user_id: int = 0,
-) -> AlfredContext:
+) -> MarvinContext:
     """
-    Build an AlfredContext for a background / scheduled job (no incoming Update).
+    Build an MarvinContext for a background / scheduled job (no incoming Update).
     Used by proactive messages like weekly summary, journal reminder, meal check-in.
     """
 
@@ -195,7 +195,7 @@ def make_bg_ctx(
         except Exception:
             pass
 
-    return AlfredContext(
+    return MarvinContext(
         text="",
         user_id=user_id,
         chat_id=chat_id,

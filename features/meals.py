@@ -1,5 +1,5 @@
 """
-alfred/features/meals.py
+marvin/features/meals.py
 ========================
 Full meal planning, recipe library, nutrition tracking, and meal adherence.
 
@@ -415,7 +415,7 @@ async def get_todays_meals_text() -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def cmd_meals(ctx) -> None:
-    """Show today's meal plan. ctx: AlfredContext"""
+    """Show today's meal plan. ctx: MarvinContext"""
     today = _today_iso()
     plan  = _get_plan_for_date(today)
     if not plan:
@@ -434,7 +434,7 @@ async def cmd_meals(ctx) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_meal_intent(intent: str, entities: dict, ctx) -> None:
-    """ctx: AlfredContext"""
+    """ctx: MarvinContext"""
 
     # ── MEAL_VIEW ────────────────────────────────────────────────────────────
     if intent == MEAL_VIEW:
@@ -624,7 +624,7 @@ async def handle_meal_intent(intent: str, entities: dict, ctx) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def send_meal_adherence_check(ctx) -> None:
-    """Evening prompt: did you eat as planned? ctx: AlfredContext"""
+    """Evening prompt: did you eat as planned? ctx: MarvinContext"""
     today = _today_iso()
     plan  = _get_plan_for_date(today)
     if not plan:

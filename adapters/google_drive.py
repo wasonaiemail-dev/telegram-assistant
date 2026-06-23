@@ -1,9 +1,9 @@
 """
-alfred/adapters/google_drive.py
+marvin/adapters/google_drive.py
 ================================
-Google Drive adapter for Alfred notes sync.
+Google Drive adapter for Marvin notes sync.
 
-Notes are mirrored from Google Tasks to a Drive folder called "Alfred Notes"
+Notes are mirrored from Google Tasks to a Drive folder called "Marvin Notes"
 as plain .txt files. The Google Tasks note ID → Drive file ID mapping is
 persisted to DRIVE_NOTES_MAP_FILE so updates and deletes can find the right file.
 
@@ -53,7 +53,7 @@ def _save_map(mapping: dict) -> None:
 
 def _get_or_create_folder(svc) -> str | None:
     """
-    Return the Drive folder ID for "Alfred Notes".
+    Return the Drive folder ID for "Marvin Notes".
     Checks the cache file first, then searches Drive, then creates it.
     """
     from core.config import DRIVE_NOTES_FOLDER_FILE
@@ -71,7 +71,7 @@ def _get_or_create_folder(svc) -> str | None:
     # 2. Search Drive for existing folder
     try:
         results = svc.files().list(
-            q="name='Alfred Notes' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            q="name='Marvin Notes' and mimeType='application/vnd.google-apps.folder' and trashed=false",
             fields="files(id)",
             pageSize=1,
         ).execute()
@@ -87,14 +87,14 @@ def _get_or_create_folder(svc) -> str | None:
     try:
         folder = svc.files().create(
             body={
-                "name": "Alfred Notes",
+                "name": "Marvin Notes",
                 "mimeType": "application/vnd.google-apps.folder",
             },
             fields="id",
         ).execute()
         folder_id = folder["id"]
         _cache_folder_id(folder_id, DRIVE_NOTES_FOLDER_FILE)
-        logger.info(f"Created Alfred Notes folder in Drive: {folder_id}")
+        logger.info(f"Created Marvin Notes folder in Drive: {folder_id}")
         return folder_id
     except Exception as e:
         logger.error(f"Drive folder creation failed: {e}")
@@ -122,7 +122,7 @@ def _safe_filename(text: str) -> str:
 
 def sync_note_add(task_id: str, text: str) -> None:
     """
-    Create a .txt file in the Alfred Notes Drive folder for a new note.
+    Create a .txt file in the Marvin Notes Drive folder for a new note.
     Records the task_id → drive_file_id mapping for future updates/deletes.
     """
     try:

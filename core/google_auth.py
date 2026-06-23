@@ -1,26 +1,26 @@
 """
-alfred/core/google_auth.py
+marvin/core/google_auth.py
 ==========================
-Google OAuth2 authentication for Alfred.
+Google OAuth2 authentication for Marvin.
 
-HOW GOOGLE AUTH WORKS IN ALFRED
+HOW GOOGLE AUTH WORKS IN MARVIN
 ────────────────────────────────
 1. Buyer runs /auth in Telegram.
-   Alfred generates an OAuth URL and sends it.
+   Marvin generates an OAuth URL and sends it.
 
 2. Buyer opens the URL, signs in with Google, and approves the requested
    permissions (Calendar + Tasks read/write).
 
 3. Google redirects to http://localhost — which shows an error page.
    That is completely normal. The buyer copies the `code=...` value from
-   the address bar and sends it to Alfred with /code <paste here>.
+   the address bar and sends it to Marvin with /code <paste here>.
 
-4. Alfred exchanges the code for a token, saves it to TOKEN_FILE on the
+4. Marvin exchanges the code for a token, saves it to TOKEN_FILE on the
    Railway /data volume, and confirms the connection.
 
-5. The token expires after 7 days. Alfred auto-refreshes it on every API
+5. The token expires after 7 days. Marvin auto-refreshes it on every API
    call as long as the process is running. If the process has been offline
-   and the token is stale, Alfred warns the buyer each morning (6:50 AM)
+   and the token is stale, Marvin warns the buyer each morning (6:50 AM)
    and provides reconnect instructions.
 
 PUBLIC INTERFACE
@@ -118,7 +118,7 @@ def _save_creds(creds):
 
 
 def is_authorized():
-    """Return True if Alfred has a valid, usable Google token right now."""
+    """Return True if Marvin has a valid, usable Google token right now."""
     return get_creds() is not None
 
 
@@ -130,7 +130,7 @@ def token_expires_in_hours():
         float — hours until expiry (may be negative if already expired)
         None  — no token on disk
 
-    Google OAuth tokens typically expire after 7 days. Alfred auto-refreshes
+    Google OAuth tokens typically expire after 7 days. Marvin auto-refreshes
     on every API call, but if the bot has been offline, this tells you
     how much time is left.
     """
@@ -197,7 +197,7 @@ def get_tasks_service():
 def get_drive_service():
     """
     Return an authorized Google Drive API service object.
-    Uses the drive.file scope — only accesses files Alfred created.
+    Uses the drive.file scope — only accesses files Marvin created.
 
     Returns:
         googleapiclient.discovery.Resource — ready to use
@@ -510,7 +510,7 @@ async def cmd_disconnect(update, context):
     Use this when:
       - You need to reconnect with a different Google account
       - Auth is broken and you want a clean slate
-      - You want to revoke Alfred's Google access entirely
+      - You want to revoke Marvin's Google access entirely
 
     After running this, use /auth to reconnect.
     """

@@ -1,7 +1,7 @@
 """
-alfred/core/intent.py
+marvin/core/intent.py
 =====================
-Two-layer intent classifier for Alfred.
+Two-layer intent classifier for Marvin.
 
 HOW IT WORKS
 ────────────
@@ -1090,7 +1090,7 @@ _SHOPPING_KEYS = "|".join(f'"{k}"' for k in SHOPPING_LISTS)
 _HABIT_IDS     = ", ".join(f'"{h}"' for h in HABITS)
 
 # _gpt_system_prompt is set at module load using the default MEMORY_CATEGORIES.
-# Call refresh_intent_prompt(categories) at bot startup (after alfred_memory.json
+# Call refresh_intent_prompt(categories) at bot startup (after marvin_memory.json
 # is loaded) so it reflects any custom categories the buyer added during /setup.
 _gpt_system_prompt: str = ""
 
@@ -1100,7 +1100,7 @@ def _build_gpt_system(memory_categories: list) -> str:
     Build the GPT classification system prompt.
 
     Called once at import time with config defaults, then again at bot startup
-    with the live category list from alfred_memory.json.
+    with the live category list from marvin_memory.json.
 
     Args:
         memory_categories: The current active list of memory categories.
@@ -1213,13 +1213,13 @@ gift_done       Mark a gift idea as purchased.
 gift_delete     Remove a gift idea.
                 Entities: query
 
-memory_add      Add a long-term fact to Alfred's memory.
+memory_add      Add a long-term fact to Marvin's memory.
                 Entities: category (one of: {memory_cats}), fact (str)
 
-memory_view     View Alfred's stored memory.
+memory_view     View Marvin's stored memory.
                 Entities: category (one of: {memory_cats}, or "all")
 
-memory_remove   Remove a specific fact from Alfred's memory.
+memory_remove   Remove a specific fact from Marvin's memory.
                 Entities: category (one of: {memory_cats}), fact (str)
 
 contact_view    Look up information about a person.
@@ -1231,7 +1231,7 @@ contact_add     Add a new contact.
 contact_update  Update notes for an existing contact.
                 Entities: name (required), updates (str)
 
-cal_emoji_set   Customize which emoji Alfred uses for a calendar event keyword.
+cal_emoji_set   Customize which emoji Marvin uses for a calendar event keyword.
                 Entities: keyword (str — the word to match in event titles, e.g. "workout"),
                           emoji (str — the emoji to use, e.g. "💪").
                 Special keywords: "show"/"list" → display overrides. "reset"/"clear" → restore defaults.
@@ -1254,7 +1254,7 @@ meal_add        Add a recipe or meal to the library.
 meal_recipe     Look up a stored recipe.
                 Entities: name (str)
 
-meal_generate   Ask Alfred to create a recipe using GPT.
+meal_generate   Ask Marvin to create a recipe using GPT.
                 Entities: description (str), save (bool)
 
 meal_import_url Import a recipe from a URL.
@@ -1278,7 +1278,7 @@ workout_log     Log a completed workout session.
 workout_view    View recent workout history.
                 Entities: days (int, default 7)
 
-workout_suggest Ask Alfred for a workout suggestion for today.
+workout_suggest Ask Marvin for a workout suggestion for today.
                 Entities: muscle_group (str, optional)
 
 workout_plan_view  View the current workout program.
@@ -1455,7 +1455,7 @@ EXAMPLES:
 {{"user": "move my dentist appointment to 4pm tomorrow", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_start": "{_today_str}T16:00"}}}}}}
 {{"user": "rename my 3pm meeting to Project Kickoff", "response": {{"intent": "cal_update", "entities": {{"title": "3pm meeting", "new_title": "Project Kickoff"}}}}}}
 {{"user": "change the location of my dentist appointment to 123 Main St", "response": {{"intent": "cal_update", "entities": {{"title": "Dentist", "new_location": "123 Main St"}}}}}}
-{{"user": "email you@example.com that this is a test from Alfred", "response": {{"intent": "gmail_send", "entities": {{"to": "you@example.com", "subject": "Test from Alfred", "body": "this is a test from Alfred"}}}}}}
+{{"user": "email you@example.com that this is a test from Marvin", "response": {{"intent": "gmail_send", "entities": {{"to": "you@example.com", "subject": "Test from Marvin", "body": "this is a test from Marvin"}}}}}}
 {{"user": "email John that I'll be 10 minutes late", "response": {{"intent": "gmail_send", "entities": {{"to": "John", "subject": "Running Late", "body": "I'll be 10 minutes late"}}}}}}
 {{"user": "send an email to boss@work.com saying I'm out sick today", "response": {{"intent": "gmail_send", "entities": {{"to": "boss@work.com", "subject": "Out Sick Today", "body": "I'm out sick today"}}}}}}
 {{"user": "draft an email to my landlord about the broken heater", "response": {{"intent": "gmail_draft", "entities": {{"to": "landlord", "subject": "Broken Heater", "body": "broken heater needs fixing"}}}}}}
@@ -1474,7 +1474,7 @@ def refresh_intent_prompt(memory_categories: list, plugin_gpt_block: str = "") -
     Rebuild the GPT classification prompt with the live memory category list
     and any plugin intent definitions.
 
-    Call this in bot.py at startup after loading alfred_memory.json:
+    Call this in bot.py at startup after loading marvin_memory.json:
 
         from core.data import get_active_categories, load_memory
         from core.intent import refresh_intent_prompt

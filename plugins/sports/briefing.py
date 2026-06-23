@@ -64,8 +64,8 @@ REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "")
 # Reddit requires a meaningful User-Agent for all requests (OAuth and anon).
 REDDIT_HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (compatible; AlfredBot/1.0; "
-        "+https://github.com/alfred-bot; personal morning briefing)"
+        "Mozilla/5.0 (compatible; MarvinBot/1.0; "
+        "+https://github.com/marvin-bot; personal morning briefing)"
     ),
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",

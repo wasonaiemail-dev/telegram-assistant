@@ -1,5 +1,5 @@
 """
-alfred/features/reply_assist.py
+marvin/features/reply_assist.py
 ================================
 Screenshot and email reply drafting assistant.
 
@@ -10,15 +10,15 @@ CAPABILITIES
   • Photo of an email → draft email reply
   • Pasted email text → draft email reply
   • Context injection: buyer types a description before sending the photo
-  • Contact lookup: if the sender is in contacts, Alfred knows their background
-  • Clarifying question: if the screenshot is ambiguous, Alfred asks first
+  • Contact lookup: if the sender is in contacts, Marvin knows their background
+  • Clarifying question: if the screenshot is ambiguous, Marvin asks first
   • Iterative refinement: "make it shorter / warmer / more formal"
-  • Style library: buyer can save example messages to fine-tune Alfred's voice
+  • Style library: buyer can save example messages to fine-tune Marvin's voice
 
 COMMANDS
 ────────
   None — triggered by:
-    • Sending a photo (Alfred detects if it's a text/email screenshot)
+    • Sending a photo (Marvin detects if it's a text/email screenshot)
     • Typing context then sending the photo
     • Explicit intent (REPLY_ASSIST, EMAIL_ASSIST, REPLY_STYLE_ADD)
 
@@ -219,7 +219,7 @@ async def handle_photo_for_reply(photo_file_path: str, ctx,
     """
     Main entry point for screenshot-based reply drafting.
     Called from bot.py when user sends a photo.
-    ctx: AlfredContext
+    ctx: MarvinContext
     """
     import base64
     data = load_data()
@@ -301,7 +301,7 @@ def looks_like_refinement(text: str) -> bool:
 
 
 async def handle_refinement(text: str, ctx) -> None:
-    """ctx: AlfredContext"""
+    """ctx: MarvinContext"""
     data       = load_data()
     tone       = get_reply_settings(data).get("default_tone", "warm")
     last_draft = get_last_draft()
@@ -319,7 +319,7 @@ async def handle_refinement(text: str, ctx) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_reply_intent(intent: str, entities: dict, ctx) -> None:
-    """ctx: AlfredContext"""
+    """ctx: MarvinContext"""
 
     if intent == REPLY_STYLE_ADD:
         example = entities.get("example", "").strip()

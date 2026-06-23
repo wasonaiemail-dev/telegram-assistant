@@ -1,7 +1,7 @@
 """
-alfred/adapters/gmail.py
+marvin/adapters/gmail.py
 ========================
-Low-level Gmail API wrapper for Alfred.
+Low-level Gmail API wrapper for Marvin.
 
 PUBLIC API
 ──────────

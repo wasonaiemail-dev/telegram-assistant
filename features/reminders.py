@@ -1,5 +1,5 @@
 """
-alfred/features/reminders.py
+marvin/features/reminders.py
 ==============================
 Reminders — timed and recurring alerts stored in userdata.json.
 
@@ -55,7 +55,7 @@ from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import BOT_NAME, TIMEZONE, RECUR_LABELS
 from core.intent import (
     REMINDER_ADD, REMINDER_LIST, REMINDER_DONE, REMINDER_DELETE,
@@ -460,7 +460,7 @@ async def handle_reminder_callback(update, context) -> None:
 async def handle_reminder_intent(
     intent:   str,
     entities: dict,
-    ctx:      AlfredContext,
+    ctx:      MarvinContext,
 ) -> None:
     """Dispatch all REMINDER_* intents."""
 

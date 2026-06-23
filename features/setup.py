@@ -1,13 +1,13 @@
 """
-alfred/features/setup.py
+marvin/features/setup.py
 ========================
-In-Telegram setup wizard for Alfred.
+In-Telegram setup wizard for Marvin.
 
 HOW IT WORKS
 ────────────
 The /setup command launches a conversational onboarding flow directly in
-Telegram. Alfred asks guided questions for each memory category, parses the
-answers using GPT to extract discrete facts, and stores them in alfred_memory.json.
+Telegram. Marvin asks guided questions for each memory category, parses the
+answers using GPT to extract discrete facts, and stores them in marvin_memory.json.
 
 The wizard uses a simple file-based state machine (setup_state.json) so it
 survives bot restarts mid-setup. State is cleared when setup completes or is
@@ -845,7 +845,7 @@ _PREFS_PROMPTS = {
         "Type *skip* to keep current setting."
     ),
     "sleep_schedule": (
-        "What are your target sleep times? Alfred uses these to give accurate "
+        "What are your target sleep times? Marvin uses these to give accurate "
         "bedtime suggestions and time morning nudges correctly.\n\n"
         "Format: *weekday bed, weekday wake, weekend bed, weekend wake, sleep goal (hrs)*\n\n"
         "Example: *11pm, 7am, midnight, 9am, 7.5*\n\n"
@@ -855,7 +855,7 @@ _PREFS_PROMPTS = {
         "Type *skip* to keep defaults (11pm / 7am weekday, midnight / 9am weekend, 7.5 hrs)."
     ),
     "quiet_hours": (
-        "When should Alfred go quiet? No proactive nudges, alerts, or reminders "
+        "When should Marvin go quiet? No proactive nudges, alerts, or reminders "
         "will be sent during this window.\n\n"
         "Format: *start time – end time*\n"
         "Example: *10pm – 7am*\n\n"
@@ -886,7 +886,7 @@ _PREFS_PROMPTS = {
         "\"use 💊 for doctor events\"."
     ),
     "smart_suggestions": (
-        "Alfred can proactively spot patterns and nudge you. Which areas?\n\n"
+        "Marvin can proactively spot patterns and nudge you. Which areas?\n\n"
         "Type any/all: *habits*, *workout*, *meals*, *mood*, *shopping*\n"
         "Or type *all* to enable everything, *none* to disable.\n\n"
         "Example: *habits, workout, mood*"
@@ -1553,7 +1553,7 @@ async def _save_prefs_answer(
             if raw in ("off", "disable", "none"):
                 ss["dnd_enabled"] = False
                 save_data(data)
-                feedback = "✓ Quiet hours disabled — Alfred will nudge any time."
+                feedback = "✓ Quiet hours disabled — Marvin will nudge any time."
             else:
                 changed = []
 
@@ -1742,7 +1742,7 @@ async def _finish_prefs_flow(
     )
     await msg.reply_text(
         "✅ *Preferences saved!*\n\n"
-        "Alfred will use these settings going forward. "
+        "Marvin will use these settings going forward. "
         "Run `/setup` anytime to update them.\n\n"
         "Some changes (like journal reminder times) take effect after the next restart.",
         parse_mode="Markdown",
@@ -1751,7 +1751,7 @@ async def _finish_prefs_flow(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DISCORD COMPATIBILITY SHIMS
-# Allow the preferences wizard to run on Discord via AlfredContext (ctx)
+# Allow the preferences wizard to run on Discord via MarvinContext (ctx)
 # instead of Telegram's Update / ContextTypes objects.
 #
 # All the internal wizard functions use:
@@ -1776,7 +1776,7 @@ class _DiscordMsg:
 
 
 class _DiscordUpdate:
-    """Fake Telegram Update that wraps a Discord AlfredContext."""
+    """Fake Telegram Update that wraps a Discord MarvinContext."""
 
     def __init__(self, ctx):
         self.callback_query = None          # never a callback on Discord

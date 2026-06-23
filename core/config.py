@@ -1,7 +1,7 @@
 """
-alfred/core/config.py
+marvin/core/config.py
 =====================
-All environment variables, constants, and file paths for Alfred.
+All environment variables, constants, and file paths for Marvin.
 
 BUYER CUSTOMIZATION:
   Values marked # <-- CUSTOMIZE are set during setup via the Setup Companion.
@@ -58,7 +58,7 @@ AUTH_STATE_FILE  = os.path.join(PERSIST_DIR, "auth_state.json")
 LOG_FILE         = os.path.join(PERSIST_DIR, "audit.log")
 CONTACTS_FILE    = os.path.join(PERSIST_DIR, "contacts.json")
 CONVO_FILE       = os.path.join(PERSIST_DIR, "conversation.json")
-MEMORY_FILE      = os.path.join(PERSIST_DIR, "alfred_memory.json")
+MEMORY_FILE      = os.path.join(PERSIST_DIR, "marvin_memory.json")
 ASK_HISTORY_FILE  = os.path.join(PERSIST_DIR, "ask_history.json")
 JOURNAL_FILE      = os.path.join(PERSIST_DIR, "journal.json")
 WORKOUT_FILE      = os.path.join(PERSIST_DIR, "workout_program.json")
@@ -96,7 +96,7 @@ SHEETS_EXPENSE_ID = os.environ.get("GOOGLE_SHEETS_EXPENSE_ID", "")
 
 # ---------------------------------------------------------------------------
 # GMAIL INTEGRATION                                          # <-- CUSTOMIZE
-# Alfred can send emails, save drafts, and surface unread counts in the
+# Marvin can send emails, save drafts, and surface unread counts in the
 # morning briefing. No extra setup beyond running /auth — scopes are included.
 #
 # GMAIL_VIP_SENDERS: comma-separated email addresses whose unread messages
@@ -115,7 +115,7 @@ GMAIL_DEFAULT_SIGNATURE = os.environ.get("GMAIL_DEFAULT_SIGNATURE", "")
 
 # ---------------------------------------------------------------------------
 # GOOGLE DRIVE — NOTES
-# Alfred stores notes as .txt files in a Drive folder called "Alfred Notes".
+# Marvin stores notes as .txt files in a Drive folder called "Marvin Notes".
 # The folder is auto-created on first use. Its ID is cached on disk.
 # The mapping of Tasks note IDs → Drive file IDs is also cached on disk.
 # No env var needed — zero-config for buyers.
@@ -127,29 +127,29 @@ DRIVE_NOTES_MAP_FILE    = os.path.join(PERSIST_DIR, "drive_notes_map.json")
 
 # ---------------------------------------------------------------------------
 # GOOGLE TASKS LIST NAMES
-# Alfred stores todos, notes, shopping, and gifts in Google Tasks.
-# These are the exact list names Alfred will create or find in your account.
+# Marvin stores todos, notes, shopping, and gifts in Google Tasks.
+# These are the exact list names Marvin will create or find in your account.
 # The Setup Companion confirms these during setup.
 # ---------------------------------------------------------------------------
 
-GTASKS_TODOS_LIST     = "Alfred Todos"
-GTASKS_NOTES_LIST     = "Alfred Notes"
+GTASKS_TODOS_LIST     = "Marvin Todos"
+GTASKS_NOTES_LIST     = "Marvin Notes"
 GTASKS_SHOPPING_LISTS = {            # internal_key -> Google Tasks list name
     "grocery":   "Shopping: Grocery",
     "household": "Shopping: Household",
     "baby":      "Shopping: Baby",
     "wishlist":  "Shopping: Wishlist",
 }
-GTASKS_GIFTS_LIST     = "Alfred Gifts"
+GTASKS_GIFTS_LIST     = "Marvin Gifts"
 
 
 # ---------------------------------------------------------------------------
 # BOT NAME                                                    # <-- CUSTOMIZE
 # What you want your assistant called. Set during setup.
-# Example: "Alfred", "Aria", "Max", "J.A.R.V.I.S."
+# Example: "Marvin", "Aria", "Max", "J.A.R.V.I.S."
 # ---------------------------------------------------------------------------
 
-BOT_NAME = os.environ.get("BOT_NAME", "Alfred")
+BOT_NAME = os.environ.get("BOT_NAME", "Marvin")
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +173,7 @@ WEATHER_LON = float(os.environ.get("WEATHER_LON", "-74.0060"))
 
 # ---------------------------------------------------------------------------
 # HOME CITY                                                  # <-- CUSTOMIZE
-# Used for travel weather detection — Alfred checks if your calendar events
+# Used for travel weather detection — Marvin checks if your calendar events
 # are in a different city. Set to your home city name (lowercase).
 # HOME_CITY_KEYWORDS: words that identify you're still "home" in an event.
 # ---------------------------------------------------------------------------
@@ -186,11 +186,11 @@ HOME_CITY_KEYWORDS = [                                          # <-- CUSTOMIZE
 
 # ---------------------------------------------------------------------------
 # HABIT TRACKER                                              # <-- CUSTOMIZE
-# Define the habits you want to track. Alfred will generate keyword
+# Define the habits you want to track. Marvin will generate keyword
 # suggestions for each habit during setup, and you can confirm or edit them.
 #
 # HABITS:        ordered list of habit IDs (internal keys, no spaces)
-# HABIT_LABELS:  what Alfred displays for each habit
+# HABIT_LABELS:  what Marvin displays for each habit
 # HABIT_KEYWORDS: phrases that auto-log that habit when spoken/typed
 #
 # NOTE: These are populated during setup. The defaults below are examples.
@@ -229,9 +229,9 @@ HABIT_KEYWORDS = {
 # ---------------------------------------------------------------------------
 # SHOPPING LISTS                                             # <-- CUSTOMIZE
 # Define which shopping lists you want. Keys are internal IDs (no spaces).
-# Labels are what Alfred displays.
+# Labels are what Marvin displays.
 #
-# SHOPPING_KEYWORDS: if Alfred detects one of these words in an item,
+# SHOPPING_KEYWORDS: if Marvin detects one of these words in an item,
 # it auto-assigns it to that list. Populated/refined during setup.
 # ---------------------------------------------------------------------------
 
@@ -257,7 +257,7 @@ SHOPPING_KEYWORDS = {
 # DAILY QUOTE                                                # <-- CUSTOMIZE
 # QUOTE_TYPE: what style of quote is sent in the morning briefing.
 # Options: "stoic", "bible", "motivational", "philosophical", "random"
-# If QUOTE_TYPE is "bible" or "motivational", Alfred uses the ZenQuotes API
+# If QUOTE_TYPE is "bible" or "motivational", Marvin uses the ZenQuotes API
 # with GPT fallback. "stoic" uses the dedicated Stoic Quotes API.
 # ---------------------------------------------------------------------------
 
@@ -294,7 +294,7 @@ NOTE_AGING_DAYS         = 30    # days before a note is resurfaced
 # ---------------------------------------------------------------------------
 # GOOGLE CALENDAR SETTINGS                                   # <-- CUSTOMIZE
 #
-# CALENDAR_IDS: which calendars Alfred reads.
+# CALENDAR_IDS: which calendars Marvin reads.
 #   "primary" = your main Google Calendar (almost always correct).
 #   To add others, find the calendar ID in Google Calendar settings →
 #   (gear icon) → Settings → [click a calendar] → scroll to
@@ -308,8 +308,8 @@ CALENDAR_IDS        = ["primary"]   # <-- CUSTOMIZE (add more if needed)
 MAX_EVENTS_PER_FETCH = 20
 
 # CALENDAR_NAMES: friendly name → Google Calendar ID for targeted event creation.
-# Say "add to work calendar" and Alfred will write to the mapped calendar ID.
-# The key is what you'd say to Alfred (lowercase), the value is the calendar ID.
+# Say "add to work calendar" and Marvin will write to the mapped calendar ID.
+# The key is what you'd say to Marvin (lowercase), the value is the calendar ID.
 # Find a calendar's ID in Google Calendar → gear → Settings → click calendar →
 # scroll to "Integrate calendar" → copy the Calendar ID.
 # Leave empty dict ({}) if you only use one calendar.
@@ -321,13 +321,13 @@ CALENDAR_NAMES: dict[str, str] = {
 
 # ---------------------------------------------------------------------------
 # EVENT PREP BRIEFING                                        # <-- CUSTOMIZE
-# Alfred sends a prep briefing the evening before significant events.
+# Marvin sends a prep briefing the evening before significant events.
 #
 # EVENT_PREP_HOUR/MINUTE: when the nightly check fires (default 8:00 PM).
 # EVENT_PREP_HOURS_LOOKAHEAD: how far ahead to look for events (default 18h,
 #   meaning events from now until 18 hours from now get a prep briefing).
 # EVENT_PREP_MIN_DURATION_MINUTES: skip events shorter than this (default 30).
-#   Prevents Alfred from prepping you for a 5-minute calendar block.
+#   Prevents Marvin from prepping you for a 5-minute calendar block.
 #
 # EVENT_PREP_KEYWORDS: if ANY of these words appear in an event title,
 #   it is treated as significant regardless of duration or guest count.
@@ -356,7 +356,7 @@ EVENT_PREP_SKIP_KEYWORDS = [        # <-- CUSTOMIZE
 
 # ---------------------------------------------------------------------------
 # TRAVEL WEATHER DETECTION                                   # <-- CUSTOMIZE
-# Alfred scans upcoming calendar events at 7:00 PM daily and sends a
+# Marvin scans upcoming calendar events at 7:00 PM daily and sends a
 # weather alert for any event that appears to be in a different city.
 #
 # TRAVEL_DETECT_DAYS_AHEAD: how many days forward to scan (default 3).
@@ -366,11 +366,11 @@ TRAVEL_DETECT_DAYS_AHEAD = 3
 
 
 # ---------------------------------------------------------------------------
-# ALFRED MEMORY
-# Long-term facts Alfred remembers about you.
+# MARVIN MEMORY
+# Long-term facts Marvin remembers about you.
 #
 # MEMORY_CATEGORIES: the default categories. The live category list is stored
-#   in alfred_memory.json (so custom categories survive redeployment).
+#   in marvin_memory.json (so custom categories survive redeployment).
 #   Buyers configure their categories during /setup in Telegram.
 #
 # MEMORY_ALWAYS_INJECT: categories injected into *every* GPT call regardless
@@ -385,7 +385,7 @@ TRAVEL_DETECT_DAYS_AHEAD = 3
 #   At 20 tokens/fact average, 50 facts ≈ 1,000 tokens per category.
 #   Relevant-category filtering means only 2–4 categories inject at once.
 #
-# MEMORY_SETUP_QUESTIONS: guided questions Alfred asks per category
+# MEMORY_SETUP_QUESTIONS: guided questions Marvin asks per category
 #   during the /setup memory wizard in Telegram.
 # ---------------------------------------------------------------------------
 
@@ -434,7 +434,7 @@ MEMORY_CATEGORY_KEYWORDS = {
 
 MEMORY_MAX_FACTS_PER_CATEGORY = 50
 
-# Guided questions Alfred asks per category during /setup memory
+# Guided questions Marvin asks per category during /setup memory
 MEMORY_SETUP_QUESTIONS = {
     "Me": [
         "What's your name, and where do you live?",
@@ -499,7 +499,7 @@ SETUP_STATE_FILE = os.path.join(PERSIST_DIR, "setup_state.json")
 
 # ---------------------------------------------------------------------------
 # /ASK CONTEXT SETTINGS
-# Alfred maintains an 8-hour conversation thread for follow-up questions.
+# Marvin maintains an 8-hour conversation thread for follow-up questions.
 # If the topic shifts significantly, the thread auto-resets.
 # ---------------------------------------------------------------------------
 
@@ -549,7 +549,7 @@ CONTACT_SYSTEM_ADDON = (
 
 # ---------------------------------------------------------------------------
 # CONVERSATION MEMORY
-# How many messages Alfred remembers per conversation session.
+# How many messages Marvin remembers per conversation session.
 # ---------------------------------------------------------------------------
 
 MAX_HISTORY = 20
@@ -557,7 +557,7 @@ MAX_HISTORY = 20
 
 # ---------------------------------------------------------------------------
 # RATE LIMITING
-# Max messages per minute before Alfred asks the user to slow down.
+# Max messages per minute before Marvin asks the user to slow down.
 # ---------------------------------------------------------------------------
 
 RATE_LIMIT_COUNT  = 30
@@ -578,7 +578,7 @@ GPT_VOICE_MODEL  = "whisper-1"      # Voice transcription
 # WORD OF THE DAY
 # 248-word list, one word per day (cycling by day-of-year).
 # No GPT randomness — deterministic, no repeats until the full year cycles.
-# Add or remove words freely; Alfred wraps around if < 365 words.
+# Add or remove words freely; Marvin wraps around if < 365 words.
 # ---------------------------------------------------------------------------
 
 WORD_OF_DAY_LIST = [

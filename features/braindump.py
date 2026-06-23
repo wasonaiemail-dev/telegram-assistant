@@ -1,5 +1,5 @@
 """
-alfred/features/braindump.py
+marvin/features/braindump.py
 =============================
 Brain Dump — stream-of-consciousness → auto-sorted todos, reminders, notes.
 
@@ -8,7 +8,7 @@ HOW IT WORKS
 1. User sends a raw dump of everything on their mind (can be messy, unstructured)
 2. GPT parses it and returns a categorized JSON object:
      {todos: [str], reminders: [{text, time}], notes: [str], shopping: [str]}
-3. Alfred creates each item in the right place and confirms with a summary
+3. Marvin creates each item in the right place and confirms with a summary
 4. User gets "here's what I captured" — no back-and-forth needed
 
 TRIGGERS
@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import logging
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import GPT_CHAT_MODEL, OPENAI_API_KEY, BOT_NAME
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ Rules:
 # COMMAND HANDLER
 # ════════════════════════════════════════════════════════════════════════════
 
-async def cmd_braindump(ctx: AlfredContext, args: str = "") -> None:
+async def cmd_braindump(ctx: MarvinContext, args: str = "") -> None:
     """
     /braindump [text]
     If no text provided, prompt the user to send their dump.
@@ -89,7 +89,7 @@ async def cmd_braindump(ctx: AlfredContext, args: str = "") -> None:
 # INTENT HANDLER
 # ════════════════════════════════════════════════════════════════════════════
 
-async def handle_braindump_intent(intent: str, ents: dict, ctx: AlfredContext) -> None:
+async def handle_braindump_intent(intent: str, ents: dict, ctx: MarvinContext) -> None:
     text = ents.get("text", "").strip()
     if not text:
         await cmd_braindump(ctx)
@@ -101,7 +101,7 @@ async def handle_braindump_intent(intent: str, ents: dict, ctx: AlfredContext) -
 # CORE — PARSE + CREATE
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _process_dump(ctx: AlfredContext, raw_text: str) -> None:
+async def _process_dump(ctx: MarvinContext, raw_text: str) -> None:
     """Parse the brain dump text with GPT and create all items."""
 
     await ctx.reply("🧠 Sorting your brain dump…")

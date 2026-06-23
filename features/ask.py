@@ -1,5 +1,5 @@
 """
-alfred/features/ask.py
+marvin/features/ask.py
 =======================
 General question-answering with persistent 8-hour conversation thread,
 memory context injection, and optional live web search.
@@ -17,7 +17,7 @@ PUBLIC INTERFACE
 
 CONVERSATION THREAD
 ────────────────────
-  Alfred maintains one rolling 8-hour conversation window stored in
+  Marvin maintains one rolling 8-hour conversation window stored in
   ask_history.json. If the thread is silent for more than ASK_CONTEXT_HOURS,
   it auto-resets so old context doesn't pollute new conversations.
   Max history is capped at ASK_MAX_HISTORY entries (oldest dropped first).
@@ -31,7 +31,7 @@ MEMORY INJECTION
 
 WEB SEARCH
 ──────────
-  If SERPER_API_KEY is set, Alfred can search the web for current info.
+  If SERPER_API_KEY is set, Marvin can search the web for current info.
   The search step is triggered automatically by the intent classifier when
   the query looks like it needs real-time data, or can be forced with
   /ask -search [query].
@@ -40,14 +40,14 @@ WEB SEARCH
 TOPIC SHIFT DETECTION
 ──────────────────────
   If the user asks something completely different from the thread topic,
-  Alfred auto-resets the thread and starts fresh rather than confusing GPT
+  Marvin auto-resets the thread and starts fresh rather than confusing GPT
   with unrelated history. Powered by a lightweight GPT check.
 """
 
 import asyncio
 import logging
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import (
     BOT_NAME,
     OPENAI_API_KEY,
@@ -186,7 +186,7 @@ async def _summarize_topic(text: str) -> str:
 
 async def handle_ask(
     text:         str,
-    ctx:          AlfredContext,
+    ctx:          MarvinContext,
     *,
     force_search: bool = False,
 ) -> str | None:
@@ -326,7 +326,7 @@ def _looks_like_search_query(text: str) -> bool:
 
 async def handle_text_message(
     text: str,
-    ctx:  AlfredContext,
+    ctx:  MarvinContext,
 ) -> None:
     """
     Handle free-text messages that fall through the intent classifier.

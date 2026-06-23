@@ -1,7 +1,7 @@
 """
-alfred/core/data.py
+marvin/core/data.py
 ===================
-All data persistence for Alfred: loading, saving, migrating, and querying
+All data persistence for Marvin: loading, saving, migrating, and querying
 user data across both Railway (local JSON) and Google Tasks.
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -45,7 +45,7 @@ The top-level keys and their shapes:
 ═══════════════════════════════════════════════════════════════════════════════
 SEPARATE FILES (not in userdata.json)
 ═══════════════════════════════════════════════════════════════════════════════
-  alfred_memory.json   Long-term facts Alfred remembers about you
+  marvin_memory.json   Long-term facts Marvin remembers about you
                          {
                            "_categories":        [str, ...],   ← live active list
                            "_custom_categories": [str, ...],   ← buyer-added extras
@@ -334,8 +334,8 @@ def save_conversation(history):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ALFRED MEMORY
-# Long-term facts Alfred remembers about you. Stored in alfred_memory.json.
+# MARVIN MEMORY
+# Long-term facts Marvin remembers about you. Stored in marvin_memory.json.
 #
 # MEMORY FILE STRUCTURE
 # ─────────────────────
@@ -361,12 +361,24 @@ def save_conversation(history):
 
 def load_memory() -> dict:
     """
-    Load Alfred's long-term memory from alfred_memory.json.
+    Load Marvin's long-term memory from marvin_memory.json.
 
     Returns a dict with all active categories guaranteed to be present.
     The live category list is read from the '_categories' key in the file;
     falls back to config.MEMORY_CATEGORIES for new/pre-setup installs.
     """
+    # One-time migration (Alfred -> Marvin rename): if the new memory file
+    # doesn't exist yet but the legacy alfred_memory.json does, carry it over
+    # so long-term memory survives the rename. Safe no-op on fresh installs.
+    if not os.path.exists(MEMORY_FILE):
+        _legacy_memory = os.path.join(os.path.dirname(MEMORY_FILE), "alfred_memory.json")
+        if os.path.exists(_legacy_memory):
+            try:
+                os.replace(_legacy_memory, MEMORY_FILE)
+                logger.info("Migrated legacy alfred_memory.json -> %s", os.path.basename(MEMORY_FILE))
+            except OSError as e:
+                logger.warning("Memory migration skipped: %s", e)
+
     if os.path.exists(MEMORY_FILE):
         try:
             with open(MEMORY_FILE, "r") as f:
@@ -393,7 +405,7 @@ def load_memory() -> dict:
 
 
 def save_memory(mem: dict) -> None:
-    """Atomically persist Alfred's memory to disk."""
+    """Atomically persist Marvin's memory to disk."""
     tmp = MEMORY_FILE + ".tmp"
     try:
         with open(tmp, "w") as f:
@@ -1150,7 +1162,7 @@ def get_event_prep_settings(data: dict) -> dict:
 
 def get_base_sports_settings(data: dict) -> dict:
     """
-    Return base Alfred sports recap settings (no Sports Pack plugin needed).
+    Return base Marvin sports recap settings (no Sports Pack plugin needed).
     Stores favorite teams for NFL/NBA/MLB/NHL — shown in morning briefing.
     The Sports Pack plugin overrides this entirely when installed.
     """

@@ -1,7 +1,7 @@
 """
-alfred/features/notes.py
+marvin/features/notes.py
 =========================
-Notes management via Google Tasks (Alfred Notes list).
+Notes management via Google Tasks (Marvin Notes list).
 
 COMMANDS
 ────────
@@ -31,7 +31,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import BOT_NAME
 from core.intent import NOTE_ADD, NOTE_LIST, NOTE_DELETE, NOTE_SEARCH, NOTE_EDIT, NOTE_APPEND
 
@@ -177,7 +177,7 @@ async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def handle_note_intent(
     intent:   str,
     entities: dict,
-    ctx:      AlfredContext,
+    ctx:      MarvinContext,
 ) -> None:
     """Dispatch all NOTE_* intents."""
 

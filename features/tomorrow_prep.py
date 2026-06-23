@@ -1,5 +1,5 @@
 """
-alfred/features/tomorrow_prep.py
+marvin/features/tomorrow_prep.py
 ==================================
 Night-before briefing — fires once per night before a "busy day."
 
@@ -7,7 +7,7 @@ A busy day is defined as: ≥ BUSY_DAY_THRESHOLD calendar events  OR
 at least one high-priority to-do due tomorrow.  The threshold is
 configurable in proactive settings (default 3).
 
-The briefing blends multiple signals into a single message so Alfred
+The briefing blends multiple signals into a single message so Marvin
 doesn't spam the user with separate notifications:
 
   1. Tomorrow's full schedule (events + times)
@@ -34,7 +34,7 @@ import datetime
 import logging
 from zoneinfo import ZoneInfo
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import (
     TIMEZONE, BOT_NAME,
     WEATHER_LAT, WEATHER_LON,
@@ -426,7 +426,7 @@ async def _build_tomorrow_prep_message(data: dict) -> str | None:
 # PUBLIC ENTRY POINTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def run_tomorrow_prep(ctx: AlfredContext) -> None:
+async def run_tomorrow_prep(ctx: MarvinContext) -> None:
     """
     Called by the nightly job in bot.py.
     Silently skips if: not a busy day, already sent tonight, or module disabled.
@@ -457,7 +457,7 @@ async def run_tomorrow_prep(ctx: AlfredContext) -> None:
     save_data(data)
 
 
-async def cmd_tomorrow_prep(ctx: AlfredContext) -> None:
+async def cmd_tomorrow_prep(ctx: MarvinContext) -> None:
     """
     /tomorrowprep — manual trigger, always fires regardless of busy threshold.
     Useful for testing and for the user to see the briefing on demand.

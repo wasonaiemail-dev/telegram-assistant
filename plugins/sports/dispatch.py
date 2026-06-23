@@ -12,7 +12,7 @@ and more reliable for NL-triggered intents.
 import asyncio
 import logging
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.intent import IntentResult
 from plugins.sports import espn_api
 from plugins.sports import stats_api
@@ -40,9 +40,9 @@ logger = logging.getLogger(__name__)
 _extract_name_from_query = extract_name_from_query
 
 
-async def _show_league_menu_ctx(ctx: AlfredContext, action: str) -> None:
+async def _show_league_menu_ctx(ctx: MarvinContext, action: str) -> None:
     """
-    Show league selection menu via AlfredContext.
+    Show league selection menu via MarvinContext.
 
     On Telegram: delegates to _show_league_menu (InlineKeyboardMarkup).
     On Discord: sends a numbered list and instructs user to use !<action> <league>.
@@ -60,7 +60,7 @@ async def _show_league_menu_ctx(ctx: AlfredContext, action: str) -> None:
 
 async def handle_sports_intent(
     intent_result: IntentResult,
-    ctx: AlfredContext,
+    ctx: MarvinContext,
 ) -> None:
     """
     Main intent dispatcher for sports plugin.

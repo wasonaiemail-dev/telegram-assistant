@@ -1,5 +1,5 @@
 
-# Alfred — Personal Assistant Bot
+# Marvin — Personal Assistant Bot
 
 > A private Telegram bot that manages your life. Todos, calendar, reminders, notes, shopping lists, habits, morning briefings, and a persistent AI assistant — all in one chat thread.
 
@@ -7,9 +7,9 @@
 
 ---
 
-## What Alfred Does
+## What Marvin Does
 
-Send Alfred a message and it handles the rest. Every feature is available by command or by plain English.
+Send Marvin a message and it handles the rest. Every feature is available by command or by plain English.
 
 | Area | What you can do |
 |---|---|
@@ -20,7 +20,7 @@ Send Alfred a message and it handles the rest. Every feature is available by com
 | 📝 **Notes** | Quick capture to Google Tasks, view and delete by number |
 | ⏰ **Reminders** | One-time and recurring reminders — "remind me every Monday at 9am" |
 | 💪 **Habits** | Log daily habits, get a nudge each evening, see yesterday in your briefing |
-| 🧠 **Memory** | Teach Alfred facts about you — injected into every AI conversation |
+| 🧠 **Memory** | Teach Marvin facts about you — injected into every AI conversation |
 | 💬 **Ask** | Persistent 8-hour AI conversation thread with optional live web search |
 | 🎁 **Gifts** | Gift idea tracker per person, stored in Google Tasks |
 | 👥 **Contacts** | Personal contact notes — facts about people in your life |
@@ -32,7 +32,7 @@ Send Alfred a message and it handles the rest. Every feature is available by com
 | 📔 **Journal** | Private daily journal with voice support and GPT reflections |
 | 😊 **Mood Tracker** | 1–10 daily mood rating, trend analysis, GPT insights |
 | 🔗 **Read Later** | Save links with AI summaries and tags, snooze, search, weekly digest |
-| 💬 **Reply Assist** | Paste a message and Alfred drafts your response |
+| 💬 **Reply Assist** | Paste a message and Marvin drafts your response |
 | 📤 **Data Export** | Export everything (journal, mood, notes, habits, memory, links) to Excel |
 | 📧 **Gmail** | Send emails, save drafts, and check unread count — all by voice or natural language |
 
@@ -48,7 +48,7 @@ Send Alfred a message and it handles the rest. Every feature is available by com
 /notes          — View and manage quick notes
 /reminders      — View upcoming reminders
 /habits         — View and log daily habits
-/memory         — View and teach Alfred about you
+/memory         — View and teach Marvin about you
 /ask <question> — Start or continue an AI conversation
 /gifts          — View and manage gift ideas
 /contacts       — View and manage personal contact notes
@@ -62,7 +62,7 @@ Send Alfred a message and it handles the rest. Every feature is available by com
 /help           — List all commands
 ```
 
-You can also just **type or talk naturally** — Alfred classifies your intent automatically. Voice messages work for everything:
+You can also just **type or talk naturally** — Marvin classifies your intent automatically. Voice messages work for everything:
 > *"Remind me to call mum on Sunday at 5pm"*
 > *"Add oat milk and eggs to the grocery list"*
 > *"What's on my calendar next week?"*
@@ -80,7 +80,7 @@ You can also just **type or talk naturally** — Alfred classifies your intent a
 4. The AI will walk you through every step
 
 ### Option B — Follow the Visual Guide
-Open `setup/Alfred_Buyer_Guide.pdf` — a 25-page illustrated guide with annotated screenshots for every step, written for people who have never used a terminal.
+Open `setup/Marvin_Buyer_Guide.pdf` — a 25-page illustrated guide with annotated screenshots for every step, written for people who have never used a terminal.
 
 ### What you'll need
 - A free [Telegram](https://telegram.org) account
@@ -99,7 +99,7 @@ Or manually:
 1. Fork this repo to your GitHub account
 2. Create a new Railway project → Deploy from GitHub repo → select your fork
 3. Add all variables from `.env.example` to Railway → Variables
-4. Railway builds and starts Alfred automatically
+4. Railway builds and starts Marvin automatically
 
 ---
 
@@ -118,7 +118,7 @@ Or manually:
 ## Project Structure
 
 ```
-alfred/
+marvin/
 ├── bot.py                  # Entry point, dispatcher, job scheduler
 ├── core/
 │   ├── config.py           # All constants and environment variables
@@ -152,7 +152,7 @@ alfred/
 │   └── export_data.py      # Full data export to Excel
 ├── setup/
 │   ├── SETUP_COMPANION.md  # AI-guided setup wizard (paste into Claude/GPT)
-│   └── Alfred_Buyer_Guide.pdf  # Illustrated visual setup guide
+│   └── Marvin_Buyer_Guide.pdf  # Illustrated visual setup guide
 ├── .env.example            # All environment variables with descriptions
 ├── railway.json            # Railway deployment config
 ├── Procfile                # Fallback process definition

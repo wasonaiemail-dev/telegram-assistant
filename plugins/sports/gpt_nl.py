@@ -179,7 +179,7 @@ _SPORTS_TOOLS = [
     },
 ]
 
-_SYSTEM_PROMPT = """You are a sports data assistant for Alfred, a personal Telegram bot.
+_SYSTEM_PROMPT = """You are a sports data assistant for Marvin, a personal Telegram bot.
 Today's date is {today}.
 
 The user sent a message that may be a sports question. Use the provided tools to decide what sports data action to take. Pick the MOST SPECIFIC function that matches.

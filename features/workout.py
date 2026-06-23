@@ -1,5 +1,5 @@
 """
-alfred/features/workout.py
+marvin/features/workout.py
 ===========================
 Full workout tracking, GPT-generated programs, PR logging, Excel export.
 
@@ -306,7 +306,7 @@ def get_briefing_line() -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def cmd_workout(ctx) -> None:
-    """Show workout program overview and streak. ctx: AlfredContext"""
+    """Show workout program overview and streak. ctx: MarvinContext"""
     w = load_workout()
     program = w.get("program", {})
     streak  = w.get("streak", 0)
@@ -336,7 +336,7 @@ async def cmd_workout(ctx) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_workout_intent(intent: str, entities: dict, ctx) -> None:
-    """ctx: AlfredContext"""
+    """ctx: MarvinContext"""
     tz  = pytz.timezone(TIMEZONE)
     today_iso = datetime.datetime.now(tz).date().isoformat()
 

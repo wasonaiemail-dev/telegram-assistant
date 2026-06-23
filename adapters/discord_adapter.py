@@ -1,7 +1,7 @@
 """
-alfred/adapters/discord_adapter.py
+marvin/adapters/discord_adapter.py
 =====================================
-Builds an AlfredContext from a Discord Message object.
+Builds an MarvinContext from a Discord Message object.
 
 Usage in discord_bot.py:
     from adapters.discord_adapter import make_context
@@ -45,7 +45,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from core.alfred_context import AlfredContext, MenuButton
+from core.marvin_context import MarvinContext, MenuButton
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +53,9 @@ logger = logging.getLogger(__name__)
 _DISCORD_MAX_LEN = 2000
 
 
-def make_context(message: Any) -> AlfredContext:
+def make_context(message: Any) -> MarvinContext:
     """
-    Build an AlfredContext from a discord.Message object.
+    Build an MarvinContext from a discord.Message object.
 
     Requires: discord.py (or discord.py-stubs) installed.
     The `message` parameter is typed as Any to avoid a hard import
@@ -66,7 +66,7 @@ def make_context(message: Any) -> AlfredContext:
     chat_id = message.channel.id
 
     # Parse args: "!scores nba" or "/scores nba" → ["nba"]
-    # Alfred on Discord uses "!" prefix by default (configurable)
+    # Marvin on Discord uses "!" prefix by default (configurable)
     parts = text.split()
     if parts and (parts[0].startswith("!") or parts[0].startswith("/")):
         args = parts[1:]
@@ -139,9 +139,9 @@ def make_context(message: Any) -> AlfredContext:
             except Exception as e:
                 logger.error(f"discord_adapter._reply_menu error: {e}")
 
-    # ── Build and return AlfredContext ────────────────────────────────────────
+    # ── Build and return MarvinContext ────────────────────────────────────────
 
-    return AlfredContext(
+    return MarvinContext(
         text=text,
         user_id=user_id,
         chat_id=chat_id,

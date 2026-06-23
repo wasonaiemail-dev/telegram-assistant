@@ -1,7 +1,7 @@
 """
-alfred/core/plugin_loader.py
+marvin/core/plugin_loader.py
 ============================
-Auto-discovery plugin loader for Alfred.
+Auto-discovery plugin loader for Marvin.
 
 HOW PLUGINS WORK
 ────────────────
@@ -26,7 +26,7 @@ A plugin's __init__.py must define:
         "name":        "Sports Pack",             # display name
         "version":     "1.0.0",
         "description": "Live scores, standings, and betting tools",
-        "author":      "Alfred",
+        "author":      "Marvin",
 
         # ── Telegram /commands ──────────────────────────────────────
         # Each entry becomes a CommandHandler in bot.py.

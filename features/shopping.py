@@ -1,5 +1,5 @@
 """
-alfred/features/shopping.py
+marvin/features/shopping.py
 ============================
 Shopping list management via Google Tasks.
 
@@ -27,7 +27,7 @@ INTENT HANDLER
 
 AUTO-ROUTING
 ────────────
-  When an item is added without specifying a list, Alfred checks
+  When an item is added without specifying a list, Marvin checks
   SHOPPING_KEYWORDS to auto-route it (e.g. "detergent" → household).
   Falls back to "grocery" if no keyword matches.
 """
@@ -35,7 +35,7 @@ AUTO-ROUTING
 import logging
 from telegram import Update
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME, SHOPPING_KEYWORDS
@@ -252,7 +252,7 @@ async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_shopping_intent(
     intent:   str,
     entities: dict,
-    ctx:      AlfredContext,
+    ctx:      MarvinContext,
 ) -> None:
     """Dispatch all SHOP_* intents."""
 

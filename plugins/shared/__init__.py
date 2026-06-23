@@ -1,5 +1,5 @@
 """
-Shared utilities for Alfred plugins.
+Shared utilities for Marvin plugins.
 
 Common helpers used across multiple plugins:
   • player_search — ESPN/API-Sports player search, league resolution, NL name extraction

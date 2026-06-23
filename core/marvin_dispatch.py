@@ -1,5 +1,5 @@
 """
-alfred/core/alfred_dispatch.py
+marvin/core/marvin_dispatch.py
 ================================
 Platform-agnostic intent dispatcher.
 
@@ -7,14 +7,14 @@ USAGE
 -----
 Both bot.py (Telegram) and discord_bot.py (Discord) call this:
 
-    from core.alfred_dispatch import alfred_dispatch
-    await alfred_dispatch(intent_result, ctx, loaded_plugins)
+    from core.marvin_dispatch import marvin_dispatch
+    await marvin_dispatch(intent_result, ctx, loaded_plugins)
 
 HOW MIGRATION WORKS
 -------------------
 Each feature handler is either:
 
-  MIGRATED    — accepts (intent, ents, ctx: AlfredContext)
+  MIGRATED    — accepts (intent, ents, ctx: MarvinContext)
                 Works on all platforms.
 
   UNMIGRATED  — accepts (intent, ents, update, context)
@@ -63,20 +63,20 @@ import asyncio
 import logging
 import traceback
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 
 logger = logging.getLogger(__name__)
 
-# Message shown on Discord for features not yet migrated to AlfredContext
+# Message shown on Discord for features not yet migrated to MarvinContext
 _DISCORD_COMING_SOON = (
     "⚙️ This feature isn't available on Discord yet — it's being migrated. "
     "Use the Telegram bot in the meantime."
 )
 
 
-async def alfred_dispatch(
+async def marvin_dispatch(
     intent_result,
-    ctx: AlfredContext,
+    ctx: MarvinContext,
     loaded_plugins: list,
 ) -> None:
     """
@@ -130,7 +130,7 @@ async def alfred_dispatch(
                 return
 
         # ─────────────────────────────────────────────────────────────────────
-        # MIGRATED FEATURES — accept AlfredContext, work on all platforms
+        # MIGRATED FEATURES — accept MarvinContext, work on all platforms
         # ─────────────────────────────────────────────────────────────────────
 
         # -- TODOS ------------------------------------------------------------
@@ -327,12 +327,12 @@ async def alfred_dispatch(
                 await ctx.reply("I'm not sure how to handle that. Try `/help` to see what I can do.")
 
     except ImportError as e:
-        logger.warning(f"alfred_dispatch: feature not yet built for intent '{intent}': {e}")
+        logger.warning(f"marvin_dispatch: feature not yet built for intent '{intent}': {e}")
         await ctx.reply("That feature is coming soon. Try `/help` to see what's available.")
 
     except Exception as e:
         logger.error(
-            f"alfred_dispatch: unhandled error for intent '{intent}': {e}\n"
+            f"marvin_dispatch: unhandled error for intent '{intent}': {e}\n"
             f"{traceback.format_exc()}"
         )
         await ctx.reply("Something went wrong. Try again, or use a specific command.")
@@ -344,7 +344,7 @@ async def alfred_dispatch(
 
 async def _dispatch_plugin_with_ctx(
     intent_result,
-    ctx: AlfredContext,
+    ctx: MarvinContext,
     plugins: list,
 ) -> bool:
     """
@@ -363,13 +363,13 @@ async def _dispatch_plugin_with_ctx(
     for plugin in plugins:
         if intent in plugin.intents and plugin.intent_handler:
             try:
-                # Phase 4: all plugin intent handlers accept ctx (AlfredContext).
+                # Phase 4: all plugin intent handlers accept ctx (MarvinContext).
                 # Sports plugin migrated in Phase 4B. Future plugins should follow suit.
                 await plugin.intent_handler(intent_result, ctx)
                 return True
             except Exception as e:
                 logger.error(
-                    f"alfred_dispatch: plugin {plugin.name} handler error "
+                    f"marvin_dispatch: plugin {plugin.name} handler error "
                     f"for '{intent}': {e}"
                 )
                 await ctx.reply(
@@ -450,7 +450,7 @@ def _build_core_intents():
 _CORE_INTENTS: set = set()  # populated on first import
 
 # Intents that work on Discord (Phase 4)
-# Expand this as more features are migrated to AlfredContext.
+# Expand this as more features are migrated to MarvinContext.
 _DISCORD_SUPPORTED_INTENTS: set = set()  # all plugin intents + ASK/UNKNOWN once migrated
 
 

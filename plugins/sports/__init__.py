@@ -1,5 +1,5 @@
 """
-Sports Pack — Live scores, standings, schedules, and betting tracker for Alfred.
+Sports Pack — Live scores, standings, schedules, and betting tracker for Marvin.
 
 Supported leagues:
   • NFL (football/nfl)
@@ -32,7 +32,7 @@ PLUGIN_META = {
     "name": "Sports Pack",
     "version": "1.0.0",
     "description": "Live scores, standings, schedules, and betting tracker",
-    "author": "Alfred",
+    "author": "Marvin",
 
     # ── Telegram /commands ──────────────────────────────────────
     "commands": [

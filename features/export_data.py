@@ -1,5 +1,5 @@
 """
-alfred/features/export_data.py
+marvin/features/export_data.py
 ==============================
 Export all user data to a single Excel workbook.
 
@@ -25,7 +25,7 @@ from io import BytesIO
 
 from telegram import Update
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from telegram.ext import ContextTypes
 
 from core.config import EXPORT_DIR
@@ -274,7 +274,7 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text("📊 Generating export… this may take a moment.")
 
     today = datetime.date.today().isoformat()
-    output_file = os.path.join(EXPORT_DIR, f"alfred_export_{today}.xlsx")
+    output_file = os.path.join(EXPORT_DIR, f"marvin_export_{today}.xlsx")
 
     result = generate_export(output_file)
 
@@ -284,7 +284,7 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 await update.message.reply_document(
                     f,
                     caption="📊 Complete data export",
-                    filename=f"alfred_export_{today}.xlsx",
+                    filename=f"marvin_export_{today}.xlsx",
                 )
         except Exception as e:
             logger.error(f"export_data: send error: {e}")
@@ -297,7 +297,7 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_export_intent(intent: str, entities: dict, ctx: AlfredContext) -> None:
+async def handle_export_intent(intent: str, entities: dict, ctx: MarvinContext) -> None:
     """Handle EXPORT_DATA intent."""
     if intent == EXPORT_DATA:
         if ctx.is_telegram and ctx._update is not None:

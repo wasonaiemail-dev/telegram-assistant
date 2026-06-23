@@ -1,5 +1,5 @@
 """
-alfred/features/calendar.py
+marvin/features/calendar.py
 ============================
 Calendar view and event management via Google Calendar.
 
@@ -27,7 +27,7 @@ INTENT HANDLER
 
 QUICK ADD
 ─────────
-  When entities are sparse (e.g. only a title with no time), Alfred falls
+  When entities are sparse (e.g. only a title with no time), Marvin falls
   back to Google Calendar's Quick Add API, which parses natural language
   like "Team standup tomorrow at 9am for 30 minutes".
 """
@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 
 from telegram import Update
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME, TIMEZONE, CALENDAR_NAMES
@@ -536,7 +536,7 @@ async def _send_calendar_view(reply_fn, svc, raw_range: str) -> None:
 async def handle_calendar_intent(
     intent:   str,
     entities: dict,
-    ctx:      AlfredContext,
+    ctx:      MarvinContext,
 ) -> None:
     """Dispatch all CAL_* intents."""
 

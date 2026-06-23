@@ -1,7 +1,7 @@
 """
-alfred/features/vacation.py
+marvin/features/vacation.py
 =============================
-Vacation mode — Alfred knows when you're away and adjusts accordingly.
+Vacation mode — Marvin knows when you're away and adjusts accordingly.
 
 WHAT VACATION MODE DOES
 ────────────────────────
@@ -16,7 +16,7 @@ When active:
 
 On return:
   • Vacation mode auto-deactivates on vacation_end_date
-  • Alfred sends a "welcome back" recovery nudge with:
+  • Marvin sends a "welcome back" recovery nudge with:
       - How many habits were missed
       - Overdue to-dos that piled up
       - A gentle "ease back in" message rather than a stress dump
@@ -24,7 +24,7 @@ On return:
 ACTIVATION FLOWS
 ─────────────────
 Auto-detect:
-  Alfred scans for multi-day travel events (duration ≥2 days).
+  Marvin scans for multi-day travel events (duration ≥2 days).
   If found, it asks: "Looks like you're travelling to {X} from {start} to {end}.
   Want me to turn on vacation mode?"
 
@@ -65,7 +65,7 @@ import datetime
 import logging
 from zoneinfo import ZoneInfo
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import TIMEZONE, HABITS, HABIT_LABELS
 from core.data import load_data, save_data, get_proactive_settings
 from core.intent import VACATION_MODE, PACKING_OVERRIDE
@@ -149,7 +149,7 @@ def _deactivate_vacation(data: dict) -> None:
 # WELCOME BACK NUDGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def _send_welcome_back(ctx: AlfredContext, data: dict) -> None:
+async def _send_welcome_back(ctx: MarvinContext, data: dict) -> None:
     """
     Send a friendly recovery message after vacation mode deactivates.
     Shows overdue to-dos + missed habits, with a gentle re-entry tone.
@@ -196,7 +196,7 @@ async def _send_welcome_back(ctx: AlfredContext, data: dict) -> None:
 # AUTO-DETECT FROM CALENDAR
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def check_vacation_auto_detect(ctx: AlfredContext) -> None:
+async def check_vacation_auto_detect(ctx: MarvinContext) -> None:
     """
     Scan the calendar for multi-day travel events starting in the next 3 days.
     If found and vacation mode is not already active, ask the user if they
@@ -270,7 +270,7 @@ async def check_vacation_auto_detect(ctx: AlfredContext) -> None:
         logger.debug("vacation: auto-detect failed: %s", exc)
 
 
-async def check_vacation_auto_resume(ctx: AlfredContext) -> None:
+async def check_vacation_auto_resume(ctx: MarvinContext) -> None:
     """
     Called daily. If vacation_end_date has passed, deactivate vacation mode
     and send a welcome-back message.
@@ -295,7 +295,7 @@ async def check_vacation_auto_resume(ctx: AlfredContext) -> None:
 async def handle_vacation_intent(
     intent: str,
     entities: dict,
-    ctx: AlfredContext,
+    ctx: MarvinContext,
 ) -> None:
     """
     Handles VACATION_MODE and PACKING_OVERRIDE intents.
@@ -384,7 +384,7 @@ async def handle_vacation_intent(
     await cmd_vacation(ctx, args=[])
 
 
-async def _handle_packing_override(entities: dict, ctx: AlfredContext) -> None:
+async def _handle_packing_override(entities: dict, ctx: MarvinContext) -> None:
     """Add a custom item to the packing list for a trip type."""
     item      = (entities.get("item") or "").strip()
     trip_type = (entities.get("trip_type") or "generic").lower().replace(" ", "_")
@@ -404,7 +404,7 @@ async def _handle_packing_override(entities: dict, ctx: AlfredContext) -> None:
         save_data(data)
         await ctx.reply(
             f"✅ Added \"{item}\" to your {trip_type.replace('_', ' ')} packing list. "
-            "Alfred will include it in future trip reminders."
+            "Marvin will include it in future trip reminders."
         )
 
 
@@ -412,7 +412,7 @@ async def _handle_packing_override(entities: dict, ctx: AlfredContext) -> None:
 # /vacation COMMAND
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def cmd_vacation(ctx: AlfredContext, args: list[str] | None = None) -> None:
+async def cmd_vacation(ctx: MarvinContext, args: list[str] | None = None) -> None:
     """/vacation — show status or toggle vacation mode."""
     args = args or []
     arg_str = " ".join(args).strip().lower()

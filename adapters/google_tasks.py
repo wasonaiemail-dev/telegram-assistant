@@ -1,17 +1,17 @@
 """
-alfred/adapters/google_tasks.py
+marvin/adapters/google_tasks.py
 ================================
 Google Tasks CRUD adapter — the single source of truth for all task-list
-operations in Alfred.
+operations in Marvin.
 
 WHAT THIS FILE DOES
 ───────────────────
-All four Alfred feature areas that use Google Tasks go through this module:
+All four Marvin feature areas that use Google Tasks go through this module:
 
-  Todos       → "Alfred Todos"    task list
-  Notes       → "Alfred Notes"    task list
+  Todos       → "Marvin Todos"    task list
+  Notes       → "Marvin Notes"    task list
   Shopping    → one list per SHOPPING_LISTS key  e.g. "Shopping: Grocery"
-  Gifts       → "Alfred Gifts"    task list
+  Gifts       → "Marvin Gifts"    task list
 
 The module handles:
   • Finding or creating named task lists on first use
@@ -22,7 +22,7 @@ The module handles:
 
 PUBLIC INTERFACE — LOW-LEVEL
 ─────────────────────────────
-  ensure_all_lists(service)          Create/find all Alfred lists, cache IDs
+  ensure_all_lists(service)          Create/find all Marvin lists, cache IDs
   get_list_id(service, list_name)    Find or create one list by name
   list_tasks(service, list_id, ...)  List tasks (optionally include completed)
   add_task(service, list_id, ...)    Add a task, returns the task dict
@@ -128,11 +128,11 @@ def get_list_id(service, list_name: str) -> str | None:
 
 def ensure_all_lists(service) -> dict[str, str]:
     """
-    Ensure all Alfred task lists exist in the user's Google Tasks account.
+    Ensure all Marvin task lists exist in the user's Google Tasks account.
     Call this once at startup or after a reauth.
 
     Returns:
-        dict mapping list_name → list_id for all Alfred lists.
+        dict mapping list_name → list_id for all Marvin lists.
         Missing entries indicate API errors for those lists.
     """
     all_names = (
@@ -410,7 +410,7 @@ def _enrich_todo(task: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def add_note(service, text: str) -> dict | None:
-    """Add a note to the Alfred Notes list."""
+    """Add a note to the Marvin Notes list."""
     list_id = get_notes_list_id(service)
     if not list_id:
         return None

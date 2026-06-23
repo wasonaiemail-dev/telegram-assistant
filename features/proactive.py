@@ -1,7 +1,7 @@
 """
-alfred/features/proactive.py
+marvin/features/proactive.py
 =============================
-Proactive intelligence layer — Alfred notices things without being asked.
+Proactive intelligence layer — Marvin notices things without being asked.
 
 All 25 notification types, organised into four categories:
   - Daily checks        (fire each day when relevant)
@@ -50,7 +50,7 @@ import datetime
 import logging
 from zoneinfo import ZoneInfo
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import TIMEZONE, HABITS, HABIT_LABELS, BOT_NAME
 from core.data import load_data, save_data, get_proactive_settings, get_sleep_schedule_settings
 
@@ -1181,7 +1181,7 @@ def _check_shopping_weekend(data: dict, ps: dict) -> str | None:
 # MAIN RUNNERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def run_daily_checks(ctx: AlfredContext) -> None:
+async def run_daily_checks(ctx: MarvinContext) -> None:
     """Run all daily proactive checks. Called by bot.py scheduled job."""
     data = load_data()
 
@@ -1231,7 +1231,7 @@ async def run_daily_checks(ctx: AlfredContext) -> None:
             logger.error(f"Proactive check {key} failed: {e}")
 
 
-async def run_weekly_analysis(ctx: AlfredContext) -> None:
+async def run_weekly_analysis(ctx: MarvinContext) -> None:
     """Run weekly pattern-recognition checks. Called by bot.py on Sunday/Monday."""
     data = load_data()
 
@@ -1349,7 +1349,7 @@ _NL_ALIASES: dict[str, str] = {
 }
 
 
-async def cmd_proactive(ctx: AlfredContext) -> None:
+async def cmd_proactive(ctx: MarvinContext) -> None:
     """Show all proactive toggle settings with current on/off state."""
     data = load_data()
     ps   = get_proactive_settings(data)
@@ -1396,7 +1396,7 @@ async def cmd_proactive(ctx: AlfredContext) -> None:
     await ctx.reply_html("\n".join(lines))
 
 
-async def handle_proactive_toggle(intent: str, entities: dict, ctx: AlfredContext) -> None:
+async def handle_proactive_toggle(intent: str, entities: dict, ctx: MarvinContext) -> None:
     """Handle NL toggle: 'turn off expense alerts', 'enable meeting prep'."""
     # Keyword rule sets structured entities: {"action": "on"/"off", "label": "habit streak"}
     # GPT fallback sets: {"text": "turn off habit streak alerts"}

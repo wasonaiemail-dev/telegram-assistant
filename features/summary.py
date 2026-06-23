@@ -1,11 +1,11 @@
 """
-alfred/features/summary.py
+marvin/features/summary.py
 ===========================
 Weekly summary — a GPT-powered review of the week's activity.
 
 PUBLIC INTERFACE
 ────────────────
-  send_weekly_summary(ctx: AlfredContext)
+  send_weekly_summary(ctx: MarvinContext)
       Called every Sunday at WEEKLY_SUMMARY_HOUR by the background job,
       or on-demand by the WEEKLY_SUMMARY intent.
 
@@ -196,7 +196,7 @@ async def _generate_summary(
 async def send_weekly_summary(ctx) -> None:
     """
     Compile and send the weekly summary.
-    ctx: AlfredContext (imported inline to avoid circular imports)
+    ctx: MarvinContext (imported inline to avoid circular imports)
     HP3: respects enabled_sections setting — only builds blocks for enabled sections.
     """
     from core.data import get_week_summary_data, load_data, get_weekly_summary_settings

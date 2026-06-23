@@ -1,7 +1,7 @@
 """
-alfred/features/memory.py
+marvin/features/memory.py
 =========================
-Handles all Alfred memory operations exposed to the user.
+Handles all Marvin memory operations exposed to the user.
 
 COMMANDS
 ────────
@@ -369,7 +369,7 @@ async def suggest_memory_fact(
 
     Args:
         user_text:      The user's original message.
-        assistant_text: Alfred's response (for context).
+        assistant_text: Marvin's response (for context).
         update:         Telegram Update object.
         context:        Telegram context object.
     """

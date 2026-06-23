@@ -1,4 +1,4 @@
-# Sports Pack Plugin for Alfred
+# Sports Pack Plugin for Marvin
 
 A comprehensive sports plugin providing live scores, standings, schedules, player/team stats, league leaders, and betting tracking — with full natural-language query support via GPT function-calling.
 

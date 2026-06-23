@@ -1,5 +1,5 @@
 """
-alfred/features/photo_handlers.py
+marvin/features/photo_handlers.py
 ===================================
 Photo-to-action handlers for specialised image types.
 
@@ -22,7 +22,7 @@ import base64
 import datetime
 import logging
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import OPENAI_API_KEY, GPT_VISION_MODEL, TIMEZONE
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ async def _vision_query(file_path: str, prompt: str, max_tokens: int = 600) -> s
 # CALENDAR PHOTO
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_calendar_photo(file_path: str, ctx: AlfredContext) -> None:
+async def handle_calendar_photo(file_path: str, ctx: MarvinContext) -> None:
     """
     Extract event details from a photo (flyer, invitation, event screenshot)
     and add the event to Google Calendar.
@@ -163,7 +163,7 @@ async def handle_calendar_photo(file_path: str, ctx: AlfredContext) -> None:
 # WHITEBOARD PHOTO
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_whiteboard_photo(file_path: str, ctx: AlfredContext) -> None:
+async def handle_whiteboard_photo(file_path: str, ctx: MarvinContext) -> None:
     """
     Transcribe text from a whiteboard, handwritten note, or sticky note
     and save it as a note in Google Tasks.
@@ -225,7 +225,7 @@ def _current_meal_slot() -> str:
         return "snack"
 
 
-async def handle_food_photo(file_path: str, ctx: AlfredContext) -> None:
+async def handle_food_photo(file_path: str, ctx: MarvinContext) -> None:
     """
     Identify food in a photo (plate of food or restaurant menu)
     and log it in the meal adherence tracker.

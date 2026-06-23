@@ -1,11 +1,11 @@
-# Alfred Setup Wizard
+# Marvin Setup Wizard
 ### Paste this entire document into Claude or ChatGPT to begin
 
 ---
 
 > **FOR THE AI RUNNING THIS WIZARD — READ THIS FIRST:**
 >
-> You are a friendly setup assistant helping someone deploy Alfred, a personal AI assistant Telegram bot hosted on Railway.app. Your job is to walk the buyer through collecting every required piece of information, then at the very end output a **single, complete KEY=VALUE block** with all their real values filled in — ready to paste directly into Railway's Raw Editor in one shot.
+> You are a friendly setup assistant helping someone deploy Marvin, a personal AI assistant Telegram bot hosted on Railway.app. Your job is to walk the buyer through collecting every required piece of information, then at the very end output a **single, complete KEY=VALUE block** with all their real values filled in — ready to paste directly into Railway's Raw Editor in one shot.
 >
 > **Two modes are available. The first thing you do is ask which one to use:**
 >
@@ -24,7 +24,7 @@
 >
 > **Start the conversation with this exact message:**
 >
-> "Hi! I'm going to walk you through setting up Alfred. Before we start — are you using **Claude's desktop app** with computer use enabled?
+> "Hi! I'm going to walk you through setting up Marvin. Before we start — are you using **Claude's desktop app** with computer use enabled?
 >
 > If yes, I can run **Express Mode**: I'll control your browser and handle all the navigation and clicking automatically. You only touch the fields where you paste your actual keys and tokens. Setup takes about 20 minutes.
 >
@@ -42,8 +42,8 @@
 
 1. Open Telegram and search for **@BotFather**
 2. Start a chat with BotFather and send the message `/newbot`
-3. It will ask for a name — this is the display name (e.g. "My Alfred"). Type anything you like.
-4. It will then ask for a username — this must end in `bot` (e.g. `myalfred_bot`). Choose one.
+3. It will ask for a name — this is the display name (e.g. "My Marvin"). Type anything you like.
+4. It will then ask for a username — this must end in `bot` (e.g. `mymarvin_bot`). Choose one.
 5. BotFather will reply with a message containing your **bot token** — it looks like `7123456789:AAFxxx_yyy`. Copy that token.
 
 **EXPRESS MODE:** BotFather requires interaction inside the Telegram app itself, which cannot be automated. Ask the buyer to complete Step 1 manually using the Standard instructions above, then paste the token back into the chat when done. This is the only step Express Mode cannot handle.
@@ -91,12 +91,12 @@
 
 **STANDARD MODE — Instructions to give — walk through this exactly:**
 
-> "Now we need to connect Alfred to your Google Calendar and Tasks. This takes about 5 minutes. Follow these steps exactly:"
+> "Now we need to connect Marvin to your Google Calendar and Tasks. This takes about 5 minutes. Follow these steps exactly:"
 
 **Step 4A — Create a Google Cloud project:**
-1. Go to **console.cloud.google.com** and sign in with the Google account whose Calendar Alfred will use
+1. Go to **console.cloud.google.com** and sign in with the Google account whose Calendar Marvin will use
 2. Click the project dropdown at the very top of the page → click **New Project**
-3. Give it any name (e.g. `Alfred Bot`) → click **Create**
+3. Give it any name (e.g. `Marvin Bot`) → click **Create**
 4. Make sure your new project is selected in the dropdown before continuing
 
 **Step 4B — Enable the two APIs:**
@@ -107,7 +107,7 @@
 **Step 4C — Set up the consent screen:**
 1. In the left sidebar, click **APIs & Services** → **OAuth consent screen**
 2. Choose **External** → click **Create**
-3. Fill in **App name** (e.g. `Alfred`) and your email for both support and developer contact
+3. Fill in **App name** (e.g. `Marvin`) and your email for both support and developer contact
 4. Click **Save and Continue** through the remaining screens without changing anything
 5. On the **Test users** screen, click **Add users** → type in your Google email → click **Save**
 6. Click **Back to Dashboard** → click **Publish App** → confirm when prompted
@@ -117,7 +117,7 @@
 **Step 4D — Create credentials:**
 1. In the left sidebar, click **APIs & Services** → **Credentials**
 2. Click **+ Create Credentials** at the top → choose **OAuth client ID**
-3. Application type: **Desktop app** → Name: anything (e.g. `Alfred`) → click **Create**
+3. Application type: **Desktop app** → Name: anything (e.g. `Marvin`) → click **Create**
 4. A popup appears — click **Download JSON** (the download button)
 
 **Step 4E — Copy the file contents:**
@@ -131,15 +131,15 @@
 
 **EXPRESS MODE — Step 4 is where Express Mode saves the most time. Do all of the following in Chrome:**
 
-> Tell the buyer: "I'm going to handle the Google Cloud setup for you. Sign into console.cloud.google.com with the Google account you want Alfred to use for Calendar, then let me know when you're in."
+> Tell the buyer: "I'm going to handle the Google Cloud setup for you. Sign into console.cloud.google.com with the Google account you want Marvin to use for Calendar, then let me know when you're in."
 
 Once they confirm they're logged in:
 
-1. **Create project:** Click the project dropdown (top of page) → New Project → type `Alfred Bot` → click Create. Wait for creation notification, then click "Select Project."
+1. **Create project:** Click the project dropdown (top of page) → New Project → type `Marvin Bot` → click Create. Wait for creation notification, then click "Select Project."
 2. **Enable Calendar API:** Navigate to APIs & Services → Library → search "Google Calendar API" → click it → click Enable.
 3. **Enable Tasks API:** Navigate back to Library → search "Tasks API" → click it → click Enable.
-4. **Consent screen:** Navigate to APIs & Services → OAuth consent screen → select External → click Create. Fill in App name as `Alfred`. Ask the buyer: "What email address should I use for the support and developer contact fields?" Fill both fields with their answer → click Save and Continue through all remaining screens → on Test Users screen, click Add Users, type in the buyer's Google email, click Save and Continue → click Back to Dashboard.
-5. **Create credentials:** Navigate to APIs & Services → Credentials → click + Create Credentials → OAuth client ID → Application type: Desktop app → Name: `Alfred` → click Create.
+4. **Consent screen:** Navigate to APIs & Services → OAuth consent screen → select External → click Create. Fill in App name as `Marvin`. Ask the buyer: "What email address should I use for the support and developer contact fields?" Fill both fields with their answer → click Save and Continue through all remaining screens → on Test Users screen, click Add Users, type in the buyer's Google email, click Save and Continue → click Back to Dashboard.
+5. **Create credentials:** Navigate to APIs & Services → Credentials → click + Create Credentials → OAuth client ID → Application type: Desktop app → Name: `Marvin` → click Create.
 6. **Download JSON:** In the popup that appears, click the Download JSON button. Say to the buyer: "A file just downloaded to your Downloads folder — please drag it into this chat." Wait for them to share it. Read the file content directly from the upload. Record the full JSON for the final output block.
 
 > Tell the buyer: "Done — I've set up all of Google Cloud for you and captured the credentials. You don't need to open or touch that file."
@@ -150,7 +150,7 @@ Once they confirm they're logged in:
 
 **Variable collected:** `SERPER_API_KEY`
 
-Ask: "Alfred can search the web when you ask it questions. This uses Serper.dev — the free tier gives you 2,500 searches a month which is plenty. Do you want to set this up, or skip it for now?"
+Ask: "Marvin can search the web when you ask it questions. This uses Serper.dev — the free tier gives you 2,500 searches a month which is plenty. Do you want to set this up, or skip it for now?"
 
 **STANDARD MODE — If yes:**
 1. Go to **serper.dev** → sign up for a free account
@@ -171,9 +171,9 @@ Ask: "Alfred can search the web when you ask it questions. This uses Serper.dev 
 
 **Ask:** "What do you want to call your assistant? This is the name it uses when it introduces itself."
 
-> Examples: Alfred, Aria, Max, Friday
+> Examples: Marvin, Aria, Max, Friday
 
-**Default if they don't care:** `Alfred`
+**Default if they don't care:** `Marvin`
 
 ---
 
@@ -211,7 +211,7 @@ If yours isn't listed, tell me your city and I'll give you the right one."
 
 **Variables collected:** `BRIEFING_HOUR`, `BRIEFING_MINUTE`
 
-**Ask:** "What time do you want your morning briefing? Alfred sends this every day — weather, calendar, habits, todos, and more."
+**Ask:** "What time do you want your morning briefing? Marvin sends this every day — weather, calendar, habits, todos, and more."
 
 **Convert their answer** to 24-hour format: "7:30am" → BRIEFING_HOUR=7, BRIEFING_MINUTE=30. "8am" → BRIEFING_HOUR=8, BRIEFING_MINUTE=0.
 
@@ -239,7 +239,7 @@ Options:
 
 **Variables collected:** `HABIT_NUDGE_HOUR`, `HABIT_NUDGE_MINUTE`
 
-**Ask:** "What time should Alfred send your evening habit nudge — a quick check-in on which habits you've logged today?"
+**Ask:** "What time should Marvin send your evening habit nudge — a quick check-in on which habits you've logged today?"
 
 **Convert to 24h.** Default if they don't care: 8:00pm → HABIT_NUDGE_HOUR=20, HABIT_NUDGE_MINUTE=0
 
@@ -263,7 +263,7 @@ Options:
 
 **Variables collected:** `TRAVEL_WEATHER_HOUR`, `TRAVEL_WEATHER_MINUTE`
 
-**Ask:** "Alfred can check your calendar each evening and send a weather forecast for any trips coming up in the next few days. What time should it run this check?"
+**Ask:** "Marvin can check your calendar each evening and send a weather forecast for any trips coming up in the next few days. What time should it run this check?"
 
 **Default:** 7:00pm → TRAVEL_WEATHER_HOUR=19, TRAVEL_WEATHER_MINUTE=0
 
@@ -275,24 +275,24 @@ Options:
 
 **Variables collected:** `DISCORD_TOKEN`, `DISCORD_ALLOWED_USER_ID`
 
-**Ask:** "Alfred also works on Discord — you can control it from any Discord server or DM. Do you want to set up Discord access now, or skip it?"
+**Ask:** "Marvin also works on Discord — you can control it from any Discord server or DM. Do you want to set up Discord access now, or skip it?"
 
 **If they say skip:** Leave both variables blank in the final output block. Discord simply won't start.
 
 **STANDARD MODE — If yes:**
 
 1. Go to **discord.com/developers/applications** and sign in
-2. Click **New Application** → give it any name (e.g. `Alfred`) → click **Create**
+2. Click **New Application** → give it any name (e.g. `Marvin`) → click **Create**
 3. In the left sidebar, click **Bot**
 4. Click **Reset Token** → confirm → copy the token that appears
 5. Scroll down to **Privileged Gateway Intents** → enable **Message Content Intent** → click **Save Changes**
 6. In the left sidebar, click **OAuth2 → URL Generator**
 7. Under Scopes, check `bot`. Under Bot Permissions, check `Send Messages`, `Read Message History`, `Read Messages/View Channels`
-8. Copy the generated URL at the bottom and open it in a browser → choose the server to add Alfred to → click **Authorize**
+8. Copy the generated URL at the bottom and open it in a browser → choose the server to add Marvin to → click **Authorize**
 9. To get your Discord user ID: in Discord, go to Settings → Advanced → turn on Developer Mode → right-click your name anywhere → **Copy User ID**
 
 **EXPRESS MODE:** Navigate to `discord.com/developers/applications`. Once the buyer is in:
-1. Click New Application, name it Alfred, click Create.
+1. Click New Application, name it Marvin, click Create.
 2. Click Bot in the sidebar → click Reset Token → confirm → read and record the token.
 3. Enable Message Content Intent → Save Changes.
 4. Click OAuth2 → URL Generator → check `bot` scope → check Send Messages, Read Message History, Read Messages/View Channels → copy the invite URL.
@@ -307,21 +307,21 @@ Options:
 
 **Variables collected:** `GMAIL_VIP_SENDERS`, `GMAIL_DEFAULT_SIGNATURE`
 
-**Ask:** "Alfred can read, send, and draft emails through Gmail. To enable it, you'll need to re-run `/auth` in Telegram after deployment so Alfred can request Gmail access — it'll be added to the same Google consent screen you already set up. Do you want to configure Gmail options now?"
+**Ask:** "Marvin can read, send, and draft emails through Gmail. To enable it, you'll need to re-run `/auth` in Telegram after deployment so Marvin can request Gmail access — it'll be added to the same Google consent screen you already set up. Do you want to configure Gmail options now?"
 
 **If they say skip:** Leave both variables blank in the final output block. Gmail features will still be available once they run `/auth`, just without VIP senders or a signature.
 
 **If yes, ask two sub-questions:**
 
 **15A — VIP Senders (optional):**
-"Do you have any email addresses you consider VIP — like a boss, partner, or important client? If so, list them separated by commas. Alfred will highlight unread emails from these senders in your morning briefing."
+"Do you have any email addresses you consider VIP — like a boss, partner, or important client? If so, list them separated by commas. Marvin will highlight unread emails from these senders in your morning briefing."
 
 Example: `boss@company.com,mom@gmail.com`
 
 Leave blank if they don't want this.
 
 **15B — Email Signature (optional):**
-"Do you want a signature automatically added to every email Alfred sends or drafts? If yes, what should it say?"
+"Do you want a signature automatically added to every email Marvin sends or drafts? If yes, what should it say?"
 
 Example: `Sam` or `Best, Sam Rivera`
 
@@ -329,7 +329,7 @@ Leave blank if they don't want one.
 
 **Important note for Standard and Express Mode:**
 
-> ⚠️ After deployment, you must run `/auth` in Telegram to grant Gmail access. Alfred will open a Google consent screen — you'll see Gmail listed alongside Calendar and Tasks. Click through to authorize it. You only need to do this once.
+> ⚠️ After deployment, you must run `/auth` in Telegram to grant Gmail access. Marvin will open a Google consent screen — you'll see Gmail listed alongside Calendar and Tasks. Click through to authorize it. You only need to do this once.
 >
 > Also: in Google Cloud Console (from Step 4), go to **APIs & Services → Library** and enable **Gmail API** if you want Gmail features to work.
 
@@ -378,7 +378,7 @@ The JSON they pasted may have line breaks. Before including it in the output blo
 
 ## DEPLOYMENT — Click-by-Click
 
-### PART 1 — Get Alfred's code onto GitHub
+### PART 1 — Get Marvin's code onto GitHub
 
 **STANDARD MODE:**
 
@@ -396,7 +396,7 @@ The JSON they pasted may have line breaks. Before including it in the output blo
 **Step 3 — Replace all the files**
 1. In GitHub Desktop, click the **Show in Finder** (Mac) or **Show in Explorer** (Windows) button at the top
 2. Delete everything currently inside that folder — you should see 4 old files: `Procfile`, `README.md`, `bot.py`, `requirements.txt`. Delete all of them.
-3. Open a second window and navigate to your **AI → alfred** folder
+3. Open a second window and navigate to your **AI → marvin** folder
 4. Select everything inside it: `bot.py`, `requirements.txt`, `Procfile`, `README.md`, `railway.json`, `.gitignore`, and the folders `core/`, `features/`, `adapters/`, `plugins/`, `setup/`
 5. Copy and paste all of it into the cloned `telegram-assistant` folder
 
@@ -410,24 +410,24 @@ If there is a `__pycache__` folder visible, delete it — it doesn't belong in t
 
 **Step 4 — Commit and push**
 1. Go back to **GitHub Desktop** — you'll see a list of all the new files on the left side
-2. In the bottom-left box, type: `Deploy Alfred v2`
+2. In the bottom-left box, type: `Deploy Marvin v2`
 3. Click **Commit to main**
 4. Click **Push origin** at the top right
 
-Alfred's code is now on GitHub.
+Marvin's code is now on GitHub.
 
 ---
 
 **EXPRESS MODE — GitHub upload:**
 
-> Tell the buyer: "Now I'll get Alfred's code onto GitHub. Open GitHub Desktop and let me know when it's open."
+> Tell the buyer: "Now I'll get Marvin's code onto GitHub. Open GitHub Desktop and let me know when it's open."
 
 Once they confirm:
 1. Ask the buyer to click **File → Clone Repository**, find the `telegram-assistant` repo, and clone it to their Desktop. Ask them to let you know once cloning is done.
 2. Once cloned, ask: "Can you click 'Show in Finder' (Mac) or 'Show in Explorer' (Windows) in GitHub Desktop?" Read the folder contents from the screen.
-3. Ask the buyer to select all files in the cloned folder and delete them, then open their Alfred project folder and copy everything into the cloned folder. Let you know when done.
-4. Return to GitHub Desktop. Confirm the changed files are listed. Type `Deploy Alfred v2` in the summary box, click **Commit to main**, then click **Push origin**.
-5. Confirm to the buyer: "Alfred's code is now on GitHub."
+3. Ask the buyer to select all files in the cloned folder and delete them, then open their Marvin project folder and copy everything into the cloned folder. Let you know when done.
+4. Return to GitHub Desktop. Confirm the changed files are listed. Type `Deploy Marvin v2` in the summary box, click **Commit to main**, then click **Push origin**.
+5. Confirm to the buyer: "Marvin's code is now on GitHub."
 
 > Note: File copying between folders requires the buyer's hands — you can guide them through it precisely but the drag-and-drop itself is theirs to do.
 
@@ -455,7 +455,7 @@ Once they confirm:
 1. Click the **Deployments** tab
 2. You'll see an **"Apply X changes"** button or a **Deploy** button at the top — click it
 3. A new deployment will appear with a spinning indicator — click it to watch the build log
-4. Wait for the line that says Alfred is running (takes 2–3 minutes)
+4. Wait for the line that says Marvin is running (takes 2–3 minutes)
 5. If you see any red error lines, copy them and paste them back here — most first-deploy errors are a one-line fix
 
 ---
@@ -469,7 +469,7 @@ Once they confirm:
 3. Click inside the editor, select all existing text, and replace it with the complete KEY=VALUE block assembled during the wizard. Ask the buyer: "Can you confirm the variables look correct on screen?" Wait for confirmation, then click **Update Variables**.
 4. Return to the main project view. Click directly on **worker-volume** in the service card. Read the Mount Path shown. If it says `/data`, confirm to the buyer and move on. If it says anything else, click Edit, change it to `/data`, and save.
 5. Click the **Deployments** tab. Click the **Deploy** or **Apply X changes** button.
-6. Watch the build log in real time. Report progress to the buyer. When `Application started` appears, say: "Alfred is live — let's test it." If any red error lines appear, read them and diagnose immediately.
+6. Watch the build log in real time. Report progress to the buyer. When `Application started` appears, say: "Marvin is live — let's test it." If any red error lines appear, read them and diagnose immediately.
 
 ---
 
@@ -478,10 +478,10 @@ Once they confirm:
 Once the Deployments tab shows **"Deployment successful"**:
 
 1. Open Telegram and find your bot
-2. Send `/start` — Alfred should greet you
+2. Send `/start` — Marvin should greet you
 3. Then run these in order:
 ```
-/setup      → walk through 25 preference steps to personalize Alfred
+/setup      → walk through 25 preference steps to personalize Marvin
 /auth       → connect Google (Calendar, Tasks, Sheets, Drive, Gmail)
 /checkauth  → verify all Google connections show green
 /briefing   → test your first morning briefing
@@ -491,11 +491,11 @@ Once the Deployments tab shows **"Deployment successful"**:
 /journal    → start your first journal entry
 ```
 
-If you set up Discord in Step 14, open your Discord server and send `!help` — Alfred should respond with the same command list.
+If you set up Discord in Step 14, open your Discord server and send `!help` — Marvin should respond with the same command list.
 
 > **Sports Pack buyers:** After deploying, add `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` to your Railway variables. See the Sports Pack README for setup instructions.
 
-If Alfred doesn't respond to `/start`, go back to Railway → Deployments and check the build log for errors.
+If Marvin doesn't respond to `/start`, go back to Railway → Deployments and check the build log for errors.
 
 ---
 
@@ -617,7 +617,7 @@ delete expense [category]        — remove most recent expense in a category
 
 ### Brain Dump
 ```
-/braindump [text]                — dump anything — Alfred sorts it into todos, reminders, notes, shopping
+/braindump [text]                — dump anything — Marvin sorts it into todos, reminders, notes, shopping
 brain dump: [text]               — alternate trigger phrase
 ```
 
@@ -654,7 +654,7 @@ draft an email to [x] about [topic]        — save to Gmail Drafts (no confirma
 save a draft to [x] about [topic]          — alternate draft phrasing
 ```
 
-> **Note:** Gmail requires running `/auth` after deployment to grant Gmail access. Alfred will walk you through it. VIP senders and email signature are set via `GMAIL_VIP_SENDERS` and `GMAIL_DEFAULT_SIGNATURE` environment variables.
+> **Note:** Gmail requires running `/auth` after deployment to grant Gmail access. Marvin will walk you through it. VIP senders and email signature are set via `GMAIL_VIP_SENDERS` and `GMAIL_DEFAULT_SIGNATURE` environment variables.
 
 ### Ask
 ```
@@ -665,13 +665,13 @@ save a draft to [x] about [topic]          — alternate draft phrasing
 
 ## APPENDIX — Feature Quick Reference
 
-**Voice:** Every feature works by voice. Send any Telegram or Discord voice note (or audio file) and Alfred transcribes it with Whisper and routes it normally.
+**Voice:** Every feature works by voice. Send any Telegram or Discord voice note (or audio file) and Marvin transcribes it with Whisper and routes it normally.
 
-**Receipt scanning:** Photograph any store receipt and send it — Alfred reads the items and removes them from your shopping lists.
+**Receipt scanning:** Photograph any store receipt and send it — Marvin reads the items and removes them from your shopping lists.
 
-**Reply assist:** Screenshot any text conversation or email and send it — Alfred drafts 3 reply options using GPT-4o vision.
+**Reply assist:** Screenshot any text conversation or email and send it — Marvin drafts 3 reply options using GPT-4o vision.
 
-**Smart suggestions:** Alfred analyzes patterns in your habits, workouts, meals, mood, and shopping over time and surfaces observations in your weekly summary. Configure which areas in `/setup` → Configure preferences.
+**Smart suggestions:** Marvin analyzes patterns in your habits, workouts, meals, mood, and shopping over time and surfaces observations in your weekly summary. Configure which areas in `/setup` → Configure preferences.
 
 **Morning briefing sections** (toggle any on/off in `/setup`):
 `weather` `calendar` `todos` `habits` `quote` `word_of_day` `meals` `journal_highlight` `workout_stats` `expenses` `gmail`
@@ -680,7 +680,7 @@ save a draft to [x] about [topic]          — alternate draft phrasing
 
 ### Proactive Alerts
 
-Alfred proactively notices things without being asked — 25 different checks across four categories.
+Marvin proactively notices things without being asked — 25 different checks across four categories.
 
 **Commands:**
 ```
@@ -717,7 +717,7 @@ All 25 checks can be toggled individually — say `"turn off [check name]"` or u
 
 Configure your personal sleep preferences during `/setup` → Sleep & Schedule.
 
-**What Alfred stores:**
+**What Marvin stores:**
 - Weekday bed time / wake time (default: 11pm / 7am)
 - Weekend bed time / wake time (default: midnight / 9am)
 - Sleep goal in hours (default: 7.5)
@@ -742,4 +742,4 @@ Step: Quiet Hours
 
 ---
 
-*Alfred Setup Companion v3.5 — Gmail step added (Step 15), GMAIL_VIP_SENDERS + GMAIL_DEFAULT_SIGNATURE in env block, Gmail commands in appendix, gmail added to briefing sections, /auth added to first-run sequence*
+*Marvin Setup Companion v3.5 — Gmail step added (Step 15), GMAIL_VIP_SENDERS + GMAIL_DEFAULT_SIGNATURE in env block, Gmail commands in appendix, gmail added to briefing sections, /auth added to first-run sequence*

@@ -1,6 +1,6 @@
-# Alfred — Project Handoff (Session Log)
-*Quick-read status doc. Updated every session. For full vision and roadmap, see Alfred_Master_Plan.md.*
-*Last updated: April 20, 2026 — Session 25 (Whop listing mockup)*
+# Marvin — Project Handoff (Session Log)
+*Quick-read status doc. Updated every session. For full vision and roadmap, see Marvin_Master_Plan.md.*
+*Last updated: June 22, 2026 — Session 27 (Discord voice + template cleanup)*
 
 ---
 
@@ -19,7 +19,7 @@
 - **Reddit OAuth setup** — Top Plays returns empty because Railway's IP is hard-blocked. Tyler needs to create a Reddit app at `reddit.com/prefs/apps` (type: script), add `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` to Railway. No code needed. Run `!topplaysdebug` to confirm.
 
 ### 🔴 Next Priorities
-1. **Sports plugin season fix** — `"season": 2024` hardcoded in `plugins/sports/config.py`. Broken for 2026. Fix: `datetime.date.today().year`. Must fix before Sports Pack is listed on Whop.
+1. **Sports `season: 2024` — dead code, optional cleanup (NOT broken).** Verified June 22 2026: the `"season": 2024` in `plugins/sports/config.py` LEAGUES dict is never read. api_sports.py computes seasons dynamically via `_current_season()` (date-based) in its own `LEAGUE_IDS`, so 2026 stats already query the correct season. The hardcode can be deleted for tidiness but is harmless. (Earlier notes calling this "broken for 2026" or "used in 10 places" were both wrong.)
 2. **Publish Whop listing** — Mockup (`AI/marvin_whop_listing.html`) is complete. Transfer copy and structure to live Whop page. Product name: **Marvin**. Price: $1. Sports Pack as separate $1 add-on listing.
 3. **Product packaging** — ZIP structure: which folders go in buyer download? Needs decision before listing goes live.
 4. **Enable Gmail API** — Tyler needs to enable Gmail API in Google Cloud Console (same project as Calendar/Tasks) if not already done.
@@ -56,8 +56,8 @@
 - **Phase 3A:** Built `plugins/sports/briefing.py` — morning sports briefing with yesterday's results, top 3 performers per game (composite score), favorite team ⭐ highlighting
 - **Phase 3B:** Built Briefing Settings UI — toggle Reddit/YouTube/player tracking, addplayer/removeplayer commands
 - **Phase 3C:** Built Reddit Top Plays pipeline — `_build_top_plays()`, `_fetch_reddit_top_plays_sub()`. Fetches Highlight-flair clips from league subreddits + r/sports catch-all. Deduplicates, sorts YouTube-first for Discord embed.
-- **Phase 4A:** Built platform abstraction — `core/alfred_context.py`, `core/html_utils.py`, `core/alfred_dispatch.py`, `adapters/discord_adapter.py`, `adapters/telegram_adapter.py`, `discord_bot.py`
-- **Phase 4B:** Migrated features to AlfredContext: ask, todos, reminders, notes, shopping, calendar, habits, gifts, contacts, mood, links, export_data
+- **Phase 4A:** Built platform abstraction — `core/marvin_context.py`, `core/html_utils.py`, `core/marvin_dispatch.py`, `adapters/discord_adapter.py`, `adapters/telegram_adapter.py`, `discord_bot.py`
+- **Phase 4B:** Migrated features to MarvinContext: ask, todos, reminders, notes, shopping, calendar, habits, gifts, contacts, mood, links, export_data
 - Fixed `tzdata` missing from requirements.txt (Railway timezone crash)
 - Fixed shopping classifier routing bug ("add milk to shopping list" was showing list instead of adding)
 - Fixed HTML escaping throughout sports briefing (raw tags showing in Telegram)
@@ -69,11 +69,11 @@
 - **Known open bug:** Reddit Top Plays flair filter misses r/baseball and r/hockey — fix is widening filter to also match "video"
 
 ### Session 9 (April 8, 2026)
-- Full folder audit: found 3 copies of Alfred codebase (AI/telegram-assistant = live, Projects/alfred = old snapshot, iCloud folder = old snapshot)
-- Read all historical docs: wasonassistant_handoff.pdf, alfred_rebuild_plan.docx v1+v2, bot-9.py, test results
-- Recovered missing feature context: expense tracking, sleep tracking, brain dump, undo, note aging, photo pipeline, Alfred persona/context injection, proactive layer
-- Created `alfred_feature_backlog.md` — full recovered context from all historical documents
-- Created `Alfred_Master_Plan.md` — comprehensive vision, architecture, roadmap, product plan
+- Full folder audit: found 3 copies of Marvin codebase (AI/telegram-assistant = live, Projects/marvin = old snapshot, iCloud folder = old snapshot)
+- Read all historical docs: wasonassistant_handoff.pdf, marvin_rebuild_plan.docx v1+v2, bot-9.py, test results
+- Recovered missing feature context: expense tracking, sleep tracking, brain dump, undo, note aging, photo pipeline, Marvin persona/context injection, proactive layer
+- Created `marvin_feature_backlog.md` — full recovered context from all historical documents
+- Created `Marvin_Master_Plan.md` — comprehensive vision, architecture, roadmap, product plan
 - Restructured docs: Handoff = session log (this file), Master Plan = full vision, Feature Backlog = detailed backlog
 - Saved open questions to auto-memory (8 unresolved decisions)
 - Full feature-by-feature customizability audit — 22 features reviewed, decisions documented in Master Plan Section 9B
@@ -111,9 +111,9 @@
 
 ### Session 12 (April 12, 2026) — CW5 + Google Tasks Sync
 - **Built CW5:** Event Prep on/off toggle. `get_event_prep_settings()` and setup wizard step were already implemented in `core/data.py` and `features/setup.py`. Only missing piece was the runtime guard in `bot.py`'s `_job_event_prep`. Three-line addition: load data, check `enabled` flag, return early if disabled. Push pending via GitHub Desktop.
-- **Architecture note confirmed:** Rebuilt Alfred stores everything directly in Google Tasks (primary data store). Two-way sync is inherently there — every Alfred write goes to Google Tasks immediately, every Alfred read comes from Google Tasks live. No traditional sync process needed.
+- **Architecture note confirmed:** Rebuilt Marvin stores everything directly in Google Tasks (primary data store). Two-way sync is inherently there — every Marvin write goes to Google Tasks immediately, every Marvin read comes from Google Tasks live. No traditional sync process needed.
 - **Built Google Tasks Sync — `features/sync_tasks.py`:**
-  - `/synctasks` command — reads all Alfred Google Tasks lists and returns a consolidated summary: todos (total, overdue, high-priority), each shopping list (count + first 5 items), gift ideas count. Useful after adding items on phone to confirm Alfred sees them.
+  - `/synctasks` command — reads all Marvin Google Tasks lists and returns a consolidated summary: todos (total, overdue, high-priority), each shopping list (count + first 5 items), gift ideas count. Useful after adding items on phone to confirm Marvin sees them.
   - `auto_sync_tasks()` scheduled job — fires 5 minutes after the morning briefing (floats with briefing time, so always 5 min after even if Tyler changes his briefing time in `/setup`). Sends the same list summary automatically each morning.
   - `_job_auto_sync_tasks` wrapper added to `bot.py`. Scheduled in `_schedule_jobs` using `_briefing_h` and `_briefing_m + 5` (with hour rollover). `/synctasks` command handler added and registered.
 
@@ -137,7 +137,7 @@
   - Categories: groceries, dining, transport, health, entertainment, shopping, household, subscriptions, other
   - `/expenses [today|week|month]` — Telegram command with period arg
   - `!expenses [today|week]` — Discord command
-  - NL intent dispatch: `handle_expense_intent()` in `alfred_dispatch.py`
+  - NL intent dispatch: `handle_expense_intent()` in `marvin_dispatch.py`
   - Storage: `userdata.json["expenses"]` list of `{id, amount, category, note, date}`
   - Briefing integration: `_section_expenses()` shows yesterday's spending in morning briefing (appears when data exists)
   - Weekly summary: `get_expense_weekly_section()` — passed to GPT as context AND appended as HTML block
@@ -147,13 +147,13 @@
   - Layer 1 keyword bypass: `"slept 7 hours"`, `"got 6.5 hours of sleep"`, `"show my sleep"` all caught
   - `/sleep` — view 7-day history. `/sleep 7.5` — log hours. `/sleep 7.5 3` — log hours + quality (1–5)
   - `!sleep [hrs]` — Discord command
-  - NL intent dispatch: `handle_sleep_intent()` in `alfred_dispatch.py`
+  - NL intent dispatch: `handle_sleep_intent()` in `marvin_dispatch.py`
   - Storage: `userdata.json["sleep_log"]` (already existed with `{hours, quality, date, note}` schema)
   - Visual progress bar: `████████░░` showing hours vs 8-hr target
   - Overwrites same-day entry if re-logged
   - Weekly summary: `get_sleep_weekly_section()` — avg, low, high, nights logged; passed to GPT + appended as HTML block
 
-- **`core/alfred_dispatch.py`** updated — `EXPENSE_*` and `SLEEP_*` intents added to imports, dispatch blocks, and `_build_core_intents()` set
+- **`core/marvin_dispatch.py`** updated — `EXPENSE_*` and `SLEEP_*` intents added to imports, dispatch blocks, and `_build_core_intents()` set
 - **`core/data.py`** updated — `"expenses": []` added to `load_data()` migration defaults and `_empty_data()`
 - **Discord `!help`** updated — expenses and sleep listed under Health & Fitness
 
@@ -203,10 +203,10 @@
 
 - `core/config.py`: added `spreadsheets` + `drive.file` OAuth scopes, `SHEETS_EXPENSE_ID`, `DRIVE_NOTES_FOLDER_FILE`, `DRIVE_NOTES_MAP_FILE`
 - `core/google_auth.py`: added `get_drive_service()`, `/checkauth` now shows 4 lines
-- `adapters/google_drive.py` NEW: `sync_note_add`, `sync_note_update`, `sync_note_delete` — mirrors notes to "Alfred Notes" Drive folder as .txt files
-- `features/expenses.py`: `_sync_expense_to_sheet()` appends each expense to Alfred Expenses Google Sheet
+- `adapters/google_drive.py` NEW: `sync_note_add`, `sync_note_update`, `sync_note_delete` — mirrors notes to "Marvin Notes" Drive folder as .txt files
+- `features/expenses.py`: `_sync_expense_to_sheet()` appends each expense to Marvin Expenses Google Sheet
 - `features/notes.py`: Drive sync calls added to add/edit/append/delete (all fire-and-forget)
-- Alfred Expenses Sheet ID: `1fJIP5VdX9PNHYBpnlDuBn7-nVrA9HfRHpmsReAIgB3k` (env var: `GOOGLE_SHEETS_EXPENSE_ID`)
+- Marvin Expenses Sheet ID: `1fJIP5VdX9PNHYBpnlDuBn7-nVrA9HfRHpmsReAIgB3k` (env var: `GOOGLE_SHEETS_EXPENSE_ID`)
 
 ### Session 23 (April 20, 2026) — Gmail Integration
 
@@ -216,7 +216,7 @@
 - `features/gmail.py` NEW: GMAIL_SEND/DRAFT/UNREAD handlers, GPT email drafting, regex+GPT entity extraction, in-memory confirmation state (`_pending_emails` dict), `get_gmail_briefing_section`
 - `features/briefing.py`: `_section_gmail()` wired into `_SECTION_BUILDERS`
 - `core/intent.py`: GMAIL_SEND/DRAFT/UNREAD constants, Layer 1 bypass rules, GPT examples, disambiguation vs EMAIL_ASSIST
-- `core/alfred_dispatch.py`: Gmail intent dispatch
+- `core/marvin_dispatch.py`: Gmail intent dispatch
 - `bot.py`: Gmail confirmation intercept (yes/no before intent classification)
 - `discord_bot.py`: Gmail confirmation intercept added
 - **Root cause fix:** `pending_gmail` in `userdata.json` was being wiped by concurrent saves from other features. Replaced with in-memory `_pending_emails: dict` keyed by user_id — confirmed working on both platforms.
@@ -227,7 +227,7 @@
 **No bot code shipped this session. All work was on product packaging and the Whop listing.**
 
 - **Platform decided: Whop** — chosen over Gumroad and Lemon Squeezy. 3% fee, no monthly cost, built for software/bots, growing social presence. Supports both marketplace and self-driven marketing.
-- **Product name decided: Marvin** — external brand name for the Whop listing. Avoids potential Alfred Mac app trademark conflict. Named after Marvin from Hitchhiker's Guide to the Galaxy.
+- **Product name decided: Marvin** — external brand name for the Whop listing. Avoids potential Marvin Mac app trademark conflict. Named after Marvin from Hitchhiker's Guide to the Galaxy.
 - **`AI/marvin_whop_listing.html`** — full dark-themed Whop-style product listing mockup built and iterated across the session. Contains:
   - Cover banner, seller row, product tagline, rating, tags
   - "Just talk to it" NL pitch with 11 varied examples across all feature categories
@@ -241,21 +241,37 @@
 - **`AI/whole_foods_receipt.jpg`** — real receipt photo saved to workspace alongside the listing HTML.
 
 ### Session 12 (cont.) — Discord Phase 4C Complete
-- **Diagnosed Phase 4C gap:** All feature files (meals, workout, journal, reply_assist, summary) already use `ctx: AlfredContext` pattern with zero Telegram-specific code. NL dispatch in `alfred_dispatch.py` already routed all these intents on Discord. The ONLY missing piece was the `!command` fast-path routing in `discord_bot.py`.
+- **Diagnosed Phase 4C gap:** All feature files (meals, workout, journal, reply_assist, summary) already use `ctx: MarvinContext` pattern with zero Telegram-specific code. NL dispatch in `marvin_dispatch.py` already routed all these intents on Discord. The ONLY missing piece was the `!command` fast-path routing in `discord_bot.py`.
 - **Added to `_handle_discord_command`:** `!meals`, `!workout`, `!journal`, `!reply [message]`, `!weekly` (also `!weeklysummary`, `!summary`), `!synctasks` — all with proper error handling.
 - **Rewrote `!help`** to list all commands in categorized sections: Sports, Daily Assistant, Health & Fitness, Lists & Tasks, Settings, Natural Language. Removed stale "coming soon" lines.
-- **Updated `alfred_dispatch.py`** comment checkboxes from `[ ]` to `[x]` for all features — they were already dispatching correctly, just needed a doc update.
+- **Updated `marvin_dispatch.py`** comment checkboxes from `[ ]` to `[x]` for all features — they were already dispatching correctly, just needed a doc update.
 - **Discord is now at full feature parity with Telegram.** Every command and NL intent works on both platforms.
+
+### Session 26 (June 9, 2026) — Relative-date fix + delete-by-name fix + live test
+- **Full live test (Telegram + Discord) — both healthy.** Briefing, calendar R/W, todos, notes, expenses, mood, sleep, gifts, contacts, Gmail, export, sports NL all passing on Telegram; Discord parity confirmed.
+- **Fixed relative-date bug (commit `dd856e0`):** `_today_str` in `core/intent.py` was computed once at startup and frozen, so a long-running deploy made every "tomorrow"/"next week" stale. Now `_gpt_classify()` injects a fresh "CURRENT DATE OVERRIDE" per request. Verified live.
+- **Fixed delete-by-name (commit `2db6bef`):** classifier emits the item name under `entities["query"]`, but todo/note/calendar delete handlers read `task`/`text`/`title`. Handlers now read `(query or <oldkey>)`. Added a keyword rule so "delete note about X" routes to delete (not search), plus numeric "delete note 2". Verified live: note/calendar/todo delete all work.
+- **Calendar delete limitation (not a bug):** `CAL_DELETE` only searches today ±7 days.
+- **Gap found:** no delete handler for mood or expense entries (both append-only). Logged to backlog → built in Session 27.
+
+### Session 27 (June 22, 2026) — Discord voice + Marvin/business separation + cleanup
+- **Built Discord voice support (commit `5237ab7`):** Discord previously ignored voice notes entirely (only image attachments were routed). Added `_handle_discord_voice` + audio-attachment routing in `discord_bot.py`, reusing `bot._transcribe_voice_file` and mirroring Telegram's transcribe→classify→dispatch + journal-session flow. **Live-tested: PASS** (sent an audio clip to #general → transcribed and acted). Whisper itself was never broken — Discord was just never wired.
+- **Stripped personal data for a clean sellable template:** genericized hardcoded example strings containing name/email/city in `core/intent.py`, `core/data.py`, `features/sync_tasks.py`, `features/setup.py`, and buyer-facing `setup/SETUP_COMPANION.md`. Real personal data was already env-driven (`ALLOWED_USER_ID`, keys) — nothing relocated. (This internal handoff still names Tyler by design — exclude it from the sellable ZIP.)
+- **Shipped mood delete + undo:** a complete-but-uncommitted feature from a prior session (`features/mood.py` `delete_mood`, `features/undo.py` mood restore, `MOOD_DELETE` wiring). Verified live: "delete my mood entry [date]" works, "undo" restores.
+- **Removed dead code + junk:** unused `_transcribe_voice` in `bot.py`; 43 wrongly-tracked `.pyc`/`__pycache__` files + `.DS_Store` + stale `PLUGIN_VERIFICATION_REPORT.txt` (all were committed before `.gitignore` covered them).
+- **Docs (commit `d742241`):** noted Discord voice + mood-delete command in `SETUP_COMPANION.md`.
+- **Verified sports `season: 2024` is dead code** (api_sports uses dynamic `_current_season()`) — see Next Priorities #1.
+- **⚠️ New issue found (pre-existing, not this session's changes):** Discord expense view errors — `!expenses` returns "Could not load expenses right now," "show my expenses" hits the generic dispatch error. Likely an expired Google Sheets auth token or Sheets API/quota problem; may affect Telegram too. Fix to try: re-run `/auth` to re-grant Google access, then test expenses on Telegram.
 
 ---
 
-## File Structure (Reference Docs — Projects/alfred/)
+## File Structure (Reference Docs — Projects/marvin/)
 
 | File | Purpose |
 |---|---|
-| `Alfred_Project_Handoff.md` | This file — session log, current status, what's next |
-| `Alfred_Master_Plan.md` | Full vision, architecture, roadmap, product plan, build order |
-| `alfred_feature_backlog.md` | All missing features with full context, recovered from historical docs |
+| `Marvin_Project_Handoff.md` | This file — session log, current status, what's next |
+| `Marvin_Master_Plan.md` | Full vision, architecture, roadmap, product plan, build order |
+| `marvin_feature_backlog.md` | All missing features with full context, recovered from historical docs |
 | `CLAUDE.md` | Claude behavior rules for this project |
 | `setup/SETUP_COMPANION.md` | Buyer installer document — v3.5, fully current through Session 23 |
 
@@ -269,7 +285,7 @@
 - **Schedule settings:** `get_schedule_settings(data)` in `core/data.py` — reads from `userdata.json["settings"]["schedule"]`, falls back to env vars. Keys: `briefing_enabled`, `briefing_hour/minute`, `habit_nudge_hour/minute`, `travel_weather_hour/minute`
 - **Rescheduling jobs live:** `reschedule_job(job_queue, name, handler, hour, minute)` in `bot.py` — cancels existing named job and re-adds at new time. No Railway restart needed.
 - **Calendar auth health check:** ✅ Live — `job_google_health_check` in `bot.py`, scheduled 10 min before briefing time automatically. No 6:50am hardcode — it floats with the briefing time setting.
-- **Context injection:** ⚠️ Partial — `ask.py` injects memory facts by keyword relevance ✅. But todos/mood/habits/reminders/calendar are NOT injected into every GPT response ❌. Alfred doesn't know "you have 3 high-priority todos" when chatting. This is the missing piece of the proactive vision.
+- **Context injection:** ⚠️ Partial — `ask.py` injects memory facts by keyword relevance ✅. But todos/mood/habits/reminders/calendar are NOT injected into every GPT response ❌. Marvin doesn't know "you have 3 high-priority todos" when chatting. This is the missing piece of the proactive vision.
 - **Reddit Top Plays:** Uses `briefing_top_plays` key (default True). YouTube hardcoded off. Requires `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` Railway env vars — Railway cloud IP is hard-blocked (HTTP 403) on anonymous Reddit requests. OAuth routes through `oauth.reddit.com` which is not blocked.
 - **Top Plays filtering:** Domain-based (not flair). `VIDEO_DOMAINS` = v.redd.it, streamable.com, youtube.com, youtu.be, clips.twitch.tv. Title scoring via `_score_title()` — play words 1.5×, controversy 0.25×, noise words drop to 0. Per-sub score floors in `SUBREDDIT_MIN_SCORE`. 72hr fallback if < 5 daily clips.
 - **vxreddit:** v.redd.it posts are converted to `vxreddit.com{permalink}` for Discord inline embedding. Reddit's native v.redd.it uses DASH streaming (separate audio/video streams) that Discord can't play inline.

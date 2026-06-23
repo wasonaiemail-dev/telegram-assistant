@@ -1,5 +1,5 @@
-# Alfred — Claude Reference Rules
-*For Claude to reference when working on the Alfred Telegram bot project.*
+# Marvin — Claude Reference Rules
+*For Claude to reference when working on the Marvin Telegram bot project.*
 *Last updated: April 20, 2026*
 
 ---
@@ -8,15 +8,15 @@
 
 **Tyler will say this to trigger the update pass:**
 
-> "Do a full end-of-session doc update. Check and update ALL of these: Alfred_Master_Plan.md, Alfred_Project_Handoff.md (add a session log entry), alfred_feature_backlog.md, the auto-memory pickup file, SETUP_COMPANION.md (if buyer-facing changes), and README.md (if new features). Tell me what you updated in each one and what you skipped and why."
+> "Do a full end-of-session doc update. Check and update ALL of these: Marvin_Master_Plan.md, Marvin_Project_Handoff.md (add a session log entry), marvin_feature_backlog.md, the auto-memory pickup file, SETUP_COMPANION.md (if buyer-facing changes), and README.md (if new features). Tell me what you updated in each one and what you skipped and why."
 
 **Every session that ships code MUST update all of the following. No exceptions.**
 
 | File | What to update |
 |---|---|
-| `Alfred_Master_Plan.md` | Header date, Section 7 env vars, Section 8 features table, Section 11 pre-launch checklist |
-| `Alfred_Project_Handoff.md` | Header date, "What's Next" section, new Session Log entry, file reference table if versions changed |
-| `alfred_feature_backlog.md` | Mark completed items ✅ Done [date], update packaging/product steps |
+| `Marvin_Master_Plan.md` | Header date, Section 7 env vars, Section 8 features table, Section 11 pre-launch checklist |
+| `Marvin_Project_Handoff.md` | Header date, "What's Next" section, new Session Log entry, file reference table if versions changed |
+| `marvin_feature_backlog.md` | Mark completed items ✅ Done [date], update packaging/product steps |
 | `auto-memory pickup file` | What shipped, what broke, what was fixed, what's next, Tyler action items, update MEMORY.md index pointer |
 | `SETUP_COMPANION.md` | New setup steps, new env vars in FINAL OUTPUT, new appendix commands, bump version footer |
 | `README.md` | Feature table row for any new features |
@@ -38,7 +38,7 @@ Tyler is **non-technical** — he does not write code. Claude writes all the cod
 
 ## Project Overview
 
-Alfred is a Python Telegram bot with two purposes:
+Marvin is a Python Telegram bot with two purposes:
 1. Tyler's personal daily assistant (calendar, tasks, reminders, habits, etc.)
 2. A sellable $1 template product that anyone can deploy
 
@@ -74,7 +74,7 @@ plugins/            — Self-contained add-on packs (each has __init__.py with P
 
 ## Bug Patterns to Avoid
 
-These are bugs that have already crashed Alfred. Don't repeat them.
+These are bugs that have already crashed Marvin. Don't repeat them.
 
 ---
 
@@ -165,7 +165,7 @@ date_part = str(reminder.get("due") or "")[:10]
 
 ### 6. Intent Regex Patterns — Always Test Multiple Phrasings
 
-**What went wrong:** The keyword rule for adding todos only matched `"add X to my todo list"`, not the bot's own suggested format `"add todo X"`. Users following Alfred's own suggestions got the GPT fallback (slower and less reliable).
+**What went wrong:** The keyword rule for adding todos only matched `"add X to my todo list"`, not the bot's own suggested format `"add todo X"`. Users following Marvin's own suggestions got the GPT fallback (slower and less reliable).
 
 **The rule:** When writing a keyword regex for an intent, always think of at least 3 natural ways someone would say it and make sure they all match:
 
@@ -198,7 +198,7 @@ The current `get_creds()` in `google_auth.py` proactively refreshes at <5 minute
 ### Data Storage
 - **All JSON data** goes through `core/data.py` — use `load_data()` and `save_data()`
 - **Main store:** `userdata.json` — reminders, habits, mood, meals, workouts, etc.
-- **Separate files:** `alfred_memory.json`, `ask_history.json`, `contacts.json`, `conversation.json`
+- **Separate files:** `marvin_memory.json`, `ask_history.json`, `contacts.json`, `conversation.json`
 - When adding a new data key, add a `.setdefault()` line in the migration block of `load_data()` so existing users' files upgrade safely
 
 ### Telegram Handlers

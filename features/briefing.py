@@ -1,6 +1,6 @@
 
 """
-alfred/features/briefing.py
+marvin/features/briefing.py
 ============================
 Morning briefing, on-demand weather, and travel weather detection.
 
@@ -625,7 +625,7 @@ async def _section_sports(_now, platform: str = "telegram"):
     except Exception:
         return ""  # Plugin installed but crashed
 
-    # Base Alfred recap (no plugin)
+    # Base Marvin recap (no plugin)
     try:
         from core.data import load_data, get_base_sports_settings
         if not get_base_sports_settings(load_data()).get("enabled", False):
@@ -753,13 +753,13 @@ async def send_weather(context, chat_id: int, location: str | None = None) -> No
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AlfredContext wrappers — for user-triggered /briefing and WEATHER intent
+# MarvinContext wrappers — for user-triggered /briefing and WEATHER intent
 # Background job path (send_briefing / send_weather) remains unchanged.
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def send_briefing_ctx(ctx) -> None:
     """
-    Send the morning briefing via AlfredContext.
+    Send the morning briefing via MarvinContext.
 
     Composes sections and sends them using ctx.reply().
     Background job still calls send_briefing(context, chat_id) directly.
@@ -831,7 +831,7 @@ async def send_briefing_ctx(ctx) -> None:
 
 
 async def send_weather_ctx(ctx, location: str | None = None) -> None:
-    """Send a weather report via AlfredContext."""
+    """Send a weather report via MarvinContext."""
     if location:
         coords = await _geocode_city(location)
         if not coords:

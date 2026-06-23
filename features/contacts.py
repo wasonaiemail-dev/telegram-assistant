@@ -1,5 +1,5 @@
 """
-alfred/features/contacts.py
+marvin/features/contacts.py
 ============================
 Personal contacts — notes about people the buyer knows.
 
@@ -33,7 +33,7 @@ STORAGE
 
 CONTEXT INJECTION
 ─────────────────
-  When Alfred detects a name in a /ask query, contact notes are prepended
+  When Marvin detects a name in a /ask query, contact notes are prepended
   to the GPT system prompt via get_contact_context(name) below.
   This is consumed by features/ask.py when CONTACT_SYSTEM_ADDON is relevant.
 """
@@ -41,7 +41,7 @@ CONTEXT INJECTION
 import logging
 from telegram import Update
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from telegram.ext import ContextTypes
 
 from core.config import BOT_NAME
@@ -206,7 +206,7 @@ async def cmd_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_contact_intent(
     intent:   str,
     entities: dict,
-    ctx:      AlfredContext,
+    ctx:      MarvinContext,
 ) -> None:
     """Dispatch all CONTACT_* intents."""
 

@@ -1,7 +1,7 @@
 """
-alfred/features/sleep.py
+marvin/features/sleep.py
 =========================
-Sleep tracking for Alfred.
+Sleep tracking for Marvin.
 
 STORAGE  (userdata.json["sleep_log"])
 ──────────────────────────────────────
@@ -37,7 +37,7 @@ import datetime
 import logging
 from zoneinfo import ZoneInfo
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import TIMEZONE
 from core.data import load_data, save_data
 
@@ -64,7 +64,7 @@ def _sleep_bar(hours: float) -> str:
 # COMMAND HANDLER
 # ════════════════════════════════════════════════════════════════════════════
 
-async def cmd_sleep(ctx: AlfredContext, args: str = "") -> None:
+async def cmd_sleep(ctx: MarvinContext, args: str = "") -> None:
     """
     /sleep           → show recent sleep history
     /sleep 7.5       → log 7.5 hours
@@ -99,7 +99,7 @@ async def cmd_sleep(ctx: AlfredContext, args: str = "") -> None:
 # INTENT HANDLER
 # ════════════════════════════════════════════════════════════════════════════
 
-async def handle_sleep_intent(intent: str, ents: dict, ctx: AlfredContext) -> None:
+async def handle_sleep_intent(intent: str, ents: dict, ctx: MarvinContext) -> None:
     from core.intent import SLEEP_LOG, SLEEP_VIEW
 
     data = load_data()
@@ -116,7 +116,7 @@ async def handle_sleep_intent(intent: str, ents: dict, ctx: AlfredContext) -> No
 # INTERNAL — LOG
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _log_sleep(ctx: AlfredContext, data: dict, ents: dict) -> None:
+async def _log_sleep(ctx: MarvinContext, data: dict, ents: dict) -> None:
     hours = ents.get("hours")
     if not hours:
         await ctx.reply(
@@ -167,7 +167,7 @@ async def _log_sleep(ctx: AlfredContext, data: dict, ents: dict) -> None:
 # INTERNAL — VIEW HISTORY
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _send_sleep_history(ctx: AlfredContext, data: dict, days: int = 7) -> None:
+async def _send_sleep_history(ctx: MarvinContext, data: dict, days: int = 7) -> None:
     tz     = ZoneInfo(TIMEZONE)
     today  = datetime.datetime.now(tz).date()
     cutoff = today - datetime.timedelta(days=days - 1)

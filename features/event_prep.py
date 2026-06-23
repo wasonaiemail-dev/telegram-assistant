@@ -1,5 +1,5 @@
 """
-alfred/features/event_prep.py
+marvin/features/event_prep.py
 ==============================
 Nightly event prep briefing — GPT-powered context for upcoming events.
 
@@ -18,7 +18,7 @@ HOW IT WORKS
      attendees, description).
   3. Call GPT to generate a 2–4 sentence prep note:
        - What to prepare / bring
-       - Any relevant memory context (injected from Alfred's memory)
+       - Any relevant memory context (injected from Marvin's memory)
        - Suggested talking points (for meetings with attendees)
   4. Send each prep note as a separate Telegram message.
 

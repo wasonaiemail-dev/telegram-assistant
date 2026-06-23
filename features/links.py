@@ -1,5 +1,5 @@
 """
-alfred/features/links.py
+marvin/features/links.py
 ========================
 Read-later / link saving — store URLs with AI-extracted titles and summaries.
 
@@ -35,7 +35,7 @@ import re
 import requests
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from telegram.ext import ContextTypes
 
 from core.config import LINKS_FILE, OPENAI_API_KEY, GPT_CHAT_MODEL
@@ -295,7 +295,7 @@ async def handle_link_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # INTENT HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def handle_link_intent(intent: str, entities: dict, ctx: AlfredContext) -> None:
+async def handle_link_intent(intent: str, entities: dict, ctx: MarvinContext) -> None:
     """Route LINK_* intents."""
     if intent == LINK_SAVE:
         url = entities.get("url", "")

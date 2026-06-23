@@ -179,16 +179,16 @@ cp /data/sports_plugin/settings.json /data/sports_plugin/settings.json.backup
 
 ### Step 2: Deploy Files
 ```bash
-cp plugins/sports/betting.py ~/alfred/plugins/sports/
-cp plugins/sports/charts.py ~/alfred/plugins/sports/
-cp plugins/sports/photo_handler.py ~/alfred/plugins/sports/
-cp plugins/sports/commands.py ~/alfred/plugins/sports/
-cp plugins/sports/dispatch.py ~/alfred/plugins/sports/
+cp plugins/sports/betting.py ~/marvin/plugins/sports/
+cp plugins/sports/charts.py ~/marvin/plugins/sports/
+cp plugins/sports/photo_handler.py ~/marvin/plugins/sports/
+cp plugins/sports/commands.py ~/marvin/plugins/sports/
+cp plugins/sports/dispatch.py ~/marvin/plugins/sports/
 
 # Also deploy documentation
-cp plugins/sports/BETTING_MODULE.md ~/alfred/plugins/sports/
-cp plugins/sports/INTEGRATION_GUIDE.md ~/alfred/plugins/sports/
-cp plugins/sports/QUICK_REFERENCE.md ~/alfred/plugins/sports/
+cp plugins/sports/BETTING_MODULE.md ~/marvin/plugins/sports/
+cp plugins/sports/INTEGRATION_GUIDE.md ~/marvin/plugins/sports/
+cp plugins/sports/QUICK_REFERENCE.md ~/marvin/plugins/sports/
 ```
 
 ### Step 3: Update Requirements
@@ -198,22 +198,22 @@ pip install -r requirements.txt --upgrade
 
 ### Step 4: Clear Python Cache
 ```bash
-find ~/alfred -type d -name __pycache__ -exec rm -rf {} +
-find ~/alfred -type f -name "*.pyc" -delete
+find ~/marvin -type d -name __pycache__ -exec rm -rf {} +
+find ~/marvin -type f -name "*.pyc" -delete
 ```
 
 ### Step 5: Restart Bot Service
 ```bash
-systemctl restart alfred-bot
+systemctl restart marvin-bot
 # or
-docker restart alfred-bot
+docker restart marvin-bot
 # or manual restart
 ```
 
 ### Step 6: Verify Operation
 ```bash
 # Monitor logs for 2 minutes
-tail -f /var/log/alfred/bot.log
+tail -f /var/log/marvin/bot.log
 
 # Should see no errors related to sports betting module
 ```
@@ -302,7 +302,7 @@ If issues occur:
 ```bash
 # Restore previous version
 git checkout HEAD~1 -- plugins/sports/
-systemctl restart alfred-bot
+systemctl restart marvin-bot
 ```
 
 ### Step 2: Data Recovery
@@ -314,7 +314,7 @@ cp /data/sports_plugin/bets.json.backup /data/sports_plugin/bets.json
 ### Step 3: Investigation
 ```bash
 # Check bot logs
-tail -n 100 /var/log/alfred/bot.log
+tail -n 100 /var/log/marvin/bot.log
 
 # Check data integrity
 python3 plugins/sports/data.py  # Validate bets.json
@@ -446,7 +446,7 @@ Deploy documentation to users:
 ## Support Contacts
 
 For production issues:
-- Check logs: `/var/log/alfred/bot.log`
+- Check logs: `/var/log/marvin/bot.log`
 - Review: `BETTING_MODULE.md` troubleshooting section
 - Check: `QUICK_REFERENCE.md` for common commands
 - Consult: `INTEGRATION_GUIDE.md` for setup issues

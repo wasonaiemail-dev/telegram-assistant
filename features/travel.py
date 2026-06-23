@@ -1,12 +1,12 @@
 """
-alfred/features/travel.py
+marvin/features/travel.py
 ==========================
-Smart travel system — Alfred tracks upcoming trips and gives proactive,
+Smart travel system — Marvin tracks upcoming trips and gives proactive,
 staged alerts so the user is never caught unprepared.
 
 HOW IT WORKS
 ────────────
-Alfred scans the calendar for events that look like travel (flights, hotels,
+Marvin scans the calendar for events that look like travel (flights, hotels,
 "trip to X", etc.).  For each trip it fires a sequence of alerts:
 
   7 days out  — "You're leaving for {destination} in 7 days. Here's a
@@ -45,7 +45,7 @@ import hashlib
 import logging
 from zoneinfo import ZoneInfo
 
-from core.alfred_context import AlfredContext
+from core.marvin_context import MarvinContext
 from core.config import TIMEZONE, WEATHER_LAT, WEATHER_LON
 from core.data import load_data, save_data, get_proactive_settings
 
@@ -356,7 +356,7 @@ async def _build_alert(
 # PUBLIC ENTRY POINTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def run_travel_alerts(ctx: AlfredContext) -> None:
+async def run_travel_alerts(ctx: MarvinContext) -> None:
     """
     Called daily by bot.py. Scans calendar for travel events and fires
     checkpoint alerts at 7/3/2/1 days out.
@@ -403,7 +403,7 @@ async def run_travel_alerts(ctx: AlfredContext) -> None:
         save_data(data)
 
 
-async def cmd_travel(ctx: AlfredContext) -> None:
+async def cmd_travel(ctx: MarvinContext) -> None:
     """/travel — show all upcoming detected trips."""
     data   = load_data()
     events = await _get_upcoming_travel_events(data, days_ahead=30)
@@ -412,7 +412,7 @@ async def cmd_travel(ctx: AlfredContext) -> None:
     if not events:
         await ctx.reply(
             "No upcoming travel events detected. "
-            "Alfred looks for events with keywords like: flight, hotel, trip, arrive, depart."
+            "Marvin looks for events with keywords like: flight, hotel, trip, arrive, depart."
         )
         return
 
@@ -439,7 +439,7 @@ async def cmd_travel(ctx: AlfredContext) -> None:
 
     lines += [
         "",
-        "<i>Alfred will send packing reminders at 7, 3, 2, and 1 days out.</i>",
+        "<i>Marvin will send packing reminders at 7, 3, 2, and 1 days out.</i>",
         "<i>Toggle travel alerts: \"turn off travel alerts\"</i>",
     ]
     await ctx.reply_html("\n".join(lines))
