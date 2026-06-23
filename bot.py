@@ -984,14 +984,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # BACKGROUND JOBS
 # =============================================================================
 
+def _local_today_str() -> str:
+    """Today's date (YYYY-MM-DD) in the configured local timezone."""
+    import datetime as _dt
+    return _dt.datetime.now(pytz.timezone(TIMEZONE)).date().isoformat()
+
+
 async def _job_briefing(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        from core.data import load_data, get_schedule_settings
-        sched = get_schedule_settings(load_data())
+        from core.data import load_data, get_schedule_settings, save_data
+        data  = load_data()
+        sched = get_schedule_settings(data)
         if not sched.get("briefing_enabled", True):
             return  # Buyer disabled the scheduled briefing
         from features.briefing import send_briefing
         await send_briefing(context, ALLOWED_USER_ID)
+        # Record today's send so a later restart's catch-up won't double-send,
+        # and so a restart across 7am can detect the day was missed.
+        # (sched is a live reference into data.)
+        sched["last_briefing_date"] = _local_today_str()
+        save_data(data)
     except Exception as e:
         logger.error(f"job_briefing error: {e}")
 
@@ -1505,6 +1517,32 @@ async def _on_startup(app: Application) -> None:
         logger.info("Bot command menu set.")
     except Exception as e:
         logger.warning(f"Startup: could not set bot commands: {e}")
+
+    # Briefing catch-up — make the morning briefing restart-proof.
+    # run_daily only fires at the exact scheduled minute; if the process is
+    # down across that moment (crash, infra cycle, or deploy), that day's
+    # briefing is silently skipped. Here, on startup, if it's already past the
+    # briefing time today and today's briefing hasn't been sent, send it now.
+    try:
+        import datetime as _dt
+        from types import SimpleNamespace
+        from core.data import load_data, get_schedule_settings, save_data
+        data  = load_data()
+        sched = get_schedule_settings(data)   # live reference into data
+        if sched.get("briefing_enabled", True):
+            _bh = int(sched.get("briefing_hour", BRIEFING_HOUR))
+            _bm = int(sched.get("briefing_minute", BRIEFING_MINUTE))
+            _now = _dt.datetime.now(pytz.timezone(TIMEZONE))
+            _due = _now.replace(hour=_bh, minute=_bm, second=0, microsecond=0)
+            _today = _now.date().isoformat()
+            if _now >= _due and sched.get("last_briefing_date") != _today:
+                logger.info(f"Briefing catch-up: sending missed briefing for {_today}.")
+                from features.briefing import send_briefing
+                await send_briefing(SimpleNamespace(bot=app.bot), ALLOWED_USER_ID)
+                sched["last_briefing_date"] = _today
+                save_data(data)
+    except Exception as e:
+        logger.warning(f"Startup: briefing catch-up failed: {e}")
 
     logger.info(f"{BOT_NAME} is ready.")
 
