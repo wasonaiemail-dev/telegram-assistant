@@ -38,18 +38,27 @@ Tyler is **non-technical** — he does not write code. Claude writes all the cod
 
 ## Project Overview
 
-Marvin is a Python Telegram bot with two purposes:
-1. Tyler's personal daily assistant (calendar, tasks, reminders, habits, etc.)
-2. A sellable $1 template product that anyone can deploy
+Marvin runs BOTH a Telegram bot and a Discord bot from one container
+(`start.sh`: `discord_bot.py` in the background, `bot.py` in the foreground).
 
-**Keep features generalized** — no hardcoded personal data before packaging for sale.
+**Two separate tracks — keep them isolated:**
+1. **Product** — the sellable $1 template. THIS repo (`wasonaiemail-dev/telegram-assistant`).
+   Keep it generalized: no hardcoded personal data before packaging for sale.
+2. **Personal** — Tyler's own daily driver. A SEPARATE repo (`wasonaiemail-dev/marvin-personal`)
+   on a SEPARATE Railway account, with its own Google account and its own Telegram/Discord
+   bot tokens. Nothing is shared with the product.
 
-| Thing | Location |
-|---|---|
-| Code | GitHub → `wasonaiemail-dev/telegram-assistant` |
-| Hosting | Railway → project `alluring-learning` → service `worker` |
-| Bot | Telegram → @wasonassistant |
-| Persistent data | Railway `/data` volume |
+**Scheduled features are Telegram-only.** The morning briefing, reminders, event prep, etc.
+are `JobQueue` jobs in `bot.py` that post to Telegram (`ALLOWED_USER_ID`). `discord_bot.py`
+has NO scheduler — Discord is manual-only (`!briefing`, `!todos`, …). `bot.py` is the
+foreground process, so a valid `TELEGRAM_TOKEN` is required or the container exits.
+
+| Thing | Product (this repo) | Personal |
+|---|---|---|
+| Code | `wasonaiemail-dev/telegram-assistant` | `wasonaiemail-dev/marvin-personal` |
+| Hosting | Railway `alluring-learning` / `worker` | separate Railway account |
+| Telegram bot | @wasonassistant | separate @BotFather bot |
+| Persistent data | Railway `/data` volume | its own `/data` volume |
 
 ---
 
@@ -247,3 +256,6 @@ The current `get_creds()` in `google_auth.py` proactively refreshes at <5 minute
 | Crash with "invalid literal for int()" | ID or date field being cast without a fallback |
 | Follow-up reply goes to wrong handler | Missing awaiting-state flag in `bot.py` routing |
 | Railway not picking up changes | Wait 60–90 seconds; check Railway dashboard for build errors |
+| Morning briefing never auto-fires (but reminders/sync do) | `schedule.briefing_enabled` is False. Re-enable: `/setup` → Configure preferences → Morning Briefing → answer `yes`. The briefing job (+ its restart catch-up) sit inside `if _briefing_enabled:` in `_schedule_jobs`; reminders/health-check/sync are outside that gate, so they still fire — that split is the tell. |
+| Briefing missed after a restart/deploy near briefing time | Expected-safe: `run_daily` fires only at the exact minute, so a restart across it skips that day. `_job_briefing_catchup` (a `run_once` job 25s after startup) re-sends it if `last_briefing_date` != today. Note: manual `/briefing` (`cmd_briefing`) does NOT set `last_briefing_date`, so it won't suppress the catch-up. |
+| Long-term memory empty right after the Alfred→Marvin rename | One-time auto-migration in `load_memory()` renames legacy `alfred_memory.json` → `marvin_memory.json` on first access. Runs only if the new file is missing and the old one exists; safe no-op otherwise. |

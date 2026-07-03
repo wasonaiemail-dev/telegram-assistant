@@ -119,7 +119,9 @@ Or manually:
 
 ```
 marvin/
-├── bot.py                  # Entry point, dispatcher, job scheduler
+├── bot.py                  # Telegram bot — dispatcher + JobQueue scheduler (foreground)
+├── discord_bot.py          # Discord bot — manual commands, runs in background
+├── start.sh                # Launches both bots (Discord background + Telegram foreground)
 ├── core/
 │   ├── config.py           # All constants and environment variables
 │   ├── data.py             # JSON state management (memory, reminders, habits)
