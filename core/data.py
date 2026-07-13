@@ -367,15 +367,15 @@ def load_memory() -> dict:
     The live category list is read from the '_categories' key in the file;
     falls back to config.MEMORY_CATEGORIES for new/pre-setup installs.
     """
-    # One-time migration (Alfred -> Marvin rename): if the new memory file
-    # doesn't exist yet but the legacy alfred_memory.json does, carry it over
+    # One-time migration (Marvin -> Marvin rename): if the new memory file
+    # doesn't exist yet but the legacy marvin_memory.json does, carry it over
     # so long-term memory survives the rename. Safe no-op on fresh installs.
     if not os.path.exists(MEMORY_FILE):
-        _legacy_memory = os.path.join(os.path.dirname(MEMORY_FILE), "alfred_memory.json")
+        _legacy_memory = os.path.join(os.path.dirname(MEMORY_FILE), "marvin_memory.json")
         if os.path.exists(_legacy_memory):
             try:
                 os.replace(_legacy_memory, MEMORY_FILE)
-                logger.info("Migrated legacy alfred_memory.json -> %s", os.path.basename(MEMORY_FILE))
+                logger.info("Migrated legacy marvin_memory.json -> %s", os.path.basename(MEMORY_FILE))
             except OSError as e:
                 logger.warning("Memory migration skipped: %s", e)
 
