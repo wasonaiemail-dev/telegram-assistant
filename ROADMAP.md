@@ -6,7 +6,7 @@
 The old Telegram assistant bot, kept as a sellable template (superseded by the live Discord Marvin).
 
 ## Where it lives
-- Repo: telegram-assistant (local clone: ~/AI/telegram-assistant)
+- Repo: telegram-assistant (local clone: ~/AI/projects/telegram-assistant)
 - Hosting: Railway 'Old Telegram Template' (@wasonassistant)
 
 ## Now / in progress

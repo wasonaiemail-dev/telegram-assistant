@@ -26,3 +26,4 @@ Thumbs.db
 
 # FUSE mount artifacts (Cowork)
 .fuse_hidden*
+_to_delete/
